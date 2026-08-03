@@ -1,0 +1,72 @@
+import { type ReactNode } from "react"
+import { IconChevronLeft, IconChevronRight } from "@/components/icons"
+import { cn } from "@workspace/ui/lib/utils"
+
+export function Pager({
+  page,
+  hasNext,
+  onPrev,
+  onNext,
+  disabled,
+  className,
+}: {
+  page: number
+  hasNext: boolean
+  onPrev: () => void
+  onNext: () => void
+  disabled?: boolean
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        "mt-8 flex items-center justify-between gap-3",
+        className
+      )}
+    >
+      <PagerButton
+        onClick={onPrev}
+        disabled={disabled || page <= 1}
+        label="上一页"
+        icon={<IconChevronLeft size={16} />}
+      />
+      <span className="text-muted-foreground text-sm tabular-nums">
+        第 {page} 页
+      </span>
+      <PagerButton
+        onClick={onNext}
+        disabled={disabled || !hasNext}
+        label="下一页"
+        icon={<IconChevronRight size={16} />}
+        iconRight
+      />
+    </div>
+  )
+}
+
+function PagerButton({
+  onClick,
+  disabled,
+  label,
+  icon,
+  iconRight,
+}: {
+  onClick: () => void
+  disabled?: boolean
+  label: string
+  icon: ReactNode
+  iconRight?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border-border bg-card text-foreground hover:bg-accent inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {!iconRight && icon}
+      <span className="hidden sm:inline">{label}</span>
+      {iconRight && icon}
+    </button>
+  )
+}

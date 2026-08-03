@@ -1,0 +1,144 @@
+export interface ChapterLink {
+  index: number
+  title: string
+  tid: string
+}
+
+/** 评论所回复的父帖 */
+export interface PostParent {
+  tid: string
+  title: string
+  author: string | null
+  publishedAt: string | null
+}
+
+/** 帖子（tid）元信息 */
+export interface PostMeta {
+  author: string | null
+  uid: string | null
+  badge: string | null
+  publishedAt: string | null
+  reads: number | null
+  likes: number | null
+  comments: number | null
+  /** 本帖回复的目标（评论页才有） */
+  parent: PostParent | null
+  /** 主题根帖 tid（评论页） */
+  rootTid: string | null
+}
+
+/** 跟帖 / 评论（扁平，可组树） */
+export interface ReplyItem {
+  tid: string
+  uptid: string
+  rootid: string
+  uid: string
+  username: string
+  subject: string
+  dateline: string
+  size: number
+}
+
+export interface ReplyNode extends ReplyItem {
+  children: ReplyNode[]
+}
+
+/** 书库（cid）元信息 */
+export interface BookMeta {
+  author: string | null
+}
+
+export interface ContentResponse {
+  title: string
+  /** Sanitized HTML: escaped text + internal `/read/:tid` anchors only */
+  content: string
+  /** Links outside the body (pre); in-body links stay in `content` */
+  links: ChapterLink[]
+  meta: PostMeta
+}
+
+export interface BookContentResponse {
+  title: string
+  content: string
+  meta: BookMeta
+}
+
+export interface HomePage {
+  links: ChapterLink[]
+  nextMtid: string | null
+}
+
+export interface HotPost {
+  rank: number
+  title: string
+  tid: string
+  reads: number
+}
+
+export interface CmtRankPost {
+  rank: number
+  title: string
+  tid: string
+  comments: number
+}
+
+export interface CategoryLink {
+  /** 展示名（已去掉 『』〖〗 等装饰） */
+  label: string
+  url: string
+  /** type=题材分类 / column=栏目关键词 / other */
+  kind: "type" | "column" | "other"
+}
+
+export interface CategoryQuery {
+  type?: string
+  keywords?: string
+}
+
+export interface CategoryPage {
+  category: string
+  links: ChapterLink[]
+  nextPage: number | null
+}
+
+/** 首页「扫文推荐」分组 */
+export interface RecommendSection {
+  title: string
+  links: ChapterLink[]
+}
+
+export interface Extractor {
+  name: string
+  homeUrl: string
+  buildUrl(tid: string): string
+  buildBookUrl(cid: string): string
+  extractContent(html: string): {
+    title: string
+    content: string
+    meta: PostMeta
+  }
+  extractBookContent(html: string): {
+    title: string
+    content: string
+    meta: BookMeta
+  }
+  extractLinks(html: string): ChapterLink[]
+  extractGoldLinks(html: string): ChapterLink[]
+  extractHotPosts(html: string): HotPost[]
+  extractCmtRankPosts(html: string): CmtRankPost[]
+  extractCategoryLinks(html: string): CategoryLink[]
+  extractRecommendSections(html: string): RecommendSection[]
+  fetchCategoryPage(query: CategoryQuery, page: number): Promise<CategoryPage>
+  fetchHomeLinks(mtid: string): Promise<HomePage>
+  fetchReplies(tid: string): Promise<ReplyNode[]>
+}
+
+export class ExtractorError extends Error {
+  constructor(
+    message: string,
+    public statusCode: number = 500
+  ) {
+    super(message)
+    this.name = "ExtractorError"
+  }
+}
