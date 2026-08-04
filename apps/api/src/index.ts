@@ -10,12 +10,17 @@ import {
   NO_STORE_HEADERS,
   UpstreamTimeoutError,
   Store,
+  assertSafeId,
   clearCache,
   fetchUpstream,
   getExtractor,
   jsonError,
   jsonOk,
   openDatabase,
+  readContentCache,
+  readRepliesCache,
+  writeContentCache,
+  writeRepliesCache,
   type ItemKind,
   type ItemState,
   type ListQuery,
@@ -85,6 +90,77 @@ function countReplies(nodes: ReplyNode[]): number {
   return nodes.reduce((n, node) => n + 1 + countReplies(node.children), 0)
 }
 
+interface LoadedContent {
+  html: string
+  fromCache: boolean
+  refreshed: boolean
+  refreshError?: string
+}
+
+/**
+ * 正文/书库 HTML 加载：
+ * - 无 refresh：先读缓存，命中直接返回；未命中抓上游并落盘
+ * - 有 refresh：跳过缓存抓上游，成功覆盖缓存；失败回退旧缓存（stale），无旧缓存则抛错
+ */
+async function loadCachedContent(
+  kind: ItemKind,
+  id: string,
+  refresh: boolean,
+  fetchFn: () => Promise<string>
+): Promise<LoadedContent> {
+  if (!refresh) {
+    const cached = await readContentCache(DATA_DIR, kind, id)
+    if (cached) return { html: cached.data, fromCache: true, refreshed: false }
+  }
+  try {
+    const html = await fetchFn()
+    await writeContentCache(DATA_DIR, kind, id, html)
+    return { html, fromCache: false, refreshed: refresh }
+  } catch (err) {
+    if (!refresh) throw err
+    const cached = await readContentCache(DATA_DIR, kind, id)
+    if (cached) {
+      return {
+        html: cached.data,
+        fromCache: true,
+        refreshed: false,
+        refreshError: err instanceof Error ? err.message : "refresh failed",
+      }
+    }
+    throw err
+  }
+}
+
+/**
+ * 回复加载：成功才写缓存；失败回退旧回复缓存（无则 []），永不导致整个请求失败、不置 stale。
+ * 注意：catch 同时覆盖「上游非 2xx（fetchRepliesRaw 抛 502）」与「body 非 JSON（parseReplies 抛 502）」
+ * 两类上游失败，均按规格回退旧缓存 / 空数组，符合部分刷新矩阵第 2、4 行；不要改成只 catch 网络错误。
+ */
+async function loadCachedReplies(
+  tid: string,
+  refresh: boolean
+): Promise<{ replies: ReplyNode[]; fromCache: boolean }> {
+  const extractor = getExtractor("cool18")
+  if (!refresh) {
+    const cached = await readRepliesCache(DATA_DIR, tid)
+    if (cached && Array.isArray(cached.data)) {
+      return { replies: cached.data as ReplyNode[], fromCache: true }
+    }
+  }
+  try {
+    const raw = await extractor.fetchRepliesRaw(tid)
+    const replies = extractor.parseReplies(raw, tid)
+    await writeRepliesCache(DATA_DIR, tid, replies)
+    return { replies, fromCache: false }
+  } catch {
+    const cached = await readRepliesCache(DATA_DIR, tid)
+    if (cached && Array.isArray(cached.data)) {
+      return { replies: cached.data as ReplyNode[], fromCache: true }
+    }
+    return { replies: [], fromCache: false }
+  }
+}
+
 async function handlePosts(url: URL): Promise<Response> {
   const tid = url.searchParams.get("tid")
   const extractor = getExtractor("cool18")
@@ -95,47 +171,95 @@ async function handlePosts(url: URL): Promise<Response> {
     return jsonOk({ links, nextMtid }, LIST_CACHE_HEADERS)
   }
 
+  assertSafeId(tid) // 非法 id → 400
+
+  const refresh = url.searchParams.get("refresh") === "1"
   const pageUrl = extractor.buildUrl(tid)
-  const [resp, replies] = await Promise.all([
-    fetchUpstream(pageUrl),
-    extractor.fetchReplies(tid).catch(() => [] as ReplyNode[]),
+
+  const [content, repliesResult] = await Promise.all([
+    loadCachedContent("post", tid, refresh, async () => {
+      const resp = await fetchUpstream(pageUrl)
+      if (!resp.ok) {
+        throw new ExtractorError(`upstream error: ${resp.status}`, 502)
+      }
+      return resp.text()
+    }),
+    loadCachedReplies(tid, refresh),
   ])
 
-  if (!resp.ok) {
-    return jsonError(`upstream error: ${resp.status}`, 502)
+  const {
+    title,
+    content: bodyHtml,
+    meta,
+  } = extractor.extractContent(content.html)
+  const links = extractor.extractLinks(content.html)
+
+  // cache hit / 刷新时以回复缓存重算评论数（extractContent 不回填 comments）
+  if (repliesResult.replies.length > 0) {
+    meta.comments = countReplies(repliesResult.replies)
   }
 
-  const html = await resp.text()
-  const { title, content, meta } = extractor.extractContent(html)
-  const links = extractor.extractLinks(html)
+  // 成功解析后记录访问（含 cache hit 与 stale 兜底）
+  store.recordVisit("post", tid, title, pageUrl)
 
-  if (replies.length > 0) {
-    meta.comments = countReplies(replies)
+  const payload: Record<string, unknown> = {
+    title,
+    content: bodyHtml,
+    links,
+    meta,
+    replies: repliesResult.replies,
+    url: pageUrl,
+  }
+  if (refresh && !content.refreshed) {
+    payload.stale = true
+    payload.refreshError = content.refreshError
   }
 
-  return jsonOk(
-    { title, content, links, meta, replies, url: pageUrl },
-    CONTENT_CACHE_HEADERS
-  )
+  const useNoStore = content.fromCache || refresh
+  return jsonOk(payload, useNoStore ? NO_STORE_HEADERS : CONTENT_CACHE_HEADERS)
 }
 
 async function handleBooks(url: URL): Promise<Response> {
   const cid = url.searchParams.get("cid")
   if (!cid) return jsonError("missing cid parameter", 400)
+  assertSafeId(cid)
 
+  const refresh = url.searchParams.get("refresh") === "1"
   const extractor = getExtractor("cool18")
   const pageUrl = extractor.buildBookUrl(cid)
-  const resp = await fetchUpstream(pageUrl, {
-    headers: { Referer: extractor.homeUrl },
-  })
-  if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
 
-  const html = await resp.text()
-  const { title, content, meta } = extractor.extractBookContent(html)
-  return jsonOk(
-    { title, content, meta, url: pageUrl, cid },
-    CONTENT_CACHE_HEADERS
-  )
+  const content = await loadCachedContent("book", cid, refresh, async () => {
+    const resp = await fetchUpstream(pageUrl, {
+      headers: { Referer: extractor.homeUrl },
+    })
+    if (!resp.ok) {
+      throw new ExtractorError(`upstream error: ${resp.status}`, 502)
+    }
+    return resp.text()
+  })
+
+  const {
+    title,
+    content: bodyHtml,
+    meta,
+  } = extractor.extractBookContent(content.html)
+
+  store.recordVisit("book", cid, title, pageUrl)
+
+  const payload: Record<string, unknown> = {
+    title,
+    content: bodyHtml,
+    meta,
+    url: pageUrl,
+    cid,
+  }
+  if (refresh && !content.refreshed) {
+    payload.stale = true
+    payload.refreshError = content.refreshError
+  }
+
+  const useNoStore = content.fromCache || refresh
+  return jsonOk(payload, useNoStore ? NO_STORE_HEADERS : CONTENT_CACHE_HEADERS)
 }
 
 async function handleBrowse(url: URL): Promise<Response> {
