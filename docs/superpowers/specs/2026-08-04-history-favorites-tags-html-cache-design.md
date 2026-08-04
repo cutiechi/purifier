@@ -1,4 +1,4 @@
-# 历史 / 收藏 / 标签 / HTML 缓存设计
+# 历史 / 收藏 / 标签 / 内容缓存设计
 
 日期：2026-08-04
 
@@ -9,16 +9,16 @@
 - 浏览历史：全量保留，可搜索
 - 收藏：单一收藏列表，可搜索
 - 标签：自由文本多标签，可点击筛选贴子/书库
-- 内容缓存：正文/书库/回复的原始 HTML 落盘，手动刷新，可手动清空
+- 内容缓存：正文/书库原始 HTML 与回复 JSON 落盘，手动刷新，可手动清空
 
 ## 已确认的产品决策
 
 - 个人单用户部署，无账号系统
-- 状态存 API 端 SQLite 单文件；HTML 缓存为独立文件
+- 状态存 API 端 SQLite 单文件；内容缓存为独立文件（正文/书库 HTML、回复 JSON）
 - 历史记录贴子（`post`）与书库（`book`），全量保留，按最近访问倒序，支持标题 + 标签搜索
 - 收藏为单一列表，支持标题 + 标签搜索
 - 标签为自由文本，一个对象可挂多个；点击标签可筛选贴子/书库
-- HTML 缓存只覆盖正文页、书库页、回复页；列表页保持实时抓取
+- 内容缓存只覆盖正文页、书库页、回复页；列表页保持实时抓取
 - 缓存默认永不过期，页面提供"刷新"按钮触发重新抓取
 - 缓存不设容量上限，提供手动清空入口
 - 历史/收藏搜索不全文检索正文，只匹配标题与标签
@@ -30,6 +30,7 @@
 - 抓取逻辑保持现有 `Cool18Extractor` 不变；缓存命中时读取 HTML 文件后仍走提取逻辑
 - 新增状态端点统一挂在 `/api/me/*` 下
 - 正文/书库接口增加 `refresh=1` 参数，用于手动刷新
+- 路由分发从"非 GET 一律 405"改为按 `(method, pathname)` 组合处理；SPA 静态托管早返回（仅 `GET && !/api`）保持不变
 
 ## 存储
 
@@ -71,19 +72,21 @@ CREATE INDEX IF NOT EXISTS idx_items_visited ON items (last_visited_at DESC);
 CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 ```
 
-历史即 `items` 全表；收藏与标签只存关系，展示标题从 `items` 读取，因此清空 HTML 缓存不会影响历史/收藏/标签。
+历史即 `items` 全表；收藏与标签只存关系，展示标题从 `items` 读取，因此清空内容缓存不会影响历史/收藏/标签。
+
+`items` 的 upsert 语义：每次成功访问（含 cache hit）都会覆盖 `title`（以上游最新为准）并更新 `last_visited_at`、`visit_count`，但 `first_seen_at` 保持不变。
 
 标签写入前统一处理：trim、折叠连续空白、最长 24 个字符；空标签直接忽略。整体替换语义：提交的标签集合即为该对象最终标签。
 
-### 缓存文件
+### 内容缓存文件
 
 缓存目录为 `$DATA_DIR/cache/`，文件名由类型与 ID 唯一决定，不建元数据表：
 
-| 内容       | 文件名             |
-| ---------- | ------------------ |
-| 贴子正文   | `post-<tid>.html`  |
-| 书库内容   | `book-<cid>.html`  |
-| 贴子回复   | `replies-<tid>.html` |
+| 内容     | 文件名               | 实际格式 |
+| -------- | -------------------- | -------- |
+| 贴子正文 | `post-<tid>.html`    | HTML     |
+| 书库内容 | `book-<cid>.html`    | HTML     |
+| 贴子回复 | `replies-<tid>.json` | JSON     |
 
 三个上游 URL 均可由 ID 唯一推导，对应关系：
 
@@ -93,25 +96,45 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 
 文件大小与更新时间直接从文件系统读取。实现时必须校验 `tid/cid` 只包含安全字符（数字与字母），防止路径穿越。清空缓存即删除 `cache/` 目录下全部文件。
 
+回复缓存只在 `fetchReplies` 成功时写入；失败时不写，下次请求继续尝试抓取。成功但确实无回复时写入空数组 JSON。`post-<tid>` 与 `replies-<tid>` 独立判定命中：正文命中但回复缺失时，正文走缓存、回复重新抓取。
+
 ## API
 
 ### 状态端点（`/api/me/*`）
 
-| 方法 | 路径与参数 | 行为 |
-| ---- | ---------- | ---- |
-| GET  | `/api/me/history?q=&kind=&page=` | 全量历史，按最近访问倒序；`q` 匹配标题或标签，`kind` 可筛选 `post`/`book` |
-| GET  | `/api/me/favorites?q=&kind=&page=` | 收藏列表，按收藏时间倒序，支持同样搜索 |
-| GET  | `/api/me/tags` | 全部标签及计数，按数量倒序 |
-| GET  | `/api/me/items?tag=&q=&kind=&page=` | 按标签筛选出的对象列表；`tag` 必填 |
-| GET  | `/api/me/state?kind=&id=` | 单个对象的已读状态、访问次数、是否收藏、标签列表 |
-| PUT  | `/api/me/favorites?kind=&id=` | 收藏；对象必须已存在于 `items`（正文页打开后会自动创建），否则 404 |
-| DELETE | `/api/me/favorites?kind=&id=` | 取消收藏 |
-| PUT  | `/api/me/tags` | Body `{ kind, id, tags: string[] }`，整体替换标签 |
-| POST | `/api/me/cache/clear` | 清空 `cache/` 目录，返回 `{ cleared: n }` |
+| 方法   | 路径与参数                          | 行为                                                                                  |
+| ------ | ----------------------------------- | ------------------------------------------------------------------------------------- |
+| GET    | `/api/me/history?q=&kind=&page=`    | 全量历史，按最近访问倒序；`q` 匹配标题或标签，`kind` 可筛选 `post`/`book`             |
+| GET    | `/api/me/favorites?q=&kind=&page=`  | 收藏列表，按收藏时间倒序，支持同样搜索                                                |
+| GET    | `/api/me/tags`                      | 全部标签及计数，按数量倒序                                                            |
+| GET    | `/api/me/items?tag=&q=&kind=&page=` | 按标签筛选出的对象列表；`tag` 必填                                                    |
+| GET    | `/api/me/state?kind=&id=`           | 单个对象的已读状态、访问次数、是否收藏、标签列表                                      |
+| PUT    | `/api/me/favorites?kind=&id=`       | 收藏；对象必须已存在于 `items`（正文页打开后会自动创建），否则 404                    |
+| DELETE | `/api/me/favorites?kind=&id=`       | 取消收藏                                                                              |
+| PUT    | `/api/me/tags`                      | Body `{ kind, id, tags: string[] }`，整体替换标签；对象必须已存在于 `items`，否则 404 |
+| DELETE | `/api/me/cache`                     | 清空 `cache/` 目录，返回 `{ cleared: n }`；用 DELETE 避免跨站表单伪造触发             |
 
 历史记录不设独立写入端点：正文/书库接口成功响应后自动 upsert `items` 并累计访问次数。
 
-列表类状态端点统一返回 `{ items, nextPage? }`，`page` 语义与现有列表接口一致。
+列表类状态端点统一返回 `{ items, nextPage? }`，固定 `pageSize = 20`，`page` 从 1 开始。`items` 每项结构：
+
+```ts
+{
+  kind: "post" | "book"
+  id: string
+  title: string
+  url: string
+  last_visited_at?: number // 历史/按标签筛选列表返回
+  favorited_at?: number // 收藏列表返回
+  visit_count: number
+  favorited: boolean
+  tags: string[]
+}
+```
+
+`tags` 与 `favorited` 在列表 SQL 中一次 join 聚合返回，禁止前端逐项再调 `/api/me/state` 造成 N+1。
+
+写接口（`PUT /api/me/favorites`、`DELETE /api/me/favorites`、`PUT /api/me/tags`、`DELETE /api/me/cache`）需要路由层放行非 GET 方法，具体分发改动见"架构"。
 
 ### 正文/书库端点扩展
 
@@ -122,7 +145,15 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 - 刷新失败但旧缓存存在：返回 200，响应带 `stale: true` 与 `refreshError`，前端显示轻提示
 - 刷新失败且无旧缓存：走现有 502/504 错误映射
 
-回复请求同样读写 `replies-<tid>.html`；`refresh=1` 时回复与正文一起重新抓取。
+刷新路径复用普通抓取的请求头（书库带 `Referer: homeUrl`，回复带 `Referer: buildUrl(tid)`），确保上游返回与首次一致。
+
+响应缓存头策略：
+
+- 磁盘缓存命中的响应：`Cache-Control: no-store`（磁盘缓存已承担缓存职责，且避免 CDN 挡住后续 `refresh`）
+- `refresh=1` 成功与 `stale: true` 的响应：`Cache-Control: no-store`
+- 普通首次抓取（无 `refresh`、无缓存）成功：保留现有 `CONTENT_CACHE_HEADERS`
+
+回复请求同样读写 `replies-<tid>.json`；`refresh=1` 时回复与正文一起重新抓取，回复失败仍不覆盖旧回复缓存。
 
 列表端点（`/api/posts?mtid=`、`/api/browse`、`/api/categories`、`/api/featured`、`/api/picks`、`/api/comments`、`/api/trending`）保持不变，不缓存。
 
@@ -162,13 +193,20 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
   - 收藏添加/取消、列表与搜索
   - 标签整体替换、按标签筛选
   - 缓存文件写入/读取/刷新覆盖/清空
-- 验证命令：`bun run typecheck` 与 `bun run build`
+- 工程接入：`packages/core/package.json` 增加 `"test": "bun test"`，`turbo.json` 增加 `test` 任务，根 `package.json` 增加 `"test": "turbo test"`
+- 验证命令：`bun run typecheck`、`bun run test`、`bun run build`
 
 ## 部署
 
-- `Dockerfile` 中新增 `DATA_DIR=/data` 并创建目录
+- `Dockerfile` 中新增 `ENV DATA_DIR=/data`，并在 `USER bun` 之前执行 `RUN mkdir -p /data && chown -R bun:bun /data`
 - README 记录挂载方式：`docker run -v purifier-data:/data ...`
 - `bun:sqlite` 为 Bun 内置能力，无需新增原生依赖
+- `.gitignore` 增加 `data/`，避免开发时把 SQLite 库与缓存文件提交进仓库
+
+## 实现注意事项
+
+- `bun:sqlite` 的 `Database` API 是同步阻塞的，单用户量级可接受；后续若出现并发路径，再评估迁移
+- 同一 `tid` 的并发首访可能重复抓取并重复写盘，last-writer-wins 无副作用，已知且接受
 
 ## 不在本次范围
 
@@ -177,3 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 - 多用户/账号体系
 - 收藏多列表
 - 历史删除/清空
+
+## 评审修订记录
+
+2026-08-04 按 `docs/superpowers/specs/review.md` 修订，纳入全部 17 条意见：路由方法分发、列表项结构与 N+1、Docker 属主、stale 响应缓存头、回复 JSON 命名与失败不落盘、标签写入存在性约束、测试设施接入、标题刷新语义、部分缓存独立判定、pageSize、DELETE 清缓存、同步 SQLite 说明、并发首访说明、refresh 保留 Referer、`.gitignore` 数据目录。
