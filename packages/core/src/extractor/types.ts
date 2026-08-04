@@ -131,6 +131,10 @@ export interface Extractor {
   fetchCategoryPage(query: CategoryQuery, page: number): Promise<CategoryPage>
   fetchHomeLinks(mtid: string): Promise<HomePage>
   fetchReplies(tid: string): Promise<ReplyNode[]>
+  /** 拉取 achildlist 原始文本（Referer: buildUrl(tid)）；网络失败抛 ExtractorError(502) */
+  fetchRepliesRaw(tid: string): Promise<string>
+  /** 纯函数：JSON 文本 → 回复树；非法 JSON 抛 ExtractorError(502)，非数组返回 [] */
+  parseReplies(raw: string, tid: string): ReplyNode[]
 }
 
 export class ExtractorError extends Error {

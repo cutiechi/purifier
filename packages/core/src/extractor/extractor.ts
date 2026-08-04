@@ -619,7 +619,7 @@ export class Cool18Extractor implements Extractor {
   /**
    * 跟帖列表：原站 achildlist JSON，再按 uptid 组树。
    */
-  async fetchReplies(tid: string): Promise<ReplyNode[]> {
+  async fetchRepliesRaw(tid: string): Promise<string> {
     const url = `${this.homeUrl}?app=forum&act=achildlist&tid=${encodeURIComponent(tid)}`
     const resp = await fetchUpstream(url, {
       headers: { Referer: this.buildUrl(tid) },
@@ -629,9 +629,13 @@ export class Cool18Extractor implements Extractor {
       throw new ExtractorError(`upstream error: ${resp.status}`, 502)
     }
 
+    return resp.text()
+  }
+
+  parseReplies(raw: string, tid: string): ReplyNode[] {
     let data: unknown
     try {
-      data = await resp.json()
+      data = JSON.parse(raw)
     } catch {
       throw new ExtractorError("invalid replies response", 502)
     }
@@ -639,9 +643,9 @@ export class Cool18Extractor implements Extractor {
     if (!Array.isArray(data)) return []
 
     const items: ReplyItem[] = []
-    for (const raw of data) {
-      if (!raw || typeof raw !== "object") continue
-      const r = raw as Record<string, unknown>
+    for (const r0 of data) {
+      if (!r0 || typeof r0 !== "object") continue
+      const r = r0 as Record<string, unknown>
       const replyTid = String(r.tid ?? "")
       if (!replyTid) continue
       items.push({
@@ -657,6 +661,10 @@ export class Cool18Extractor implements Extractor {
     }
 
     return this.buildReplyTree(items, tid)
+  }
+
+  async fetchReplies(tid: string): Promise<ReplyNode[]> {
+    return this.parseReplies(await this.fetchRepliesRaw(tid), tid)
   }
 
   private buildReplyTree(items: ReplyItem[], parentId: string): ReplyNode[] {
