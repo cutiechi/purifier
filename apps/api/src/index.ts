@@ -10,6 +10,7 @@ import {
   NO_STORE_HEADERS,
   UpstreamTimeoutError,
   Store,
+  clearCache,
   fetchUpstream,
   getExtractor,
   jsonError,
@@ -25,8 +26,7 @@ import {
 const PORT = Number(process.env.PORT || 3001)
 const HOST = process.env.HOSTNAME || "0.0.0.0"
 /** Vite build output; when present, non-/api routes serve the SPA. */
-const WEB_DIST =
-  process.env.WEB_DIST || join(import.meta.dir, "../../web/dist")
+const WEB_DIST = process.env.WEB_DIST || join(import.meta.dir, "../../web/dist")
 const DATA_DIR = process.env.DATA_DIR || "./data"
 const store = new Store(openDatabase(DATA_DIR))
 
@@ -198,6 +198,49 @@ function handleMeState(url: URL): Response {
   return jsonOk(state ?? empty, NO_STORE_HEADERS)
 }
 
+async function handleFavoriteWrite(
+  req: Request,
+  favorite: boolean
+): Promise<Response> {
+  const url = new URL(req.url)
+  const kind = meKindParam(url)
+  const id = meIdParam(url)
+  if (favorite) {
+    const ok = store.addFavorite(kind, id)
+    if (!ok) return jsonError("item not found", 404)
+  } else {
+    store.removeFavorite(kind, id)
+  }
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+async function handleTagsWrite(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonError("invalid json body", 400)
+  }
+  const b = (body ?? {}) as { kind?: unknown; id?: unknown; tags?: unknown }
+  if (b.kind !== "post" && b.kind !== "book") {
+    return jsonError("invalid kind", 400)
+  }
+  if (typeof b.id !== "string" || !/^[A-Za-z0-9]+$/.test(b.id)) {
+    return jsonError("invalid id", 400)
+  }
+  if (!Array.isArray(b.tags) || !b.tags.every((t) => typeof t === "string")) {
+    return jsonError("tags must be string[]", 400)
+  }
+  const tags = store.setTags(b.kind, b.id, b.tags as string[])
+  if (tags === null) return jsonError("item not found", 404)
+  return jsonOk({ ok: true, tags }, NO_STORE_HEADERS)
+}
+
+async function handleCacheClear(): Promise<Response> {
+  const cleared = await clearCache(DATA_DIR)
+  return jsonOk({ cleared }, NO_STORE_HEADERS)
+}
+
 async function handleComments(): Promise<Response> {
   const extractor = getExtractor("cool18")
   const resp = await fetchUpstream(`${extractor.homeUrl}?act=cmtrank&y=1`)
@@ -214,10 +257,7 @@ async function handleTrending(): Promise<Response> {
   const resp = await fetchUpstream(`${extractor.homeUrl}?app=forum&act=hot`)
   if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
   const html = await resp.text()
-  return jsonOk(
-    { posts: extractor.extractHotPosts(html) },
-    LIST_CACHE_HEADERS
-  )
+  return jsonOk({ posts: extractor.extractHotPosts(html) }, LIST_CACHE_HEADERS)
 }
 
 async function route(req: Request): Promise<Response> {
@@ -268,12 +308,22 @@ async function route(req: Request): Promise<Response> {
       case "/api/me/history":
         requireGet(req)
         return handleMeHistory(url)
-      case "/api/me/favorites":
-        requireGet(req)
-        return handleMeFavorites(url)
-      case "/api/me/tags":
-        requireGet(req)
-        return handleMeTags()
+      case "/api/me/favorites": {
+        if (req.method === "GET") return handleMeFavorites(url)
+        if (req.method === "PUT") return await handleFavoriteWrite(req, true)
+        if (req.method === "DELETE")
+          return await handleFavoriteWrite(req, false)
+        throw new ExtractorError("method not allowed", 405)
+      }
+      case "/api/me/tags": {
+        if (req.method === "GET") return handleMeTags()
+        if (req.method === "PUT") return await handleTagsWrite(req)
+        throw new ExtractorError("method not allowed", 405)
+      }
+      case "/api/me/cache": {
+        if (req.method === "DELETE") return await handleCacheClear()
+        throw new ExtractorError("method not allowed", 405)
+      }
       case "/api/me/items":
         requireGet(req)
         return handleMeItems(url)
