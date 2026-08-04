@@ -4,13 +4,15 @@
   "private": true,
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev",
-    "lint": "turbo lint",
-    "format": "turbo format",
+    "build:web": "bun run --filter=web build",
+    "dev": "bun run --filter=api dev & bun run --filter=web dev",
+    "dev:api": "bun run --filter=api dev",
+    "dev:web": "bun run --filter=web dev",
+    "start": "bun run --filter=api start",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,css}\"",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
-    "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",

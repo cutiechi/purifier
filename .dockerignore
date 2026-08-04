@@ -1,0 +1,32 @@
+# deps & build artifacts
+node_modules
+**/node_modules
+.next
+**/.next
+.turbo
+**/.turbo
+out
+**/out
+dist
+**/dist
+
+# VCS / local
+.git
+.gitignore
+.reasonix
+.tmp
+**/.DS_Store
+
+# IDE / env (inject at runtime)
+.vscode
+.idea
+.env
+.env.*
+!.env.example
+
+# docs & misc
+*.md
+!README.md
+AGENTS.md
+.claude
+.grok

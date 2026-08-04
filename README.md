@@ -1,21 +1,25 @@
-# shadcn/ui monorepo template
+# Purifier
 
-This is a Next.js monorepo template with shadcn/ui.
+Cool18 净化阅读：Bun API + Vite SPA。
 
-## Adding components
-
-To add components to your app, run the following command at the root of your `web` app:
+## 开发
 
 ```bash
-pnpm dlx shadcn@latest add button -c apps/web
+bun install
+bun run dev:api   # :3001
+bun run dev:web   # :3000，/api 代理到 3001
 ```
 
-This will place the ui components in the `packages/ui/src/components` directory.
+## 生产
 
-## Using components
+```bash
+bun run build:web
+PORT=3000 bun run start   # 单进程：API + 静态页
+```
 
-To use the components in your app, import them from the `ui` package.
+## Docker
 
-```tsx
-import { Button } from "@workspace/ui/components/button";
+```bash
+docker build -t purifier:latest .
+docker run -p 3000:3000 -e HTTPS_PROXY=http://host:7890 purifier:latest
 ```

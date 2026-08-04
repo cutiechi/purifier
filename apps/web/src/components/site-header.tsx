@@ -1,0 +1,116 @@
+
+import { Link } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
+import { useEffect, useState } from "react"
+import {
+  IconChevronLeft,
+  IconClose,
+  IconMenu,
+  IconSearch,
+} from "@/components/icons"
+import { ModeToggle } from "@/components/mode-toggle"
+import { NAV_ITEMS, routes } from "@/lib/routes"
+import { cn } from "@workspace/ui/lib/utils"
+
+export function SiteHeader({ showBack }: { showBack?: boolean }) {
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const [open, setOpen] = useState(false)
+
+  // 路由变化时收起移动端菜单（key 重置更干净，这里用 pathname 同步）
+  const menuKey = pathname
+  useEffect(() => {
+    // 仅在 pathname 变化时关闭
+    setOpen(false)
+  }, [menuKey])
+
+  return (
+    <header className="border-border/60 bg-background/75 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur-xl">
+      <div className="mx-auto flex h-14 max-w-3xl items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5 lg:max-w-4xl">
+        {showBack ? (
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors"
+            aria-label="返回"
+          >
+            <IconChevronLeft size={18} />
+          </button>
+        ) : null}
+
+        <Link
+          to={routes.home}
+          className="text-foreground inline-flex h-11 shrink-0 items-center px-1.5 text-[15px] font-semibold tracking-tight"
+        >
+          Purifier
+        </Link>
+
+        {/* Desktop nav — lg+ only so phone landscape keeps hamburger */}
+        <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto lg:flex">
+          {NAV_ITEMS.map((item) => {
+            const active = item.match(pathname)
+            return (
+              <Link
+                key={item.href}
+                to={item.href}
+                className={cn(
+                  "inline-flex h-11 shrink-0 items-center rounded-lg px-2.5 text-[13px] font-medium transition-colors",
+                  active
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                )}
+              >
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-0.5">
+          <Link
+            to={routes.search}
+            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 items-center justify-center rounded-xl transition-colors lg:hidden"
+            aria-label="搜索"
+          >
+            <IconSearch size={18} />
+          </Link>
+          <ModeToggle />
+          <button
+            type="button"
+            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 items-center justify-center rounded-xl transition-colors lg:hidden"
+            aria-label={open ? "关闭菜单" : "打开菜单"}
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? <IconClose size={18} /> : <IconMenu size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile / tablet drawer */}
+      {open && (
+        <nav className="border-border/60 mx-auto max-w-3xl border-t px-3 py-3 lg:hidden">
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+            {NAV_ITEMS.map((item) => {
+              const active = item.match(pathname)
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className={cn(
+                    "inline-flex min-h-11 items-center justify-center rounded-xl px-2 py-2.5 text-center text-[13px] font-medium transition-colors",
+                    active
+                      ? "bg-accent text-foreground"
+                      : "bg-muted/50 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  {item.label}
+                </Link>
+              )
+            })}
+          </div>
+        </nav>
+      )}
+    </header>
+  )
+}
