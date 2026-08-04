@@ -52,6 +52,7 @@ export function ArticleView({
   contentHtml,
   sourceUrl,
   currentTid,
+  actions,
   footer,
 }: {
   title: string
@@ -59,6 +60,7 @@ export function ArticleView({
   contentHtml: string
   sourceUrl: string
   currentTid?: string
+  actions?: ReactNode
   footer?: ReactNode
 }) {
   return (
@@ -70,6 +72,8 @@ export function ArticleView({
       <h1 className="text-foreground mb-3 text-xl leading-snug font-bold tracking-tight sm:mb-4 sm:text-2xl sm:leading-tight">
         {title}
       </h1>
+
+      {actions && <div className="mb-4">{actions}</div>}
 
       {meta && <PostMetaBar meta={meta} currentTid={currentTid} />}
 

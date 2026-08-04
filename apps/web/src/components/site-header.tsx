@@ -90,7 +90,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
       {/* Mobile / tablet drawer */}
       {open && (
         <nav className="border-border/60 mx-auto max-w-3xl border-t px-3 py-3 lg:hidden">
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
             {NAV_ITEMS.map((item) => {
               const active = item.match(pathname)
               return (
@@ -98,7 +98,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
                   key={item.href}
                   to={item.href}
                   className={cn(
-                    "inline-flex min-h-11 items-center justify-center rounded-xl px-2 py-2.5 text-center text-[13px] font-medium transition-colors",
+                    "inline-flex h-11 shrink-0 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",
                     active
                       ? "bg-accent text-foreground"
                       : "bg-muted/50 text-muted-foreground hover:bg-accent hover:text-foreground"

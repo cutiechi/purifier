@@ -13,6 +13,9 @@
  * | Categories  | `/categories`                |
  * | Browse      | `/browse?type|q=&page=`      |
  * | Search      | `/search?q=&page=`           |
+ * | History     | `/history`                   |
+ * | Favorites   | `/favorites`                 |
+ * | Tags        | `/tags?tag=&q=&kind=&page=`  |
  */
 
 export const routes = {
@@ -24,6 +27,9 @@ export const routes = {
   categories: "/categories",
   browse: "/browse",
   search: "/search",
+  history: "/history",
+  favorites: "/favorites",
+  tags: "/tags",
 } as const
 
 export const api = {
@@ -35,6 +41,12 @@ export const api = {
   comments: "/api/comments",
   categories: "/api/categories",
   browse: "/api/browse",
+  meHistory: "/api/me/history",
+  meFavorites: "/api/me/favorites",
+  meTags: "/api/me/tags",
+  meItems: "/api/me/items",
+  meState: "/api/me/state",
+  meCache: "/api/me/cache",
   health: "/api/health",
 } as const
 
@@ -65,6 +77,34 @@ export function searchPath(opts: { q: string; page?: number }): string {
   params.set("q", opts.q)
   if (opts.page && opts.page > 1) params.set("page", String(opts.page))
   return `${routes.search}?${params.toString()}`
+}
+
+/** /api/me/* 列表查询串（q/kind/page），page>1 才带 */
+export function meListQuery(opts: {
+  q?: string
+  kind?: string
+  page?: number
+}): string {
+  const params = new URLSearchParams()
+  if (opts.q) params.set("q", opts.q)
+  if (opts.kind) params.set("kind", opts.kind)
+  if (opts.page && opts.page > 1) params.set("page", String(opts.page))
+  return params.toString()
+}
+
+/** 标签页筛选路径：/tags?tag=xxx[&q=&kind=&page=] */
+export function tagsPath(opts: {
+  tag: string
+  q?: string
+  kind?: string
+  page?: number
+}): string {
+  const params = new URLSearchParams()
+  params.set("tag", opts.tag)
+  if (opts.q) params.set("q", opts.q)
+  if (opts.kind) params.set("kind", opts.kind)
+  if (opts.page && opts.page > 1) params.set("page", String(opts.page))
+  return `${routes.tags}?${params.toString()}`
 }
 
 export function parsePage(
@@ -116,5 +156,20 @@ export const NAV_ITEMS = [
     href: routes.search,
     label: "搜索",
     match: (p: string) => p === routes.search,
+  },
+  {
+    href: routes.history,
+    label: "历史",
+    match: (p: string) => p === routes.history,
+  },
+  {
+    href: routes.favorites,
+    label: "收藏",
+    match: (p: string) => p === routes.favorites,
+  },
+  {
+    href: routes.tags,
+    label: "标签",
+    match: (p: string) => p === routes.tags,
   },
 ] as const
