@@ -300,6 +300,59 @@ function handleMeHistory(url: URL): Response {
   return jsonOk(store.listHistory(meListQuery(url)), NO_STORE_HEADERS)
 }
 
+/**
+ * 删除历史：
+ * - ?all=1 → 清空全部
+ * - ?kind=&id= → 删除单条
+ * - body { items: [{kind,id}] } → 批量（清空本页）
+ */
+async function handleHistoryDelete(req: Request): Promise<Response> {
+  const url = new URL(req.url)
+  if (url.searchParams.get("all") === "1") {
+    const removed = store.clearHistory()
+    return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+  }
+
+  const kindRaw = url.searchParams.get("kind")
+  const idRaw = url.searchParams.get("id")
+  if (kindRaw !== null || idRaw !== null) {
+    const kind = meKindParam(url)
+    const id = meIdParam(url)
+    const existed = store.deleteItem(kind, id)
+    return jsonOk({ ok: true, removed: existed ? 1 : 0 }, NO_STORE_HEADERS)
+  }
+
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonError(
+      "missing all=1, kind+id, or JSON body { items: [{kind,id}] }",
+      400
+    )
+  }
+  const items = (body as { items?: unknown })?.items
+  if (
+    !Array.isArray(items) ||
+    !items.every(
+      (it) =>
+        it &&
+        typeof it === "object" &&
+        ((it as { kind?: unknown }).kind === "post" ||
+          (it as { kind?: unknown }).kind === "book") &&
+        typeof (it as { id?: unknown }).id === "string" &&
+        /^[A-Za-z0-9]+$/.test((it as { id: string }).id)
+    )
+  ) {
+    return jsonError("items must be {kind,id}[]", 400)
+  }
+  const pairs = (items as Array<{ kind: "post" | "book"; id: string }>).map(
+    (it) => ({ kind: it.kind, id: it.id })
+  )
+  const removed = store.deleteItems(pairs)
+  return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+}
+
 function handleMeFavorites(url: URL): Response {
   return jsonOk(store.listFavorites(meListQuery(url)), NO_STORE_HEADERS)
 }
@@ -372,6 +425,14 @@ async function handleTagsWrite(req: Request): Promise<Response> {
   return jsonOk({ ok: true, tags }, NO_STORE_HEADERS)
 }
 
+/** 全局删除某一标签（所有对象上的该标签行） */
+function handleTagDelete(url: URL): Response {
+  const tag = url.searchParams.get("tag")?.trim()
+  if (!tag) return jsonError("missing tag parameter", 400)
+  const removed = store.deleteTag(tag)
+  return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+}
+
 async function handleCacheClear(): Promise<Response> {
   const cleared = await clearCache(DATA_DIR)
   return jsonOk({ cleared }, NO_STORE_HEADERS)
@@ -441,9 +502,11 @@ async function route(req: Request): Promise<Response> {
       case "/api/trending":
         requireGet(req)
         return await handleTrending()
-      case "/api/me/history":
-        requireGet(req)
-        return handleMeHistory(url)
+      case "/api/me/history": {
+        if (req.method === "GET") return handleMeHistory(url)
+        if (req.method === "DELETE") return await handleHistoryDelete(req)
+        throw new ExtractorError("method not allowed", 405)
+      }
       case "/api/me/favorites": {
         if (req.method === "GET") return handleMeFavorites(url)
         if (req.method === "PUT") return await handleFavoriteWrite(req, true)
@@ -454,6 +517,7 @@ async function route(req: Request): Promise<Response> {
       case "/api/me/tags": {
         if (req.method === "GET") return handleMeTags()
         if (req.method === "PUT") return await handleTagsWrite(req)
+        if (req.method === "DELETE") return handleTagDelete(url)
         throw new ExtractorError("method not allowed", 405)
       }
       case "/api/me/cache": {

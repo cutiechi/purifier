@@ -120,6 +120,64 @@ export class Store {
       .run(kind, id)
   }
 
+  /**
+   * 删除历史条目：连同 favorites / tags 一并清理。
+   * 返回是否曾存在于 items（不存在也幂等成功）。
+   */
+  deleteItem(kind: ItemKind, id: string): boolean {
+    const exists = this.db
+      .query("SELECT 1 FROM items WHERE kind = ?1 AND id = ?2")
+      .get(kind, id)
+    if (!exists) return false
+    const run = this.db.transaction(() => {
+      this.purgeItem(kind, id)
+    })
+    run()
+    return true
+  }
+
+  /** 批量删除历史；返回实际删除的 items 行数 */
+  deleteItems(pairs: Array<{ kind: ItemKind; id: string }>): number {
+    let removed = 0
+    const run = this.db.transaction(() => {
+      for (const { kind, id } of pairs) {
+        const exists = this.db
+          .query("SELECT 1 FROM items WHERE kind = ?1 AND id = ?2")
+          .get(kind, id)
+        if (!exists) continue
+        this.purgeItem(kind, id)
+        removed++
+      }
+    })
+    run()
+    return removed
+  }
+
+  /** 在事务内删除单条 items + favorites + tags（不另开事务） */
+  private purgeItem(kind: ItemKind, id: string): void {
+    this.db
+      .query("DELETE FROM tags WHERE kind = ?1 AND id = ?2")
+      .run(kind, id)
+    this.db
+      .query("DELETE FROM favorites WHERE kind = ?1 AND id = ?2")
+      .run(kind, id)
+    this.db.query("DELETE FROM items WHERE kind = ?1 AND id = ?2").run(kind, id)
+  }
+
+  /** 清空全部历史（items + favorites + tags）；返回删除的 items 数 */
+  clearHistory(): number {
+    const row = this.db.query("SELECT COUNT(*) AS n FROM items").get() as {
+      n: number
+    }
+    const run = this.db.transaction(() => {
+      this.db.query("DELETE FROM tags").run()
+      this.db.query("DELETE FROM favorites").run()
+      this.db.query("DELETE FROM items").run()
+    })
+    run()
+    return Number(row.n ?? 0)
+  }
+
   /** 整体替换标签；对象不存在返回 null（API 层映射 404）；返回实际落库的标签 */
   setTags(kind: ItemKind, id: string, tags: string[]): string[] | null {
     const exists = this.db
@@ -139,6 +197,16 @@ export class Store {
     })
     run()
     return normalized
+  }
+
+  /** 从全部对象上移除指定标签；返回删除行数（标签不存在则为 0） */
+  deleteTag(tag: string): number {
+    const normalized = normalizeTag(tag)
+    if (!normalized) return 0
+    const result = this.db
+      .query("DELETE FROM tags WHERE tag = ?1")
+      .run(normalized)
+    return Number(result.changes ?? 0)
   }
 
   /** 历史：全量，最近访问倒序；q 匹配标题子串（NOCASE）或标签精确；kind 可筛选 */

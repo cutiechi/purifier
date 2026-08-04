@@ -19,6 +19,7 @@ export function MeListPage({
   buildUrl,
   pick,
   renderTrailing,
+  toolbar,
   emptyText,
 }: {
   title: string
@@ -27,6 +28,12 @@ export function MeListPage({
   buildUrl: (q: string, kind: string, page: number) => string
   pick: MeListPick
   renderTrailing?: (item: MeListItem, reload: () => void) => ReactNode
+  /** 列表上方可选操作区（历史清空等） */
+  toolbar?: (ctx: {
+    items: MeListItem[]
+    reload: () => void
+    loading: boolean
+  }) => ReactNode
   emptyText?: string
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -127,14 +134,14 @@ export function MeListPage({
         </button>
       </form>
 
-      <div className="mb-4 flex gap-1.5">
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
         {KIND_TABS.map((tab) => (
           <button
             key={tab.value}
             type="button"
             onClick={() => update({ kind: tab.value })}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+              "min-h-9 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors sm:min-h-0 sm:px-3",
               kind === tab.value
                 ? "bg-accent text-foreground"
                 : "bg-muted/50 text-muted-foreground hover:bg-accent/70"
@@ -144,6 +151,8 @@ export function MeListPage({
           </button>
         ))}
       </div>
+
+      {toolbar?.({ items, reload, loading })}
 
       <AsyncBody
         loading={loading}

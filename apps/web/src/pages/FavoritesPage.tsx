@@ -16,6 +16,7 @@ function UnfavoriteButton({
       type="button"
       disabled={busy}
       onClick={async () => {
+        if (!window.confirm(`取消收藏「${item.title}」？`)) return
         setBusy(true)
         try {
           const res = await fetch(
@@ -27,7 +28,7 @@ function UnfavoriteButton({
           setBusy(false)
         }
       }}
-      className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+      className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
     >
       取消收藏
     </button>

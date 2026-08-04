@@ -69,9 +69,11 @@ packages/typescript-config/               # base / react-library 配置
 | `GET /api/comments`     | 无                         | `{ posts }` 评论榜                                      |
 | `GET /api/trending`     | 无                         | `{ posts }` 人气榜                                      |
 | `GET /api/me/history`   | `q`、`kind`、`page`        | 阅读历史 `{ items, nextPage? }`                         |
+| `DELETE /api/me/history`| `all=1` 或 `kind`+`id` 或 body `{ items }` | 清空全部 / 删单条 / 批量（清空本页）；连带清收藏与标签 |
 | `GET /api/me/favorites` | `q`、`kind`、`page`        | 收藏列表；`PUT`/`DELETE` 加/取消收藏（带 `kind`、`id`） |
 | `GET /api/me/tags`      | 无                         | `{ tags: TagCount[] }` 全部标签及计数                   |
 | `PUT /api/me/tags`      | body `{ kind, id, tags }`  | 整体替换标签 `{ ok, tags }`；对象不存在 404             |
+| `DELETE /api/me/tags`   | `tag`                      | 全局删除该标签 `{ ok, removed }`（从所有对象上移除）    |
 | `GET /api/me/items`     | `tag`、`q`、`kind`、`page` | 按标签精确筛选 `{ items, nextPage? }`                   |
 | `GET /api/me/state`     | `kind`、`id`               | 条目收藏/标签/访问状态；无记录返回 200 空状态           |
 | `DELETE /api/me/cache`  | 无                         | 清空内容缓存 `{ cleared: n }`                           |

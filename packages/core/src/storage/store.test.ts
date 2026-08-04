@@ -58,6 +58,39 @@ describe("recordVisit / getState", () => {
   })
 })
 
+describe("deleteItem / clearHistory", () => {
+  test("deleteItem removes item favorites and tags", () => {
+    const { store } = makeStore()
+    store.recordVisit("post", "1", "T", "u")
+    store.addFavorite("post", "1")
+    store.setTags("post", "1", ["科幻"])
+    expect(store.deleteItem("post", "1")).toBe(true)
+    expect(store.getState("post", "1")).toBeNull()
+    expect(store.listFavorites({}).items).toEqual([])
+    expect(store.listTags()).toEqual([])
+    expect(store.deleteItem("post", "1")).toBe(false)
+  })
+
+  test("deleteItems batch and clearHistory", () => {
+    const { store } = makeStore()
+    store.recordVisit("post", "1", "A", "u")
+    store.recordVisit("book", "2", "B", "u")
+    store.recordVisit("post", "3", "C", "u")
+    store.setTags("post", "1", ["x"])
+    expect(
+      store.deleteItems([
+        { kind: "post", id: "1" },
+        { kind: "book", id: "2" },
+        { kind: "post", id: "missing" },
+      ])
+    ).toBe(2)
+    expect(store.listHistory({}).items.map((i) => i.id)).toEqual(["3"])
+    expect(store.clearHistory()).toBe(1)
+    expect(store.listHistory({}).items).toEqual([])
+    expect(store.clearHistory()).toBe(0)
+  })
+})
+
 describe("favorites", () => {
   test("addFavorite fails for missing item", () => {
     const { store } = makeStore()
@@ -101,6 +134,20 @@ describe("setTags / normalize", () => {
   test("setTags returns null for missing item", () => {
     const { store } = makeStore()
     expect(store.setTags("book", "9", ["x"])).toBeNull()
+  })
+
+  test("deleteTag removes the tag from all items", () => {
+    const { store } = makeStore()
+    store.recordVisit("post", "1", "T1", "u1")
+    store.recordVisit("post", "2", "T2", "u2")
+    store.setTags("post", "1", ["科幻", "长篇"])
+    store.setTags("post", "2", ["科幻"])
+    expect(store.deleteTag("科幻")).toBe(2)
+    expect(store.getState("post", "1")?.tags).toEqual(["长篇"])
+    expect(store.getState("post", "2")?.tags).toEqual([])
+    expect(store.listTags()).toEqual([{ tag: "长篇", count: 1 }])
+    expect(store.deleteTag("不存在")).toBe(0)
+    expect(store.deleteTag("  ")).toBe(0)
   })
 })
 

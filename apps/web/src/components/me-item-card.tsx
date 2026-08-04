@@ -32,7 +32,7 @@ export function MeItemCard({
   const time = item.last_visited_at ?? item.favorited_at
   return (
     <div className="group flex flex-col rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
-      <div className="flex items-center gap-3 sm:gap-3.5">
+      <div className="flex items-start gap-2 sm:items-center sm:gap-3.5">
         <Link
           to={href}
           className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5"
@@ -53,12 +53,18 @@ export function MeItemCard({
               {item.visit_count} 次访问
             </span>
           </span>
+          {/* 有 trailing 时移动端隐藏 chevron，把横向空间留给标题与操作 */}
           <IconChevronRight
             size={16}
-            className="shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground"
+            className={[
+              "shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground",
+              trailing ? "hidden sm:block" : "",
+            ].join(" ")}
           />
         </Link>
-        {trailing}
+        {trailing ? (
+          <div className="flex shrink-0 items-center self-center">{trailing}</div>
+        ) : null}
       </div>
       <div className="mt-1.5 pl-11 sm:pl-[3.25rem]">
         <TagChips tags={item.tags} />

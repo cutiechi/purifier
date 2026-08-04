@@ -52,6 +52,10 @@ export function ItemActions({
   const [busy, setBusy] = useState(false)
 
   const toggleFavorite = async () => {
+    if (state?.favorited) {
+      const title = state.title?.trim() || "该条目"
+      if (!window.confirm(`取消收藏「${title}」？`)) return
+    }
     setBusy(true)
     try {
       const method = state?.favorited ? "DELETE" : "PUT"
@@ -75,6 +79,17 @@ export function ItemActions({
     return res.ok
   }
 
+  const [removing, setRemoving] = useState<string | null>(null)
+  const removeTag = async (tag: string) => {
+    const current = state?.tags ?? []
+    setRemoving(tag)
+    try {
+      await saveTags(current.filter((t) => t !== tag))
+    } finally {
+      setRemoving(null)
+    }
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -82,7 +97,7 @@ export function ItemActions({
         onClick={() => void toggleFavorite()}
         disabled={busy}
         className={[
-          "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+          "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 sm:min-h-0",
           state?.favorited
             ? "bg-amber-400/15 text-amber-600 hover:bg-amber-400/25 dark:text-amber-400"
             : "bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -96,7 +111,7 @@ export function ItemActions({
         type="button"
         onClick={onRefresh}
         disabled={refreshing}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 sm:min-h-0"
       >
         <IconRefreshCw
           size={13}
@@ -105,21 +120,44 @@ export function ItemActions({
         刷新
       </button>
 
-      <TagEditor tags={state?.tags ?? []} onSave={saveTags} />
+      <TagEditor
+        tags={state?.tags ?? []}
+        onSave={saveTags}
+        onRemove={(tag) => void removeTag(tag)}
+        removing={removing}
+      />
     </div>
   )
+}
+
+function formatTagsInput(tags: string[]): string {
+  return tags.join(", ")
 }
 
 function TagEditor({
   tags,
   onSave,
+  onRemove,
+  removing,
 }: {
   tags: string[]
   onSave: (tags: string[]) => Promise<boolean>
+  onRemove?: (tag: string) => void
+  removing?: string | null
 }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState("")
   const [busy, setBusy] = useState(false)
+
+  const open = () => {
+    setValue(formatTagsInput(tags))
+    setEditing(true)
+  }
+
+  const cancel = () => {
+    setEditing(false)
+    setValue(formatTagsInput(tags))
+  }
 
   const submit = async () => {
     setBusy(true)
@@ -137,31 +175,31 @@ function TagEditor({
 
   if (editing) {
     return (
-      <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">
         <input
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void submit()
-            if (e.key === "Escape") setEditing(false)
+            if (e.key === "Escape") cancel()
           }}
           placeholder="多个标签用逗号分隔"
-          className="h-8 w-52 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+          className="h-9 w-44 max-w-full min-w-0 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60 sm:h-8 sm:w-52"
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={busy}
-          className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
+          className="min-h-9 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-foreground disabled:opacity-50 sm:min-h-0"
         >
           保存
         </button>
         <button
           type="button"
-          onClick={() => setEditing(false)}
+          onClick={cancel}
           disabled={busy}
-          className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground"
+          className="min-h-9 rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground sm:min-h-0"
         >
           取消
         </button>
@@ -170,12 +208,12 @@ function TagEditor({
   }
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-1.5">
-      <TagChips tags={tags} />
+    <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">
+      <TagChips tags={tags} onRemove={onRemove} removing={removing} />
       <button
         type="button"
-        onClick={() => setEditing(true)}
-        className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={open}
+        className="min-h-9 rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:min-h-0"
       >
         编辑标签
       </button>
