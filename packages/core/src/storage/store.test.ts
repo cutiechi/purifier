@@ -103,3 +103,103 @@ describe("setTags / normalize", () => {
     expect(store.setTags("book", "9", ["x"])).toBeNull()
   })
 })
+
+function seed(store: Store) {
+  store.recordVisit("post", "1", "Alpha 星", "u1")
+  store.recordVisit("book", "2", "Beta 书", "u2")
+  store.recordVisit("post", "3", "gamma 贴", "u3")
+  store.setTags("post", "1", ["科幻"])
+  store.setTags("post", "3", ["随笔"])
+  store.addFavorite("book", "2")
+}
+
+describe("listHistory", () => {
+  test("orders by last_visited_at desc", () => {
+    const { store } = makeStore()
+    seed(store)
+    const res = store.listHistory({})
+    expect(res.items.map((i) => i.id)).toEqual(["3", "2", "1"])
+    expect(res.nextPage).toBeUndefined()
+  })
+
+  test("matches title substring case-insensitively and tag exactly", () => {
+    const { store } = makeStore()
+    seed(store)
+    expect(store.listHistory({ q: "ALPHA" }).items.map((i) => i.id)).toEqual([
+      "1",
+    ])
+    expect(store.listHistory({ q: "科幻" }).items.map((i) => i.id)).toEqual([
+      "1",
+    ])
+  })
+
+  test("filters by kind and aggregates tags/favorited", () => {
+    const { store } = makeStore()
+    seed(store)
+    const res = store.listHistory({ kind: "book" })
+    expect(res.items).toHaveLength(1)
+    expect(res.items[0]?.tags).toEqual([])
+    expect(res.items[0]?.favorited).toBe(true)
+    const posts = store.listHistory({ kind: "post" })
+    expect(posts.items.map((i) => i.id)).toEqual(["3", "1"])
+    expect(posts.items.find((i) => i.id === "1")?.tags).toEqual(["科幻"])
+  })
+
+  test("paginates 20 per page", () => {
+    const { store } = makeStore()
+    for (let i = 0; i < 25; i++) {
+      store.recordVisit("post", String(i), `T${i}`, "u")
+    }
+    const p1 = store.listHistory({ page: 1 })
+    expect(p1.items).toHaveLength(20)
+    expect(p1.nextPage).toBe(2)
+    const p2 = store.listHistory({ page: 2 })
+    expect(p2.items).toHaveLength(5)
+    expect(p2.nextPage).toBeUndefined()
+  })
+})
+
+describe("listFavorites", () => {
+  test("orders by favorited_at desc and returns favorited_at", () => {
+    const { store } = makeStore()
+    seed(store)
+    store.recordVisit("post", "10", "Ten", "u")
+    store.addFavorite("post", "10")
+    const res = store.listFavorites({})
+    expect(res.items.map((i) => i.id)).toEqual(["10", "2"])
+    expect(res.items[0]?.favorited_at).toBeDefined()
+    expect(res.items.every((i) => i.favorited)).toBe(true)
+  })
+
+  test("searches within favorites", () => {
+    const { store } = makeStore()
+    seed(store)
+    expect(store.listFavorites({ q: "beta" }).items.map((i) => i.id)).toEqual([
+      "2",
+    ])
+  })
+})
+
+describe("listTags", () => {
+  test("counts desc, tie by tag asc", () => {
+    const { store } = makeStore()
+    seed(store)
+    store.setTags("book", "2", ["科幻", "历史"])
+    const res = store.listTags()
+    expect(res).toEqual([
+      { tag: "科幻", count: 2 },
+      { tag: "历史", count: 1 },
+      { tag: "随笔", count: 1 },
+    ])
+  })
+})
+
+describe("listByTag", () => {
+  test("filters exactly by tag, then q and kind", () => {
+    const { store } = makeStore()
+    seed(store)
+    expect(store.listByTag("科幻", {}).items.map((i) => i.id)).toEqual(["1"])
+    expect(store.listByTag("科", {}).items).toHaveLength(0) // 精确匹配
+    expect(store.listByTag("科幻", { kind: "book" }).items).toHaveLength(0)
+  })
+})
