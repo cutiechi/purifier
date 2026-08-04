@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
+import { ItemActions } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { api } from "@/lib/routes"
 
@@ -17,26 +18,38 @@ export default function BookPage() {
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [error, setError] = useState("")
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshNotice, setRefreshNotice] = useState("")
 
-  const fetchBook = useCallback(async () => {
-    if (!cid) return
-    setLoading(true)
-    setError("")
-    setBook(null)
-    try {
-      const res = await fetch(`${api.books}?cid=${encodeURIComponent(cid)}`)
-      const json = await res.json()
-      if (!res.ok) {
-        setError(json.error || "请求失败")
-        return
+  const fetchBook = useCallback(
+    async (opts?: { refresh?: boolean }) => {
+      if (!cid) return
+      const refresh = opts?.refresh
+      if (refresh) setRefreshing(true)
+      else setLoading(true)
+      setError("")
+      try {
+        const res = await fetch(
+          `${api.books}?cid=${encodeURIComponent(cid)}${refresh ? "&refresh=1" : ""}`
+        )
+        const json = await res.json()
+        if (!res.ok) {
+          setError(json.error || "请求失败")
+          return
+        }
+        setBook(json)
+        setRefreshNotice(
+          json.stale ? "刷新失败，当前展示的是缓存内容" : ""
+        )
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "未知错误")
+      } finally {
+        if (refresh) setRefreshing(false)
+        else setLoading(false)
       }
-      setBook(json)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误")
-    } finally {
-      setLoading(false)
-    }
-  }, [cid])
+    },
+    [cid]
+  )
 
   useEffect(() => {
     fetchBook()
@@ -52,12 +65,27 @@ export default function BookPage() {
         emptyText="内容不存在"
       >
         {book && (
-          <ArticleView
-            title={book.title}
-            meta={{ author: book.meta?.author }}
-            contentHtml={book.content}
-            sourceUrl={book.url}
-          />
+          <>
+            {refreshNotice && (
+              <div className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 mb-4 rounded-2xl border px-4 py-2.5 text-sm">
+                {refreshNotice}
+              </div>
+            )}
+            <ArticleView
+              title={book.title}
+              meta={{ author: book.meta?.author }}
+              contentHtml={book.content}
+              sourceUrl={book.url}
+              actions={
+                <ItemActions
+                  kind="book"
+                  id={cid}
+                  onRefresh={() => void fetchBook({ refresh: true })}
+                  refreshing={refreshing}
+                />
+              }
+            />
+          </>
         )}
       </AsyncBody>
     </PageShell>
