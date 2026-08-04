@@ -108,6 +108,7 @@ apps/web/src/
 ### Task 1：测试设施接入 + 存储骨架（~20 min）
 
 **Files:**
+
 - `packages/core/package.json`（~）
 - `package.json`（根，~）
 - `turbo.json`（~）
@@ -226,6 +227,7 @@ export * from "./db"
 ```
 
 **Consumes-Produces:**
+
 - Consumes：现有 bun workspace / turbo 配置；`packages/core/src/index.ts` 的 `export * from "./extractor" / "./upstream"`。
 - Produces：根目录可运行 `bun run test`；`openDatabase` 可建库建表（任务 2 起被 `Store` 使用）。
 
@@ -267,7 +269,9 @@ describe("openDatabase", () => {
     const dir = tempDir()
     const db = openDatabase(dir)
     const rows = db
-      .query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .query(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+      )
       .all() as { name: string }[]
     expect(rows.map((r) => r.name)).toEqual(["favorites", "items", "tags"])
     db.close()
@@ -298,6 +302,7 @@ export * from "./storage"
 ### Task 2：Store 写路径（recordVisit / getState / 收藏 / 标签）（~35 min）
 
 **Files:**
+
 - `packages/core/src/storage/store.ts`（+）
 - `packages/core/src/storage/store.test.ts`（~，追加测试）
 - `packages/core/src/storage/index.ts`（~，追加导出）
@@ -361,15 +366,13 @@ export class Store {
         `SELECT title, url, first_seen_at, last_visited_at, visit_count
          FROM items WHERE kind = ?1 AND id = ?2`
       )
-      .get(kind, id) as
-      | {
-          title: string
-          url: string
-          first_seen_at: number
-          last_visited_at: number
-          visit_count: number
-        }
-      | null
+      .get(kind, id) as {
+      title: string
+      url: string
+      first_seen_at: number
+      last_visited_at: number
+      visit_count: number
+    } | null
     if (!row) return null
     const fav = this.db
       .query("SELECT 1 FROM favorites WHERE kind = ?1 AND id = ?2")
@@ -440,6 +443,7 @@ export class Store {
 ```
 
 **Consumes-Produces:**
+
 - Consumes：Task 1 的 `openDatabase` / `types.ts`。
 - Produces：`recordVisit`/`getState`/`addFavorite`/`removeFavorite`/`setTags`/`normalizeTag`/`normalizeTags`；任务 3 的读路径复用 `getState` 之外的方法。
 
@@ -534,6 +538,7 @@ describe("setTags / normalize", () => {
 ### Task 3：Store 读路径（listHistory / listFavorites / listTags / listByTag）（~40 min）
 
 **Files:**
+
 - `packages/core/src/storage/store.ts`（~，追加读方法）
 - `packages/core/src/storage/store.test.ts`（~，追加测试）
 
@@ -686,6 +691,7 @@ private tagsFor(kindIds: Array<[ItemKind, string]>): Map<string, string[]> {
 ```
 
 **Consumes-Produces:**
+
 - Consumes：Task 2 的 `Store`（`recordVisit`/`setTags`/`addFavorite` 用于造数据）。
 - Produces：四个读方法，供 Task 6 的 `/api/me/history|favorites|tags|items` 使用；`nextPage` 语义（`PAGE_SIZE+1` 探针）就绪。
 
@@ -805,6 +811,7 @@ describe("listByTag", () => {
 ### Task 4：内容缓存模块（~30 min）
 
 **Files:**
+
 - `packages/core/src/storage/cache.ts`（+）
 - `packages/core/src/storage/cache.test.ts`（+）
 - `packages/core/src/storage/index.ts`（~，追加导出）
@@ -814,7 +821,14 @@ describe("listByTag", () => {
 `packages/core/src/storage/cache.ts`（完整文件）：
 
 ```ts
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises"
 import { join } from "node:path"
 import { ExtractorError } from "../extractor/types"
 import { ItemKind } from "./types"
@@ -834,7 +848,11 @@ export interface CacheEntry<T> {
   sizeBytes: number
 }
 
-export function contentCachePath(dataDir: string, kind: ItemKind, id: string): string {
+export function contentCachePath(
+  dataDir: string,
+  kind: ItemKind,
+  id: string
+): string {
   assertSafeId(id)
   return join(dataDir, "cache", `${kind}-${id}.html`)
 }
@@ -878,7 +896,11 @@ export async function readRepliesCache(
   const path = repliesCachePath(dataDir, id)
   try {
     const [raw, info] = await Promise.all([readFile(path, "utf8"), stat(path)])
-    return { data: JSON.parse(raw), mtimeMs: info.mtimeMs, sizeBytes: info.size }
+    return {
+      data: JSON.parse(raw),
+      mtimeMs: info.mtimeMs,
+      sizeBytes: info.size,
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
     throw err
@@ -891,7 +913,11 @@ export async function writeRepliesCache(
   replies: unknown
 ): Promise<void> {
   await mkdir(join(dataDir, "cache"), { recursive: true })
-  await writeFile(repliesCachePath(dataDir, id), JSON.stringify(replies), "utf8")
+  await writeFile(
+    repliesCachePath(dataDir, id),
+    JSON.stringify(replies),
+    "utf8"
+  )
 }
 
 /** 清空 cache/ 目录下全部文件；返回删除数量；目录不存在返回 0 */
@@ -911,6 +937,7 @@ export async function clearCache(dataDir: string): Promise<number> {
 ```
 
 **Consumes-Produces:**
+
 - Consumes：`ExtractorError`（`../extractor/types`）、`ItemKind`。
 - Produces：`assertSafeId`/`contentCachePath`/`repliesCachePath`/读写/`clearCache`，供 Task 8 的 posts/books 缓存路径使用。
 
@@ -1009,6 +1036,7 @@ describe("clearCache", () => {
 ### Task 5：Extractor 回复拆分（fetchRepliesRaw / parseReplies）（~30 min）
 
 **Files:**
+
 - `packages/core/src/extractor/types.ts`（~，接口加两个方法）
 - `packages/core/src/extractor/extractor.ts`（~，拆分 fetchReplies）
 - `packages/core/src/extractor/replies.test.ts`（+）
@@ -1075,6 +1103,7 @@ describe("clearCache", () => {
 ```
 
 **Consumes-Produces:**
+
 - Consumes：现有 `fetchUpstream`、`ExtractorError`、`ReplyItem/ReplyNode`。
 - Produces：可单测的 `parseReplies`（纯函数）+ 可独立调用的 `fetchRepliesRaw`；Task 8 的回复缓存路径依赖这两个方法。
 
@@ -1146,6 +1175,7 @@ describe("parseReplies", () => {
 ### Task 6：API 路由分发 + `/api/me/*` 读端点（~40 min）
 
 **Files:**
+
 - `packages/core/src/upstream.ts`（~，加 `NO_STORE_HEADERS`）
 - `apps/api/src/index.ts`（~，路由分发 + me 读端点）
 
@@ -1360,6 +1390,7 @@ async function route(req: Request): Promise<Response> {
 说明：`handleComments`/`handleTrending` 的完整实现已在上方给出（由原 switch 内联分支原样抽出，含 `resp.ok` 分支与 `LIST_CACHE_HEADERS`，实现时直接照抄即可）。`handleFavoriteWrite`/`handleTagsWrite`/`handleCacheClear` 在 Task 7 实现——**本任务先给它们留占位实现**（`return jsonError("not implemented", 500)`），Task 7 替换为真实现；也可以在 Task 7 再补 case。推荐：本任务 route() 中这三个 case 直接暂不注册，Task 7 一并加入，保持每次提交可编译可运行。
 
 **Consumes-Produces:**
+
 - Consumes：Task 1–5 的 `Store`/`openDatabase`/`ListQuery`/`ItemState`/`NO_STORE_HEADERS`。
 - Produces：`GET /api/me/history|favorites|tags|items|state`；405/400 语义；`/api/me/*` 全部 `no-store`。
 
@@ -1393,6 +1424,7 @@ curl -s 'http://127.0.0.1:3001/api/me/state?kind=post&id=999' # 200 空状态（
 ### Task 7：API 写端点（favorites PUT/DELETE、tags PUT、cache DELETE）（~30 min）
 
 **Files:**
+
 - `apps/api/src/index.ts`（~，补全 Task 6 预留的写 case 与处理器）
 
 **Interfaces**（追加到 `apps/api/src/index.ts`）：
@@ -1445,6 +1477,7 @@ async function handleCacheClear(): Promise<Response> {
 `route()` 中把 Task 6 预留的 case 补全（把 `if (req.method === ...)` 分支接到真处理器）。
 
 **Consumes-Produces:**
+
 - Consumes：Task 6 的 `meKindParam`/`meIdParam`；Task 2–4 的 `Store.addFavorite/removeFavorite/setTags`、`clearCache`。
 - Produces：`PUT|DELETE /api/me/favorites?kind=&id=`、`PUT /api/me/tags`（body `{kind,id,tags}`）、`DELETE /api/me/cache`；404/400 语义。
 
@@ -1489,6 +1522,7 @@ curl -i -s -X POST 'http://127.0.0.1:3001/api/me/cache' | head -1  # 405
 ### Task 8：posts/books 内容缓存与 `refresh=1`（~50 min）
 
 **Files:**
+
 - `apps/api/src/index.ts`（~，重写 `handlePosts`/`handleBooks` + 缓存辅助函数）
 
 **Interfaces**（追加到 `apps/api/src/index.ts`）：
@@ -1595,9 +1629,11 @@ async function handlePosts(url: URL): Promise<Response> {
     loadCachedReplies(tid, refresh),
   ])
 
-  const { title, content: bodyHtml, meta } = extractor.extractContent(
-    content.html
-  )
+  const {
+    title,
+    content: bodyHtml,
+    meta,
+  } = extractor.extractContent(content.html)
   const links = extractor.extractLinks(content.html)
 
   // cache hit / 刷新时以回复缓存重算评论数（extractContent 不回填 comments）
@@ -1648,9 +1684,11 @@ async function handleBooks(url: URL): Promise<Response> {
     return resp.text()
   })
 
-  const { title, content: bodyHtml, meta } = extractor.extractBookContent(
-    content.html
-  )
+  const {
+    title,
+    content: bodyHtml,
+    meta,
+  } = extractor.extractBookContent(content.html)
 
   store.recordVisit("book", cid, title, pageUrl)
 
@@ -1674,6 +1712,7 @@ async function handleBooks(url: URL): Promise<Response> {
 `apps/api/src/index.ts` 的 import 追加：`assertSafeId`、`readContentCache`、`writeContentCache`、`readRepliesCache`、`writeRepliesCache`。
 
 **Consumes-Produces:**
+
 - Consumes：Task 4 的缓存模块、Task 5 的 `fetchRepliesRaw`/`parseReplies`、Task 2 的 `recordVisit`。
 - Produces：`GET /api/posts?tid=` 与 `GET /api/books?cid=` 的缓存 + `refresh=1` 全语义（矩阵见规格第 156–164 行）；cache hit/refresh 响应 `no-store`。
 
@@ -1723,6 +1762,7 @@ curl -i -s 'http://127.0.0.1:3001/api/posts?tid=999999&refresh=1' | head -1
 > 前端无自动化测试设施，本任务及后续前端任务验证 = `bun run typecheck` + `bun run build:web` + 手工点击。
 
 **Files:**
+
 - `apps/web/src/lib/routes.ts`（~）
 - `apps/web/src/lib/format.ts`（~）
 - `apps/web/src/App.tsx`（~）
@@ -1805,7 +1845,7 @@ export function formatDateTime(ms: number): string {
 `site-header.tsx` 移动端抽屉：`grid grid-cols-3 gap-1.5 sm:grid-cols-4` → `flex gap-1.5 overflow-x-auto`，链接加 `shrink-0`。**桌面 nav（`lg:flex`，第 49 行）已有 `overflow-x-auto`，加 3 项后自然横向滚动，本任务无需改动桌面端**：
 
 ```tsx
-<nav className="border-border/60 mx-auto max-w-3xl border-t px-3 py-3 lg:hidden">
+<nav className="mx-auto max-w-3xl border-t border-border/60 px-3 py-3 lg:hidden">
   <div className="flex gap-1.5 overflow-x-auto pb-1">
     {NAV_ITEMS.map((item) => {
       const active = item.match(pathname)
@@ -1848,9 +1888,17 @@ export function IconBookOpen({ className, size }: IconProps) {
   )
 }
 
-export function IconStar({ className, size, filled }: IconProps & { filled?: boolean }) {
+export function IconStar({
+  className,
+  size,
+  filled,
+}: IconProps & { filled?: boolean }) {
   return (
-    <svg {...base(size)} className={className} fill={filled ? "currentColor" : "none"}>
+    <svg
+      {...base(size)}
+      className={className}
+      fill={filled ? "currentColor" : "none"}
+    >
       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
     </svg>
   )
@@ -1901,6 +1949,7 @@ export function ArticleView({
 ```
 
 **Consumes-Produces:**
+
 - Consumes：现有 `routes.ts`/`NAV_ITEMS`/`SiteHeader`/`ArticleView`/`icons.tsx`。
 - Produces：可编译的导航与路由底座；`meListQuery`/`tagsPath`/`formatDateTime`/四个图标/`actions` 插槽；三个占位页面。
 
@@ -1916,6 +1965,7 @@ export function ArticleView({
 ### Task 10：MeListPage + 历史页 + 收藏页（~45 min）
 
 **Files:**
+
 - `apps/web/src/components/tag-chips.tsx`（+）
 - `apps/web/src/components/me-item-card.tsx`（+）
 - `apps/web/src/components/me-list-page.tsx`（+）
@@ -1945,7 +1995,7 @@ export function TagChips({
         <Link
           key={tag}
           to={tagsPath({ tag })}
-          className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-1.5 py-0.5 text-[11px] leading-4 transition-colors"
+          className="rounded-md bg-muted/70 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           #{tag}
         </Link>
@@ -1991,10 +2041,13 @@ export function MeItemCard({
   const href = item.kind === "post" ? readPath(item.id) : bookPath(item.id)
   const time = item.last_visited_at ?? item.favorited_at
   return (
-    <div className="border-border/80 bg-card/80 hover:border-border group flex flex-col rounded-2xl border px-3.5 py-3.5 shadow-sm transition-all duration-200 sm:px-4 sm:py-4">
+    <div className="group flex flex-col rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
       <div className="flex items-center gap-3 sm:gap-3.5">
-        <Link to={href} className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5">
-          <span className="bg-muted text-muted-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+        <Link
+          to={href}
+          className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
             {item.kind === "post" ? (
               <IconFileText size={15} />
             ) : (
@@ -2002,17 +2055,17 @@ export function MeItemCard({
             )}
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-foreground line-clamp-2 text-[15px] leading-snug font-medium">
+            <span className="line-clamp-2 text-[15px] leading-snug font-medium text-foreground">
               {item.title}
             </span>
-            <span className="text-muted-foreground text-xs">
+            <span className="text-xs text-muted-foreground">
               {time != null && <>{formatDateTime(time)} · </>}
               {item.visit_count} 次访问
             </span>
           </span>
           <IconChevronRight
             size={16}
-            className="text-muted-foreground/30 group-hover:text-muted-foreground shrink-0 transition-colors"
+            className="shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground"
           />
         </Link>
         {trailing}
@@ -2147,11 +2200,11 @@ export function MeListPage({
           name="q"
           defaultValue={q}
           placeholder="搜索标题或标签…"
-          className="border-border bg-card text-foreground placeholder:text-muted-foreground/60 h-11 min-w-0 flex-1 rounded-xl border px-3.5 text-sm outline-none focus:border-sky-500/60"
+          className="h-11 min-w-0 flex-1 rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
         />
         <button
           type="submit"
-          className="bg-accent text-foreground h-11 shrink-0 rounded-xl px-4 text-sm font-medium"
+          className="h-11 shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-foreground"
         >
           搜索
         </button>
@@ -2229,9 +2282,7 @@ export default function HistoryPage() {
 
 ```tsx
 import { useCallback, useState } from "react"
-import {
-  MeListPage,
-} from "@/components/me-list-page"
+import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { api, meListQuery } from "@/lib/routes"
 
@@ -2259,7 +2310,7 @@ function UnfavoriteButton({
           setBusy(false)
         }
       }}
-      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+      className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
     >
       取消收藏
     </button>
@@ -2288,6 +2339,7 @@ export default function FavoritesPage() {
 ```
 
 **Consumes-Produces:**
+
 - Consumes：Task 9 的 `routes`/`api`/`meListQuery`/`formatDateTime`/图标/`PageShell`/`AsyncBody`/`Pager`/`PageHeader`/`PostList`。
 - Produces：可用的历史页与收藏页（搜索、类型筛选、分页、标签 chips、取消收藏）。
 
@@ -2301,9 +2353,10 @@ export default function FavoritesPage() {
 bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Store(openDatabase("./data")); s.recordVisit("post","1","测试贴","u1"); s.recordVisit("book","2","测试书","u2"); s.setTags("post","1",["科幻"]); s.addFavorite("post","1")'
 ```
 
-   - `/history`：两条记录，顺序正确，标签 chip 显示，点 chip 跳 `/tags?tag=科幻`（Task 11 前显示占位页）。
-   - 搜索「测试」/「科幻」过滤生效；类型 tabs 生效；翻页正常。
-   - `/favorites`：只有 post 1；「取消收藏」后列表刷新为空态。
+- `/history`：两条记录，顺序正确，标签 chip 显示，点 chip 跳 `/tags?tag=科幻`（Task 11 前显示占位页）。
+- 搜索「测试」/「科幻」过滤生效；类型 tabs 生效；翻页正常。
+- `/favorites`：只有 post 1；「取消收藏」后列表刷新为空态。
+
 4. 提交：`git add -A && git commit -m "feat(web): history/favorites pages (MeListPage shared list)"`
 
 ---
@@ -2311,6 +2364,7 @@ bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Sto
 ### Task 11：标签页 + 数据管理（~45 min）
 
 **Files:**
+
 - `apps/web/src/pages/TagsPage.tsx`（~，替换占位为完整实现）
 
 **Interfaces:**
@@ -2320,9 +2374,7 @@ bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Sto
 ```tsx
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import {
-  MeListPage,
-} from "@/components/me-list-page"
+import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
@@ -2373,17 +2425,21 @@ function TagListView() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="筛选标签…"
-        className="border-border bg-card text-foreground placeholder:text-muted-foreground/60 mb-4 h-11 w-full rounded-xl border px-3.5 text-sm outline-none focus:border-sky-500/60"
+        className="mb-4 h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
       />
 
       {loading && (
-        <p className="text-muted-foreground py-10 text-center text-sm">加载中…</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          加载中…
+        </p>
       )}
       {error && (
-        <p className="text-destructive py-10 text-center text-sm">{error}</p>
+        <p className="py-10 text-center text-sm text-destructive">{error}</p>
       )}
       {!loading && !error && filtered.length === 0 && (
-        <p className="text-muted-foreground py-10 text-center text-sm">暂无标签</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          暂无标签
+        </p>
       )}
 
       <div className="flex flex-col gap-1.5">
@@ -2391,12 +2447,12 @@ function TagListView() {
           <Link
             key={t.tag}
             to={tagsPath({ tag: t.tag })}
-            className="border-border/80 bg-card/80 hover:border-border hover:bg-accent/50 flex items-center justify-between rounded-2xl border px-4 py-3 transition-colors"
+            className="flex items-center justify-between rounded-2xl border border-border/80 bg-card/80 px-4 py-3 transition-colors hover:border-border hover:bg-accent/50"
           >
-            <span className="text-foreground text-[15px] font-medium">
+            <span className="text-[15px] font-medium text-foreground">
               #{t.tag}
             </span>
-            <span className="bg-muted text-muted-foreground rounded-md px-2 py-0.5 text-xs tabular-nums">
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground tabular-nums">
               {t.count} 项
             </span>
           </Link>
@@ -2447,9 +2503,9 @@ function DataManagement() {
   }
 
   return (
-    <section className="border-border mt-12 rounded-2xl border p-4 sm:p-5">
-      <h2 className="text-foreground mb-1 text-sm font-semibold">数据管理</h2>
-      <p className="text-muted-foreground mb-3 text-xs">
+    <section className="mt-12 rounded-2xl border border-border p-4 sm:p-5">
+      <h2 className="mb-1 text-sm font-semibold text-foreground">数据管理</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
         清空正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。
       </p>
       {confirming ? (
@@ -2458,7 +2514,7 @@ function DataManagement() {
             type="button"
             onClick={() => void clearCache()}
             disabled={busy}
-            className="bg-destructive text-white rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            className="rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
             确认清空
           </button>
@@ -2466,7 +2522,7 @@ function DataManagement() {
             type="button"
             onClick={() => setConfirming(false)}
             disabled={busy}
-            className="bg-muted text-muted-foreground rounded-lg px-3 py-1.5 text-xs font-medium"
+            className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground"
           >
             取消
           </button>
@@ -2475,12 +2531,12 @@ function DataManagement() {
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="bg-muted/70 text-muted-foreground hover:bg-muted rounded-lg px-3 py-1.5 text-xs font-medium"
+          className="rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
         >
           清空缓存
         </button>
       )}
-      {result && <p className="text-muted-foreground mt-2 text-xs">{result}</p>}
+      {result && <p className="mt-2 text-xs text-muted-foreground">{result}</p>}
     </section>
   )
 }
@@ -2496,6 +2552,7 @@ export default function TagsPage() {
 > 注：`useCallback` 在完整文件中未使用可移除；`TagItemsView` 每次渲染新建 `buildUrl` 闭包，`MeListPage` 以 `useMemo` 依赖 `buildUrl`，tag 变化时 URL 同步变化，符合预期。
 
 **Consumes-Produces:**
+
 - Consumes：Task 10 的 `MeListPage`/`MeListItem`、Task 9 的 `api.meTags/meItems/meCache`/`tagsPath`/`meListQuery`。
 - Produces：标签计数列表（数量倒序，客户端搜索）、`?tag=` 对象筛选页（可继续搜索/类型筛选/分页）、「数据管理」清空缓存（DELETE + 二次确认 + 结果提示）。
 
@@ -2509,10 +2566,11 @@ export default function TagsPage() {
 bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Store(openDatabase("./data")); s.recordVisit("post","1","测试贴","u1"); s.recordVisit("post","3","另一篇","u3"); s.setTags("post","1",["科幻","长篇"]); s.setTags("post","3",["科幻"])'
 ```
 
-   - `/tags`：`#科幻 2 项`、`#长篇 1 项`（数量倒序）；输入「科」过滤。
-   - 点 `#科幻` → `/tags?tag=科幻`：两条对象，标题/时间/访问次数正常；搜索「测试」剩 1 条；类型 tabs 生效。
-   - 全局：任何页面标签 chip 点击均跳转 `/tags?tag=xxx`。
-   - 先抓一篇正文产生缓存文件，再在标签页底部「数据管理」清空 → 显示「已清除 N 个缓存文件」；`ls data/cache` 为空。
+- `/tags`：`#科幻 2 项`、`#长篇 1 项`（数量倒序）；输入「科」过滤。
+- 点 `#科幻` → `/tags?tag=科幻`：两条对象，标题/时间/访问次数正常；搜索「测试」剩 1 条；类型 tabs 生效。
+- 全局：任何页面标签 chip 点击均跳转 `/tags?tag=xxx`。
+- 先抓一篇正文产生缓存文件，再在标签页底部「数据管理」清空 → 显示「已清除 N 个缓存文件」；`ls data/cache` 为空。
+
 4. 提交：`git add -A && git commit -m "feat(web): tags page (list/filter/data management)"`
 
 ---
@@ -2520,6 +2578,7 @@ bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Sto
 ### Task 12：正文/书库页操作行（收藏/标签编辑/刷新）（~50 min）
 
 **Files:**
+
 - `apps/web/src/components/item-actions.tsx`（+）
 - `apps/web/src/pages/ReadPage.tsx`（~）
 - `apps/web/src/pages/BookPage.tsx`（~）
@@ -2627,7 +2686,7 @@ export function ItemActions({
         type="button"
         onClick={onRefresh}
         disabled={refreshing}
-        className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       >
         <IconRefreshCw
           size={13}
@@ -2678,13 +2737,13 @@ function TagEditor({
             if (e.key === "Escape") setEditing(false)
           }}
           placeholder="多个标签用逗号分隔"
-          className="border-border bg-card text-foreground placeholder:text-muted-foreground/60 h-8 w-52 rounded-lg border px-2.5 text-xs outline-none focus:border-sky-500/60"
+          className="h-8 w-52 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={busy}
-          className="bg-accent text-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium disabled:opacity-50"
+          className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
         >
           保存
         </button>
@@ -2692,7 +2751,7 @@ function TagEditor({
           type="button"
           onClick={() => setEditing(false)}
           disabled={busy}
-          className="bg-muted/70 text-muted-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium"
+          className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground"
         >
           取消
         </button>
@@ -2706,7 +2765,7 @@ function TagEditor({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors"
+        className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         编辑标签
       </button>
@@ -2771,6 +2830,7 @@ actions={
 `BookPage.tsx`：同样改造（`kind="book"`、无 replies、`api.books`），`ArticleView` 传 `actions`。
 
 **Consumes-Produces:**
+
 - Consumes：Task 9 的 `ArticleView.actions` 插槽、图标；Task 10 的 `TagChips`；`api.meState/meFavorites/meTags`。
 - Produces：正文/书库页标题下操作行（收藏切换、标签编辑整体替换、刷新 + 旋转图标 + stale 提示条）；打开页面自动回填状态。
 
@@ -2784,11 +2844,12 @@ actions={
 bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Store(openDatabase("./data")); s.recordVisit("post","1","测试贴","u1")'
 ```
 
-   - `/read/1`：操作行出现；点「收藏」变「已收藏」（星星填充），刷新页面仍保持；点「已收藏」取消。
-   - 「编辑标签」输入 `科幻, 长篇` 回车 → chips 更新为 `#科幻 #长篇`；点 chip 跳 `/tags?tag=科幻`。
-   - 「刷新」：正常时图标旋转后内容更新、无提示；断网/无代理时出现「刷新失败，当前展示的是缓存内容」且内容为旧缓存；`stale` 响应体带 `stale:true`。
-   - 打开正文后 `/api/me/history` 出现该贴且 visit_count 递增。
-   - `/book/1` 同样验证（无回复）。
+- `/read/1`：操作行出现；点「收藏」变「已收藏」（星星填充），刷新页面仍保持；点「已收藏」取消。
+- 「编辑标签」输入 `科幻, 长篇` 回车 → chips 更新为 `#科幻 #长篇`；点 chip 跳 `/tags?tag=科幻`。
+- 「刷新」：正常时图标旋转后内容更新、无提示；断网/无代理时出现「刷新失败，当前展示的是缓存内容」且内容为旧缓存；`stale` 响应体带 `stale:true`。
+- 打开正文后 `/api/me/history` 出现该贴且 visit_count 递增。
+- `/book/1` 同样验证（无回复）。
+
 4. 提交：`git add -A && git commit -m "feat(web): read/book page action row (favorite/tags/refresh)"`
 
 ---
@@ -2796,6 +2857,7 @@ bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Sto
 ### Task 13：部署与文档（~20 min）
 
 **Files:**
+
 - `Dockerfile`（~）
 - `.gitignore`（~）
 - `README.md`（~）
@@ -2804,6 +2866,7 @@ bun -e 'import { openDatabase, Store } from "@workspace/core"; const s = new Sto
 **Interfaces:**
 
 `Dockerfile`（两处，均针对 runner 阶段）：
+
 - `ENV DATA_DIR=/data` 并入现有 ENV 块（第 52–55 行，`NODE_ENV`/`PORT`/`HOSTNAME`/`WEB_DIST` 之后）；
 - `RUN mkdir -p /data && chown -R bun:bun /data` 放在 `USER bun` 前一行（第 64–65 行 `EXPOSE 3000` → `USER bun` 之间）：
 
@@ -2820,6 +2883,7 @@ data/
 ```
 
 `README.md`：
+
 - 环境变量表新增 `DATA_DIR | ./data | SQLite 库与内容缓存目录`。
 - API 表新增 `/api/me/*` 各端点行与 `refresh=1` 说明。
 - 部署小节记录挂载：`docker run -p 3000:3000 -v purifier-data:/data purifier:latest`。
@@ -2827,6 +2891,7 @@ data/
 `AGENTS.md`：同步环境变量表（`DATA_DIR`）、API 约定表（`/api/me/*`、`refresh=1`）、验证命令（`bun run test`）。
 
 **Consumes-Produces:**
+
 - Consumes：既有 Dockerfile（runner 阶段）/README/AGENTS.md。
 - Produces：容器内数据持久化到 `/data` 卷；开发时 `data/` 不入库；文档与仓库约定同步。
 
@@ -2850,27 +2915,27 @@ docker rm -f purifier-test && docker volume rm purifier-data
 
 ## 验收清单（Self-Review 对照）
 
-| # | 规格要求 | 落点 |
-| --- | --- | --- |
-| 1 | 三张表 + 三个索引，DDL 与规格一致 | Task 1 `db.ts` |
-| 2 | 历史全量保留、最近访问倒序、可搜索 | Task 2/3/6 |
-| 3 | 收藏单一列表、可搜索、对象不存在 404 | Task 2/3/7 |
-| 4 | 标签整体替换、normalize（trim/折叠/24 码点/去重）、精确筛选 | Task 2/3/7/11 |
-| 5 | 列表 `{ items, nextPage? }`，pageSize=20，page 从 1 | Task 3 |
-| 6 | `tags`/`favorited` 单次 SQL 聚合，无 N+1 | Task 3 `runList`+`tagsFor` |
-| 7 | 缓存文件名 `post-<tid>.html`/`book-<cid>.html`/`replies-<tid>.json` | Task 4 |
-| 8 | ID 安全校验 `/^[A-Za-z0-9]+$/` → 400 | Task 4 `assertSafeId` |
-| 9 | 回复缓存成功才写；空回复写 `[]`；正文/回复独立命中 | Task 4/5/8 |
-| 10 | `refresh=1` 部分失败矩阵与 `stale`/`refreshError` | Task 8 |
-| 11 | 缓存命中/刷新/`/api/me/*` 响应 `no-store`；首抓保留 CONTENT 头 | Task 6/7/8 |
-| 12 | cache hit 时 `meta.comments` 由回复缓存重算 | Task 8 |
-| 13 | 成功访问 upsert（title 覆盖、visit_count+1、first_seen 保留） | Task 2/8 |
-| 14 | 路由 `(method, pathname)` 分发；SPA 早返回不变 | Task 6 |
-| 15 | 清空缓存 `DELETE /api/me/cache` → `{ cleared: n }` | Task 4/7/11 |
-| 16 | 前端三导航入口（移动端横向滚动）+ 三页面 + 标签 chips 全局可点 | Task 9/10/11 |
-| 17 | 正文/书库页操作行（收藏切换/标签编辑/刷新） | Task 12 |
-| 18 | Docker `DATA_DIR=/data` + mkdir/chown；README 挂载；`.gitignore data/` | Task 13 |
-| 19 | `bun run test` / `typecheck` / `build` 全绿 | 各任务验证步骤 |
+| #   | 规格要求                                                               | 落点                       |
+| --- | ---------------------------------------------------------------------- | -------------------------- |
+| 1   | 三张表 + 三个索引，DDL 与规格一致                                      | Task 1 `db.ts`             |
+| 2   | 历史全量保留、最近访问倒序、可搜索                                     | Task 2/3/6                 |
+| 3   | 收藏单一列表、可搜索、对象不存在 404                                   | Task 2/3/7                 |
+| 4   | 标签整体替换、normalize（trim/折叠/24 码点/去重）、精确筛选            | Task 2/3/7/11              |
+| 5   | 列表 `{ items, nextPage? }`，pageSize=20，page 从 1                    | Task 3                     |
+| 6   | `tags`/`favorited` 单次 SQL 聚合，无 N+1                               | Task 3 `runList`+`tagsFor` |
+| 7   | 缓存文件名 `post-<tid>.html`/`book-<cid>.html`/`replies-<tid>.json`    | Task 4                     |
+| 8   | ID 安全校验 `/^[A-Za-z0-9]+$/` → 400                                   | Task 4 `assertSafeId`      |
+| 9   | 回复缓存成功才写；空回复写 `[]`；正文/回复独立命中                     | Task 4/5/8                 |
+| 10  | `refresh=1` 部分失败矩阵与 `stale`/`refreshError`                      | Task 8                     |
+| 11  | 缓存命中/刷新/`/api/me/*` 响应 `no-store`；首抓保留 CONTENT 头         | Task 6/7/8                 |
+| 12  | cache hit 时 `meta.comments` 由回复缓存重算                            | Task 8                     |
+| 13  | 成功访问 upsert（title 覆盖、visit_count+1、first_seen 保留）          | Task 2/8                   |
+| 14  | 路由 `(method, pathname)` 分发；SPA 早返回不变                         | Task 6                     |
+| 15  | 清空缓存 `DELETE /api/me/cache` → `{ cleared: n }`                     | Task 4/7/11                |
+| 16  | 前端三导航入口（移动端横向滚动）+ 三页面 + 标签 chips 全局可点         | Task 9/10/11               |
+| 17  | 正文/书库页操作行（收藏切换/标签编辑/刷新）                            | Task 12                    |
+| 18  | Docker `DATA_DIR=/data` + mkdir/chown；README 挂载；`.gitignore data/` | Task 13                    |
+| 19  | `bun run test` / `typecheck` / `build` 全绿                            | 各任务验证步骤             |
 
 ## 评审修订记录
 
@@ -2889,4 +2954,3 @@ docker rm -f purifier-test && docker volume rm purifier-data
 - **P2-12**（Task 13）：明确 `ENV DATA_DIR=/data` 并入现有 ENV 块，`RUN mkdir/chown` 放 `USER bun` 前一行。
 - **P2-13**（Task 11）：`DataManagement` 仅渲染于标签列表页底部为有意为之，加注释确认。
 - P2-9（`assertSafeId` 错误消息）维持现状，评审判定可接受。
-

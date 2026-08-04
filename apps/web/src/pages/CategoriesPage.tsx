@@ -1,8 +1,4 @@
-
-import {
-  CategoryGrid,
-  type CategoryItem,
-} from "@/components/category-grid"
+import { CategoryGrid, type CategoryItem } from "@/components/category-grid"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"

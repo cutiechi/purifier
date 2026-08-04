@@ -17,11 +17,13 @@ export interface PickSection {
 
 /** 清理分组名装饰括号 */
 export function cleanSectionTitle(title: string): string {
-  return title
-    .replace(/^[【\[]\s*/, "")
-    .replace(/\s*[】\]]$/, "")
-    .replace(/^[★\s]+/, "")
-    .trim() || title
+  return (
+    title
+      .replace(/^[【\[]\s*/, "")
+      .replace(/\s*[】\]]$/, "")
+      .replace(/^[★\s]+/, "")
+      .trim() || title
+  )
 }
 
 /** 短标签：年份、序号、极短文案 → 用芯片而不是整行卡片 */
@@ -59,7 +61,7 @@ function ChipLink({
       className={cn(
         "border-border/80 bg-card hover:border-border hover:bg-accent/50",
         "inline-flex min-h-10 items-center justify-center rounded-xl border px-3.5 py-2",
-        "text-foreground text-sm font-medium transition-all active:scale-[0.98]",
+        "text-sm font-medium text-foreground transition-all active:scale-[0.98]",
         "shadow-sm"
       )}
     >
@@ -79,7 +81,7 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
           <section key={section.title}>
             <SectionLabel
               action={
-                <span className="text-muted-foreground text-xs tabular-nums">
+                <span className="text-xs text-muted-foreground tabular-nums">
                   {section.links.length}
                 </span>
               }

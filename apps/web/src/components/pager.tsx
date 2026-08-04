@@ -19,10 +19,7 @@ export function Pager({
 }) {
   return (
     <div
-      className={cn(
-        "mt-8 flex items-center justify-between gap-3",
-        className
-      )}
+      className={cn("mt-8 flex items-center justify-between gap-3", className)}
     >
       <PagerButton
         onClick={onPrev}
@@ -30,7 +27,7 @@ export function Pager({
         label="上一页"
         icon={<IconChevronLeft size={16} />}
       />
-      <span className="text-muted-foreground text-sm tabular-nums">
+      <span className="text-sm text-muted-foreground tabular-nums">
         第 {page} 页
       </span>
       <PagerButton
@@ -62,7 +59,7 @@ function PagerButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="border-border bg-card text-foreground hover:bg-accent inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
     >
       {!iconRight && icon}
       <span className="hidden sm:inline">{label}</span>

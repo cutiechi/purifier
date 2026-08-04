@@ -22,13 +22,13 @@ export function ErrorBox({
   onRetry?: () => void
 }) {
   return (
-    <div className="border-destructive/25 bg-destructive/8 text-destructive mb-5 rounded-2xl border px-4 py-3.5 text-sm sm:px-5 sm:py-4">
+    <div className="mb-5 rounded-2xl border border-destructive/25 bg-destructive/8 px-4 py-3.5 text-sm text-destructive sm:px-5 sm:py-4">
       <p className="leading-relaxed">{message}</p>
       {onRetry && (
         <button
           type="button"
           onClick={onRetry}
-          className="bg-destructive/12 hover:bg-destructive/20 mt-3 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          className="mt-3 rounded-lg bg-destructive/12 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-destructive/20"
         >
           重试
         </button>
@@ -39,7 +39,7 @@ export function ErrorBox({
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="text-muted-foreground flex flex-col items-center justify-center gap-2 py-16 text-center text-sm">
+    <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-sm text-muted-foreground">
       {children}
     </div>
   )

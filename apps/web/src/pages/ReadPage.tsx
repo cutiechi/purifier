@@ -1,10 +1,6 @@
-
 import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
-import {
-  ArticleView,
-  RelatedLinks,
-} from "@/components/article-view"
+import { ArticleView, RelatedLinks } from "@/components/article-view"
 import { ItemActions } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { type PostMetaFields } from "@/components/post-meta"
@@ -45,9 +41,7 @@ export default function ReadPage() {
           return
         }
         setContent(json)
-        setRefreshNotice(
-          json.stale ? "刷新失败，当前展示的是缓存内容" : ""
-        )
+        setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
       } finally {
@@ -74,7 +68,7 @@ export default function ReadPage() {
         {content && (
           <>
             {refreshNotice && (
-              <div className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 mb-4 rounded-2xl border px-4 py-2.5 text-sm">
+              <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
                 {refreshNotice}
               </div>
             )}

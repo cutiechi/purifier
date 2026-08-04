@@ -23,6 +23,7 @@ Purifier 是一个 Cool18 净化阅读应用，Bun workspace 单仓，Turbo 编�
 | `bun run typecheck` | Turbo 全仓类型检查                       |
 | `bun run build`     | Turbo 全仓构建                           |
 | `bun run build:web` | 只构建前端                               |
+| `bun run test`      | 运行测试（`turbo test` → `bun test`）    |
 | `bun run start`     | 生产模式运行 API（可托管 `WEB_DIST`）    |
 | `bun run format`    | Prettier 格式化                          |
 
@@ -36,6 +37,7 @@ apps/web/src/pages/                   # 页面级组件
 apps/web/src/components/              # 共享 UI 组件
 packages/core/src/extractor/extractor.ts  # Cool18Extractor
 packages/core/src/extractor/types.ts      # Extractor 接口与数据模型
+packages/core/src/storage/                # SQLite（历史/收藏/标签）与磁盘内容缓存
 packages/core/src/upstream.ts             # 代理请求、超时、缓存头
 packages/typescript-config/               # base / react-library 配置
 ```
@@ -50,22 +52,29 @@ packages/typescript-config/               # base / react-library 配置
 - 页面组件放在 `pages/`，可复用 UI 放在 `components/`；路由常量集中在 `lib/routes.ts`。
 - 上游解析统一走 `packages/core` 的 `Extractor` 接口，不要在 API 或前端直接解析 HTML。
 - 正文安全清洗在 `Cool18Extractor.extractPreHtml`：剥标签、转义文本，只保留 `/read/:tid` 与 `/book/:cid` 站内链接。
-- 仓库目前没有自动化测试；改动后用 `bun run typecheck` 和 `bun run build` 验证。
+- 测试位于 `packages/core`（`bun test`，经根目录 `bun run test` 触发）；改动后用 `bun run test`、`bun run typecheck` 和 `bun run build` 验证。
 
 ## API 约定
 
-| 路径                  | 参数                  | 行为                                              |
-| --------------------- | --------------------- | ------------------------------------------------- |
-| `GET /api/health`     | 无                    | `{ status: "ok", runtime: "bun" }`                |
-| `GET /api/posts`      | `tid`                 | 帖子正文 + 章节链接 + 元信息 + 跟帖树             |
-| `GET /api/posts`      | `mtid`                | 首页分页列表 `{ links, nextMtid }`                |
-| `GET /api/books`      | `cid`                 | 书库内容 `{ title, content, meta, url }`          |
-| `GET /api/browse`     | `type` 或 `q`，`page` | 分类 / 关键词列表 `{ category, links, nextPage }` |
-| `GET /api/categories` | 无                    | `{ links: CategoryLink[] }`                       |
-| `GET /api/featured`   | 无                    | `{ links }` 精华热贴                              |
-| `GET /api/picks`      | 无                    | `{ sections }` 扫文推荐分组                       |
-| `GET /api/comments`   | 无                    | `{ posts }` 评论榜                                |
-| `GET /api/trending`   | 无                    | `{ posts }` 人气榜                                |
+| 路径                    | 参数                       | 行为                                                    |
+| ----------------------- | -------------------------- | ------------------------------------------------------- |
+| `GET /api/health`       | 无                         | `{ status: "ok", runtime: "bun" }`                      |
+| `GET /api/posts`        | `tid`                      | 帖子正文 + 章节链接 + 元信息 + 跟帖树                   |
+| `GET /api/posts`        | `mtid`                     | 首页分页列表 `{ links, nextMtid }`                      |
+| `GET /api/books`        | `cid`                      | 书库内容 `{ title, content, meta, url }`                |
+| `GET /api/browse`       | `type` 或 `q`，`page`      | 分类 / 关键词列表 `{ category, links, nextPage }`       |
+| `GET /api/categories`   | 无                         | `{ links: CategoryLink[] }`                             |
+| `GET /api/featured`     | 无                         | `{ links }` 精华热贴                                    |
+| `GET /api/picks`        | 无                         | `{ sections }` 扫文推荐分组                             |
+| `GET /api/comments`     | 无                         | `{ posts }` 评论榜                                      |
+| `GET /api/trending`     | 无                         | `{ posts }` 人气榜                                      |
+| `GET /api/me/history`   | `q`、`kind`、`page`        | 阅读历史 `{ items, nextPage? }`                         |
+| `GET /api/me/favorites` | `q`、`kind`、`page`        | 收藏列表；`PUT`/`DELETE` 加/取消收藏（带 `kind`、`id`） |
+| `GET /api/me/tags`      | 无                         | `{ tags: TagCount[] }` 全部标签及计数                   |
+| `PUT /api/me/tags`      | body `{ kind, id, tags }`  | 整体替换标签 `{ ok, tags }`；对象不存在 404             |
+| `GET /api/me/items`     | `tag`、`q`、`kind`、`page` | 按标签精确筛选 `{ items, nextPage? }`                   |
+| `GET /api/me/state`     | `kind`、`id`               | 条目收藏/标签/访问状态；无记录返回 200 空状态           |
+| `DELETE /api/me/cache`  | 无                         | 清空内容缓存 `{ cleared: n }`                           |
 
 错误处理：
 
@@ -77,26 +86,31 @@ packages/typescript-config/               # base / react-library 配置
 
 列表响应使用 `LIST_CACHE_HEADERS`（`s-maxage=60`），正文响应使用 `CONTENT_CACHE_HEADERS`（`s-maxage=300`）。
 
+`GET /api/posts` / `GET /api/books` 带 `refresh=1` 时跳过缓存强制抓上游：成功覆盖缓存，失败回退旧缓存并附 `stale`/`refreshError`，无旧缓存则抛错。缓存命中、刷新与全部 `/api/me/*` 响应使用 `NO_STORE_HEADERS`（`no-store`）。
+
 ## 环境变量
 
-| 变量                         | 默认值                  | 说明                               |
-| ---------------------------- | ----------------------- | ---------------------------------- |
-| `PORT`                       | `3001`                  | API 端口；Docker 内为 `3000`       |
-| `HOSTNAME`                   | `0.0.0.0`               | 监听地址                           |
-| `WEB_DIST`                   | `apps/web/dist`         | SPA 静态目录；存在时才托管         |
-| `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy` |
-| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                  |
+| 变量                         | 默认值                  | 说明                                         |
+| ---------------------------- | ----------------------- | -------------------------------------------- |
+| `PORT`                       | `3001`                  | API 端口；Docker 内为 `3000`                 |
+| `HOSTNAME`                   | `0.0.0.0`               | 监听地址                                     |
+| `WEB_DIST`                   | `apps/web/dist`         | SPA 静态目录；存在时才托管                   |
+| `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data` |
+| `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy`           |
+| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                            |
 
 ## 常见改动路径
 
 - 新增前端页面：在 `apps/web/src/App.tsx` 注册路由，必要时在 `routes.ts` 添加导航项和 API 常量，页面放到 `apps/web/src/pages/`。
 - 新增 API：在 `apps/api/src/index.ts` 的 `route` 中加分支，内容抓取逻辑放入 `packages/core`。
+- 改动历史/收藏/标签或内容缓存：数据层在 `packages/core/src/storage/`（`db.ts` / `store.ts` / `cache.ts`），API 层在 `apps/api/src/index.ts` 的 `/api/me/*` 分支；测试在同目录 `*.test.ts`。
 - 新增上游站点：实现 `Extractor` 接口并在 `getExtractor` 注册；解析方法仍返回定义好的模型。
 - 调整正文清洗：只改 `Cool18Extractor.extractPreHtml`，并保持输出为清洗后 HTML。
 
 ## 验证
 
 ```bash
+bun run test
 bun run typecheck
 bun run build
 ```

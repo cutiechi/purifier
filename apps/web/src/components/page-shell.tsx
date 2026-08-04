@@ -15,7 +15,7 @@ export function PageShell({
   wide?: boolean
 }) {
   return (
-    <div className="bg-background relative min-h-svh">
+    <div className="relative min-h-svh bg-background">
       {/* soft ambient glow */}
       <div
         aria-hidden
@@ -35,11 +35,6 @@ export function PageShell({
   )
 }
 
-export {
-  Spinner,
-  ErrorBox,
-  EmptyState,
-  AsyncBody,
-} from "@/components/ui-state"
+export { Spinner, ErrorBox, EmptyState, AsyncBody } from "@/components/ui-state"
 export { PageHeader } from "@/components/page-header"
 export { Pager } from "@/components/pager"

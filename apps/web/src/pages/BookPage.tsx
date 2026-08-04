@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
@@ -38,9 +37,7 @@ export default function BookPage() {
           return
         }
         setBook(json)
-        setRefreshNotice(
-          json.stale ? "刷新失败，当前展示的是缓存内容" : ""
-        )
+        setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
       } finally {
@@ -67,7 +64,7 @@ export default function BookPage() {
         {book && (
           <>
             {refreshNotice && (
-              <div className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 mb-4 rounded-2xl border px-4 py-2.5 text-sm">
+              <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
                 {refreshNotice}
               </div>
             )}

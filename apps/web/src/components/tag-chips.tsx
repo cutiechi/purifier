@@ -16,7 +16,7 @@ export function TagChips({
         <Link
           key={tag}
           to={tagsPath({ tag })}
-          className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-1.5 py-0.5 text-[11px] leading-4 transition-colors"
+          className="rounded-md bg-muted/70 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           #{tag}
         </Link>

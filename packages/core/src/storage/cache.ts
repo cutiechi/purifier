@@ -1,4 +1,11 @@
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises"
 import { join } from "node:path"
 import { ExtractorError } from "../extractor/types"
 import { ItemKind } from "./types"
@@ -18,7 +25,11 @@ export interface CacheEntry<T> {
   sizeBytes: number
 }
 
-export function contentCachePath(dataDir: string, kind: ItemKind, id: string): string {
+export function contentCachePath(
+  dataDir: string,
+  kind: ItemKind,
+  id: string
+): string {
   assertSafeId(id)
   return join(dataDir, "cache", `${kind}-${id}.html`)
 }
@@ -62,7 +73,11 @@ export async function readRepliesCache(
   const path = repliesCachePath(dataDir, id)
   try {
     const [raw, info] = await Promise.all([readFile(path, "utf8"), stat(path)])
-    return { data: JSON.parse(raw), mtimeMs: info.mtimeMs, sizeBytes: info.size }
+    return {
+      data: JSON.parse(raw),
+      mtimeMs: info.mtimeMs,
+      sizeBytes: info.size,
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null
     throw err
@@ -75,7 +90,11 @@ export async function writeRepliesCache(
   replies: unknown
 ): Promise<void> {
   await mkdir(join(dataDir, "cache"), { recursive: true })
-  await writeFile(repliesCachePath(dataDir, id), JSON.stringify(replies), "utf8")
+  await writeFile(
+    repliesCachePath(dataDir, id),
+    JSON.stringify(replies),
+    "utf8"
+  )
 }
 
 /** 清空 cache/ 目录下全部文件；返回删除数量；目录不存在返回 0 */

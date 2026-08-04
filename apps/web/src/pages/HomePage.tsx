@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
@@ -143,14 +142,14 @@ export default function HomePage() {
 
         {loadMoreError && (
           <div className="py-6 text-center">
-            <p className="text-destructive mb-3 text-sm">{loadMoreError}</p>
+            <p className="mb-3 text-sm text-destructive">{loadMoreError}</p>
             <button
               type="button"
               onClick={() => {
                 setLoadMoreError("")
                 loadMore()
               }}
-              className="border-border bg-card text-foreground hover:bg-accent rounded-xl border px-4 py-2 text-sm font-medium"
+              className="rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
             >
               加载更多 · 重试
             </button>
@@ -158,7 +157,7 @@ export default function HomePage() {
         )}
 
         {noMore && (
-          <p className="text-muted-foreground py-10 text-center text-sm">
+          <p className="py-10 text-center text-sm text-muted-foreground">
             已经到底了
           </p>
         )}

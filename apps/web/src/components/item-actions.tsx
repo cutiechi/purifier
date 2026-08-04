@@ -96,7 +96,7 @@ export function ItemActions({
         type="button"
         onClick={onRefresh}
         disabled={refreshing}
-        className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       >
         <IconRefreshCw
           size={13}
@@ -147,13 +147,13 @@ function TagEditor({
             if (e.key === "Escape") setEditing(false)
           }}
           placeholder="多个标签用逗号分隔"
-          className="border-border bg-card text-foreground placeholder:text-muted-foreground/60 h-8 w-52 rounded-lg border px-2.5 text-xs outline-none focus:border-sky-500/60"
+          className="h-8 w-52 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={busy}
-          className="bg-accent text-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium disabled:opacity-50"
+          className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
         >
           保存
         </button>
@@ -161,7 +161,7 @@ function TagEditor({
           type="button"
           onClick={() => setEditing(false)}
           disabled={busy}
-          className="bg-muted/70 text-muted-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium"
+          className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground"
         >
           取消
         </button>
@@ -175,7 +175,7 @@ function TagEditor({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors"
+        className="rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         编辑标签
       </button>

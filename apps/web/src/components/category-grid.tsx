@@ -31,14 +31,12 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
               )}
             >
               <div className="min-w-0">
-                <div className="text-foreground text-[15px] font-semibold tracking-tight sm:text-base">
+                <div className="text-[15px] font-semibold tracking-tight text-foreground sm:text-base">
                   {item.label}
                 </div>
-                <p className="text-muted-foreground mt-0.5 text-xs">
-                  栏目精选
-                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">栏目精选</p>
               </div>
-              <span className="text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 transition-colors">
+              <span className="shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground">
                 →
               </span>
             </Link>
@@ -48,7 +46,7 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
 
       {types.length > 0 && (
         <section>
-          <h2 className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide">
+          <h2 className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground">
             题材
           </h2>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-2.5 md:grid-cols-4">
@@ -59,7 +57,7 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
                 className={cn(
                   "border-border/70 bg-card/90 hover:border-border hover:bg-accent/50",
                   "flex h-11 items-center justify-center rounded-xl border px-2 text-center",
-                  "text-foreground text-[13px] font-medium transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
+                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
                 )}
               >
                 {item.label}
@@ -71,7 +69,7 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
 
       {others.length > 0 && (
         <section>
-          <h2 className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide">
+          <h2 className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground">
             其它
           </h2>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-2.5">
@@ -82,7 +80,7 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
                 className={cn(
                   "border-border/70 bg-card/90 hover:border-border hover:bg-accent/50",
                   "flex h-11 items-center justify-center rounded-xl border px-2 text-center",
-                  "text-foreground text-[13px] font-medium transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
+                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
                 )}
               >
                 {item.label}

@@ -1,7 +1,5 @@
 import { useCallback, useState } from "react"
-import {
-  MeListPage,
-} from "@/components/me-list-page"
+import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { api, meListQuery } from "@/lib/routes"
 
@@ -29,7 +27,7 @@ function UnfavoriteButton({
           setBusy(false)
         }
       }}
-      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+      className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
     >
       取消收藏
     </button>

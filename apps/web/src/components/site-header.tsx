@@ -1,4 +1,3 @@
-
 import { Link } from "react-router-dom"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useEffect, useState } from "react"
@@ -25,13 +24,13 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
   }, [menuKey])
 
   return (
-    <header className="border-border/60 bg-background/75 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 border-b backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-border/60 bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-3xl items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5 lg:max-w-4xl">
         {showBack ? (
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors"
+            className="flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label="返回"
           >
             <IconChevronLeft size={18} />
@@ -40,7 +39,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
         <Link
           to={routes.home}
-          className="text-foreground inline-flex h-11 shrink-0 items-center px-1.5 text-[15px] font-semibold tracking-tight"
+          className="inline-flex h-11 shrink-0 items-center px-1.5 text-[15px] font-semibold tracking-tight text-foreground"
         >
           Purifier
         </Link>
@@ -69,7 +68,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
         <div className="ml-auto flex items-center gap-0.5">
           <Link
             to={routes.search}
-            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 items-center justify-center rounded-xl transition-colors lg:hidden"
+            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
             aria-label="搜索"
           >
             <IconSearch size={18} />
@@ -77,7 +76,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
           <ModeToggle />
           <button
             type="button"
-            className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 items-center justify-center rounded-xl transition-colors lg:hidden"
+            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
             aria-label={open ? "关闭菜单" : "打开菜单"}
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
@@ -89,7 +88,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
       {/* Mobile / tablet drawer */}
       {open && (
-        <nav className="border-border/60 mx-auto max-w-3xl border-t px-3 py-3 lg:hidden">
+        <nav className="mx-auto max-w-3xl border-t border-border/60 px-3 py-3 lg:hidden">
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {NAV_ITEMS.map((item) => {
               const active = item.match(pathname)

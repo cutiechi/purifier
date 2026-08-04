@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react"
 import { useTheme } from "next-themes"
 import { IconMoon, IconSun } from "@/components/icons"
@@ -15,7 +14,7 @@ export function ModeToggle() {
     <button
       type="button"
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-      className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-11 items-center justify-center rounded-xl transition-colors"
+      className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       aria-label="切换主题"
     >
       {mounted && resolvedTheme === "dark" ? (

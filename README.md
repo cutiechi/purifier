@@ -61,31 +61,44 @@ docker run -p 3000:3000 -e HTTPS_PROXY=http://host:7890 purifier:latest
 
 如果部署环境无法直连上游 cool18，需要设置 `HTTPS_PROXY` / `HTTP_PROXY`。
 
+历史、收藏、标签与内容缓存持久化在容器内 `/data`（`DATA_DIR`），用卷挂载保存：
+
+```bash
+docker run -p 3000:3000 -v purifier-data:/data purifier:latest
+```
+
 ## 环境变量
 
-| 变量                         | 默认值                     | 说明                        |
-| ---------------------------- | -------------------------- | --------------------------- |
-| `PORT`                       | `3001`（Docker 内 `3000`） | API 监听端口                |
-| `HOSTNAME`                   | `0.0.0.0`                  | 监听地址                    |
-| `WEB_DIST`                   | `apps/web/dist`            | Vite 构建产物目录           |
-| `HTTPS_PROXY` / `HTTP_PROXY` | 无                         | 上游请求使用的代理          |
-| `API_PROXY`                  | `http://127.0.0.1:3001`    | Vite dev 的 `/api` 代理目标 |
+| 变量                         | 默认值                        | 说明                        |
+| ---------------------------- | ----------------------------- | --------------------------- |
+| `PORT`                       | `3001`（Docker 内 `3000`）    | API 监听端口                |
+| `HOSTNAME`                   | `0.0.0.0`                     | 监听地址                    |
+| `WEB_DIST`                   | `apps/web/dist`               | Vite 构建产物目录           |
+| `DATA_DIR`                   | `./data`（Docker 内 `/data`） | SQLite 库与内容缓存目录     |
+| `HTTPS_PROXY` / `HTTP_PROXY` | 无                            | 上游请求使用的代理          |
+| `API_PROXY`                  | `http://127.0.0.1:3001`       | Vite dev 的 `/api` 代理目标 |
 
 ## API
 
-| 路径                  | 参数                  | 说明                     |
-| --------------------- | --------------------- | ------------------------ |
-| `GET /api/health`     | 无                    | 健康检查                 |
-| `GET /api/posts`      | `tid` 或 `mtid`       | 帖子正文，或首页分页列表 |
-| `GET /api/books`      | `cid`                 | 书库内容                 |
-| `GET /api/browse`     | `type` 或 `q`，`page` | 分类 / 关键词列表        |
-| `GET /api/categories` | 无                    | 分类入口                 |
-| `GET /api/featured`   | 无                    | 首页精华热贴             |
-| `GET /api/picks`      | 无                    | 扫文推荐分组             |
-| `GET /api/comments`   | 无                    | 评论榜                   |
-| `GET /api/trending`   | 无                    | 人气榜                   |
+| 路径                    | 参数                  | 说明                                  |
+| ----------------------- | --------------------- | ------------------------------------- |
+| `GET /api/health`       | 无                    | 健康检查                              |
+| `GET /api/posts`        | `tid` 或 `mtid`       | 帖子正文，或首页分页列表              |
+| `GET /api/books`        | `cid`                 | 书库内容                              |
+| `GET /api/browse`       | `type` 或 `q`，`page` | 分类 / 关键词列表                     |
+| `GET /api/categories`   | 无                    | 分类入口                              |
+| `GET /api/featured`     | 无                    | 首页精华热贴                          |
+| `GET /api/picks`        | 无                    | 扫文推荐分组                          |
+| `GET /api/comments`     | 无                    | 评论榜                                |
+| `GET /api/trending`     | 无                    | 人气榜                                |
+| `GET /api/me/history`   | `q`、`kind`、`page`   | 阅读历史 `{ items, nextPage? }`       |
+| `GET /api/me/favorites` | `q`、`kind`、`page`   | 收藏列表；`PUT` / `DELETE` 收藏或取消 |
+| `GET /api/me/tags`      | 无                    | 标签及计数；`PUT` 整体替换标签        |
+| `GET /api/me/items`     | `tag`、`q`、`page`    | 按标签精确筛选条目                    |
+| `GET /api/me/state`     | `kind`、`id`          | 条目收藏 / 标签 / 访问状态            |
+| `DELETE /api/me/cache`  | 无                    | 清空内容缓存 `{ cleared: n }`         |
 
-错误统一返回 `{ "error": "..." }`，并带对应的 HTTP 状态码。
+错误统一返回 `{ "error": "..." }`，并带对应的 HTTP 状态码。`GET /api/posts` 与 `GET /api/books` 带 `refresh=1` 时跳过缓存强制抓取上游：成功则覆盖缓存，失败则回退旧缓存并附 `refreshError`；缓存命中与刷新响应均为 `no-store`。
 
 ## 注意事项
 

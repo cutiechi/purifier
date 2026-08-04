@@ -1,5 +1,4 @@
-const DEFAULT_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0"
+const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0"
 const DEFAULT_TIMEOUT_MS = 15_000
 
 function proxyUrl(): string | undefined {

@@ -1,4 +1,3 @@
-
 import {
   Suspense,
   useCallback,
@@ -14,13 +13,7 @@ import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
-import {
-  api,
-  browsePath,
-  parsePage,
-  parseQuery,
-  readPath,
-} from "@/lib/routes"
+import { api, browsePath, parsePage, parseQuery, readPath } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -109,9 +102,7 @@ function BrowseContent() {
         }
       />
 
-      {!queryString && (
-        <ErrorBox message="缺少分类参数，请从分类目录选择" />
-      )}
+      {!queryString && <ErrorBox message="缺少分类参数，请从分类目录选择" />}
 
       {queryString && (
         <AsyncBody

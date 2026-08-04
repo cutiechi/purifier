@@ -1,11 +1,7 @@
-
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
-import {
-  ListPostCard,
-  pageCountLabel,
-} from "@/components/list-post-card"
+import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { formatCount } from "@/lib/format"

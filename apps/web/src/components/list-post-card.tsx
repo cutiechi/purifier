@@ -1,8 +1,5 @@
 import { type ReactNode } from "react"
-import {
-  PostCard,
-  RankBadge,
-} from "@/components/post-card"
+import { PostCard, RankBadge } from "@/components/post-card"
 import {
   formatTitleMeta,
   parseListTitle,
@@ -12,7 +9,7 @@ import { cn } from "@workspace/ui/lib/utils"
 
 export function IndexBadge({ n }: { n: number }) {
   return (
-    <span className="text-muted-foreground bg-muted/80 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold tabular-nums">
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/80 text-xs font-semibold text-muted-foreground tabular-nums">
       {n}
     </span>
   )
@@ -20,7 +17,7 @@ export function IndexBadge({ n }: { n: number }) {
 
 export function GenrePill({ genre }: { genre: string }) {
   return (
-    <span className="bg-muted text-muted-foreground inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-wide">
+    <span className="inline-flex shrink-0 items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground">
       {genre}
     </span>
   )
@@ -34,9 +31,9 @@ export function StatTrailing({
   unit: string
 }) {
   return (
-    <span className="text-muted-foreground shrink-0 text-right text-xs tabular-nums">
-      <span className="text-foreground/80 font-semibold">{value}</span>
-      <span className="text-muted-foreground ml-0.5">{unit}</span>
+    <span className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+      <span className="font-semibold text-foreground/80">{value}</span>
+      <span className="ml-0.5 text-muted-foreground">{unit}</span>
     </span>
   )
 }
@@ -107,5 +104,5 @@ export function pageCountLabel(
 }
 
 export function listMetaClassName() {
-  return cn("text-muted-foreground mb-3 text-xs")
+  return cn("mb-3 text-xs text-muted-foreground")
 }

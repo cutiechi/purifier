@@ -1,11 +1,4 @@
-
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
@@ -14,13 +7,7 @@ import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { IconSearch } from "@/components/icons"
-import {
-  api,
-  parsePage,
-  parseQuery,
-  readPath,
-  searchPath,
-} from "@/lib/routes"
+import { api, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -114,7 +101,7 @@ function SearchContent() {
         <div className="relative min-w-0 flex-1">
           <IconSearch
             size={16}
-            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2"
+            className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted-foreground"
           />
           <input
             type="search"
@@ -123,19 +110,24 @@ function SearchContent() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="输入关键词"
             maxLength={40}
-            className="border-border bg-card text-foreground placeholder:text-muted-foreground focus:border-ring focus:ring-ring/30 h-11 w-full rounded-2xl border pr-4 pl-10 text-sm shadow-sm outline-none focus:ring-2"
+            className="h-11 w-full rounded-2xl border border-border bg-card pr-4 pl-10 text-sm text-foreground shadow-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
           />
         </div>
         <button
           type="submit"
-          className="bg-primary text-primary-foreground hover:opacity-90 h-11 shrink-0 rounded-2xl px-5 text-sm font-medium transition-opacity"
+          className="h-11 shrink-0 rounded-2xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >
           查询
         </button>
       </form>
 
       {!q && !loading ? (
-        <AsyncBody loading={false} error="" empty emptyText="输入关键词开始搜索">
+        <AsyncBody
+          loading={false}
+          error=""
+          empty
+          emptyText="输入关键词开始搜索"
+        >
           {null}
         </AsyncBody>
       ) : (

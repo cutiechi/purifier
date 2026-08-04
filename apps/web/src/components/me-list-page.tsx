@@ -117,11 +117,11 @@ export function MeListPage({
           name="q"
           defaultValue={q}
           placeholder="搜索标题或标签…"
-          className="border-border bg-card text-foreground placeholder:text-muted-foreground/60 h-11 min-w-0 flex-1 rounded-xl border px-3.5 text-sm outline-none focus:border-sky-500/60"
+          className="h-11 min-w-0 flex-1 rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
         />
         <button
           type="submit"
-          className="bg-accent text-foreground h-11 shrink-0 rounded-xl px-4 text-sm font-medium"
+          className="h-11 shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-foreground"
         >
           搜索
         </button>

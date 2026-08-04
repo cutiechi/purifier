@@ -1,19 +1,18 @@
-
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import {
-  PicksSections,
-  type PickSection,
-} from "@/components/picks-sections"
+import { PicksSections, type PickSection } from "@/components/picks-sections"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { api } from "@/lib/routes"
 
 export default function PicksPage() {
-  const { items: sections, loading, error, reload } = useAsyncList(
-    api.picks,
-    (json) =>
-      ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length)
+  const {
+    items: sections,
+    loading,
+    error,
+    reload,
+  } = useAsyncList(api.picks, (json) =>
+    ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length)
   )
 
   const total = sections.reduce((n, s) => n + s.links.length, 0)

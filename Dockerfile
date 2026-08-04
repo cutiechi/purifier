@@ -53,6 +53,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV WEB_DIST=/app/apps/web/dist
+ENV DATA_DIR=/data
 
 COPY --from=api-deps /app/package.json ./
 COPY --from=api-deps /app/node_modules ./node_modules
@@ -62,5 +63,6 @@ COPY --from=api-deps /app/packages/typescript-config ./packages/typescript-confi
 COPY --from=web-builder /app/apps/web/dist ./apps/web/dist
 
 EXPOSE 3000
+RUN mkdir -p /data && chown -R bun:bun /data
 USER bun
 CMD ["bun", "run", "apps/api/src/index.ts"]

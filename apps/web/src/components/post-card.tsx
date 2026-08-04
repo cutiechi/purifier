@@ -23,13 +23,7 @@ export function RankBadge({ rank }: { rank: number }) {
   )
 }
 
-export function AvatarBadge({
-  seed,
-  label,
-}: {
-  seed: string
-  label: string
-}) {
+export function AvatarBadge({ seed, label }: { seed: string; label: string }) {
   return (
     <span
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white shadow-inner"
@@ -59,23 +53,23 @@ export function PostCard({
     <Link
       to={href}
       className={cn(
-        "border-border/80 bg-card/80 hover:border-border hover:bg-accent/50 group flex items-center gap-3 rounded-2xl border px-3.5 py-3.5 shadow-sm transition-all duration-200 active:scale-[0.99] sm:gap-3.5 sm:px-4 sm:py-4",
+        "group flex items-center gap-3 rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border hover:bg-accent/50 active:scale-[0.99] sm:gap-3.5 sm:px-4 sm:py-4",
         className
       )}
     >
       {leading}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-foreground group-hover:text-foreground line-clamp-2 text-[15px] leading-snug font-medium">
+        <span className="line-clamp-2 text-[15px] leading-snug font-medium text-foreground group-hover:text-foreground">
           {title}
         </span>
         {subtitle != null && subtitle !== "" && (
-          <span className="text-muted-foreground text-xs">{subtitle}</span>
+          <span className="text-xs text-muted-foreground">{subtitle}</span>
         )}
       </div>
       {trailing ?? (
         <IconChevronRight
           size={16}
-          className="text-muted-foreground/30 group-hover:text-muted-foreground shrink-0 transition-colors"
+          className="shrink-0 text-muted-foreground/30 transition-colors group-hover:text-muted-foreground"
         />
       )}
     </Link>

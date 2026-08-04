@@ -109,7 +109,10 @@ export function parseListTitle(raw: string): ParsedTitle {
       const chSingle = rest.match(
         /^(\d+(?:\.\d+)?(?:[（(]完[）)]|完)?)\s*(.*)$/
       )
-      if (chSingle && (!chSingle[2] || /^(?:原作|作者|译者|翻译|作)/i.test(chSingle[2]!))) {
+      if (
+        chSingle &&
+        (!chSingle[2] || /^(?:原作|作者|译者|翻译|作)/i.test(chSingle[2]!))
+      ) {
         chapters = fullwidthToHalf(chSingle[1]!).replace(/\s+/g, "")
         rest = (chSingle[2] ?? "").trim()
       } else if (/^第/.test(rest)) {
@@ -150,11 +153,7 @@ export function parseListTitle(raw: string): ParsedTitle {
       rest = ""
     } else if (rest) {
       // 仅当明确不像句子时才当作者（精华列表里常见「刘伶醉」）
-      if (
-        rest.length <= 16 &&
-        !/[。！？\s]/.test(rest) &&
-        !/^第/.test(rest)
-      ) {
+      if (rest.length <= 16 && !/[。！？\s]/.test(rest) && !/^第/.test(rest)) {
         author = rest
         rest = ""
       } else {

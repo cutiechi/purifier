@@ -1,4 +1,3 @@
-
 import { PostCard, PostList } from "@/components/post-card"
 import { readPath } from "@/lib/routes"
 
@@ -18,13 +17,7 @@ function countNodes(nodes: ReplyNode[]): number {
   return nodes.reduce((n, node) => n + 1 + countNodes(node.children), 0)
 }
 
-function ReplyTree({
-  nodes,
-  depth,
-}: {
-  nodes: ReplyNode[]
-  depth: number
-}) {
+function ReplyTree({ nodes, depth }: { nodes: ReplyNode[]; depth: number }) {
   return (
     <PostList className={depth > 0 ? "mt-1.5" : undefined}>
       {nodes.map((node) => (
@@ -36,9 +29,7 @@ function ReplyTree({
               <>
                 {node.username || "匿名"}
                 {node.dateline ? ` · ${node.dateline}` : ""}
-                {node.size > 0
-                  ? ` · ${node.size.toLocaleString()} bytes`
-                  : ""}
+                {node.size > 0 ? ` · ${node.size.toLocaleString()} bytes` : ""}
               </>
             }
           />
@@ -56,8 +47,8 @@ export function ReplyList({ replies }: { replies: ReplyNode[] }) {
   const total = countNodes(replies)
 
   return (
-    <section className="border-border mt-10 border-t pt-8 sm:mt-12">
-      <h3 className="text-muted-foreground mb-3 text-xs font-semibold tracking-wider uppercase">
+    <section className="mt-10 border-t border-border pt-8 sm:mt-12">
+      <h3 className="mb-3 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
         评论 · {total}
       </h3>
       <ReplyTree nodes={replies} depth={0} />

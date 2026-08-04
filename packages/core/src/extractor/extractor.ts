@@ -128,10 +128,7 @@ export class Cool18Extractor implements Extractor {
    * 从 threadview 页抽取元信息：
    * .sender / .views body 优先，JSON-LD + threadInfo 补全
    */
-  private extractPostMeta(
-    html: string,
-    $: cheerio.CheerioAPI
-  ): PostMeta {
+  private extractPostMeta(html: string, $: cheerio.CheerioAPI): PostMeta {
     let author: string | null = null
     let uid: string | null = null
     let badge: string | null = null
@@ -249,9 +246,7 @@ export class Cool18Extractor implements Extractor {
 
     // gift script path: .../getgift/{dbname}/{tid}/{uid}/get.js
     if (!uid) {
-      const giftMatch = html.match(
-        /getgift\/[^/]+\/\d+\/(\d+)\/get\.js/
-      )
+      const giftMatch = html.match(/getgift\/[^/]+\/\d+\/(\d+)\/get\.js/)
       if (giftMatch?.[1]) uid = giftMatch[1]
     }
 
@@ -452,9 +447,10 @@ export class Cool18Extractor implements Extractor {
 
       if (node.type !== "tag") return
 
-      const tag = (node as { name?: string; tagName?: string }).name
-        ?? (node as { tagName?: string }).tagName
-        ?? ""
+      const tag =
+        (node as { name?: string; tagName?: string }).name ??
+        (node as { tagName?: string }).tagName ??
+        ""
 
       if (tag === "a") {
         const $a = $(node)
@@ -555,11 +551,7 @@ export class Cool18Extractor implements Extractor {
     // 「《禁忌书屋》评论榜」：table.rank-table，列：排名/发帖人/标题/发布时间/评论数
     $("table.rank-table tbody tr").each((_i, tr) => {
       const $tr = $(tr)
-      const $a = $tr
-        .find("td")
-        .eq(2)
-        .find("a[href*='tid=']")
-        .first()
+      const $a = $tr.find("td").eq(2).find("a[href*='tid=']").first()
       const href = $a.attr("href") || ""
       const tid = this.extractTid(href)
       if (!tid) return
@@ -766,9 +758,7 @@ export class Cool18Extractor implements Extractor {
       ""
     )
 
-    inner = inner
-      .replace(/<p><\/p>/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
+    inner = inner.replace(/<p><\/p>/gi, "\n").replace(/<br\s*\/?>/gi, "\n")
 
     const placeholders: string[] = []
     // 抽出可识别链接为占位符（支持有/无引号 href）
@@ -801,9 +791,7 @@ export class Cool18Extractor implements Extractor {
 
         const label = this.escapeHtml(labelText || tid || cid || "链接")
         const idx = placeholders.length
-        placeholders.push(
-          `<a href="${this.escapeHtml(internal)}">${label}</a>`
-        )
+        placeholders.push(`<a href="${this.escapeHtml(internal)}">${label}</a>`)
         return `\u0000L${idx}\u0000`
       }
     )
@@ -911,7 +899,10 @@ export class Cool18Extractor implements Extractor {
       seen.add(item.tid)
 
       // 下一页游标：本批主帖中最小的 tid（与原站 _mtid 推进逻辑一致）
-      if (nextMtid === null || parseInt(item.tid, 10) < parseInt(nextMtid, 10)) {
+      if (
+        nextMtid === null ||
+        parseInt(item.tid, 10) < parseInt(nextMtid, 10)
+      ) {
         nextMtid = item.tid
       }
 
