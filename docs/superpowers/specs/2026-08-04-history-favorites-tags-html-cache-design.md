@@ -134,6 +134,10 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 
 `tags` 与 `favorited` 在列表 SQL 中一次 join 聚合返回，禁止前端逐项再调 `/api/me/state` 造成 N+1。
 
+搜索匹配规则：`q` 对标题做子串包含、大小写不敏感；对标签做精确匹配；`?tag=` 筛选同样精确匹配。
+
+`/api/me/tags` 返回 `{ tags: { tag: string, count: number }[] }`，按数量倒序，无分页。
+
 写接口（`PUT /api/me/favorites`、`DELETE /api/me/favorites`、`PUT /api/me/tags`、`DELETE /api/me/cache`）需要路由层放行非 GET 方法，具体分发改动见"架构"。
 
 ### 正文/书库端点扩展
@@ -142,8 +146,18 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 
 - 无 `refresh`：先查缓存文件，命中则读文件并提取，未命中则抓上游并落盘
 - 有 `refresh`：跳过缓存直接抓上游；成功后覆盖缓存文件
-- 刷新失败但旧缓存存在：返回 200，响应带 `stale: true` 与 `refreshError`，前端显示轻提示
-- 刷新失败且无旧缓存：走现有 502/504 错误映射
+- `stale: true` 与 `refreshError` 只反映正文/书库资源的刷新结果；回复刷新失败不回退为 stale，而是回退到旧回复缓存（无旧缓存则返回空数组）
+- 正文/书库刷新失败且无旧缓存：整体走现有 502/504 错误映射
+
+`refresh=1` 时正文与回复的部分成功组合如下（书库无回复，只按正文规则）：
+
+| 正文刷新         | 回复刷新 | 正文响应               | 回复响应               |
+| ---------------- | -------- | ---------------------- | ---------------------- |
+| 成功             | 成功     | 新正文                 | 新回复                 |
+| 成功             | 失败     | 新正文                 | 旧回复缓存，无则空数组 |
+| 失败             | 成功     | 旧正文 + `stale: true` | 新回复                 |
+| 失败             | 失败     | 旧正文 + `stale: true` | 旧回复缓存，无则空数组 |
+| 失败（无旧正文） | 任意     | 整体 502/504           | —                      |
 
 刷新路径复用普通抓取的请求头（书库带 `Referer: homeUrl`，回复带 `Referer: buildUrl(tid)`），确保上游返回与首次一致。
 
@@ -152,6 +166,8 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 - 磁盘缓存命中的响应：`Cache-Control: no-store`（磁盘缓存已承担缓存职责，且避免 CDN 挡住后续 `refresh`）
 - `refresh=1` 成功与 `stale: true` 的响应：`Cache-Control: no-store`
 - 普通首次抓取（无 `refresh`、无缓存）成功：保留现有 `CONTENT_CACHE_HEADERS`
+
+cache hit 响应使用 `no-store` 是有意为之：保证每次打开都到达源站并计入历史，后续不要"优化"成短 CDN 缓存。cache hit 时 `meta.comments` 仍由回复缓存重新计数（`extractContent` 不会回填 comments）。
 
 回复请求同样读写 `replies-<tid>.json`；`refresh=1` 时回复与正文一起重新抓取，回复失败仍不覆盖旧回复缓存。
 
@@ -219,3 +235,5 @@ CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
 ## 评审修订记录
 
 2026-08-04 按 `docs/superpowers/specs/review.md` 修订，纳入全部 17 条意见：路由方法分发、列表项结构与 N+1、Docker 属主、stale 响应缓存头、回复 JSON 命名与失败不落盘、标签写入存在性约束、测试设施接入、标题刷新语义、部分缓存独立判定、pageSize、DELETE 清缓存、同步 SQLite 说明、并发首访说明、refresh 保留 Referer、`.gitignore` 数据目录。
+
+第二轮（2026-08-04）补充 5 条：部分刷新矩阵与 `stale` 语义、cache hit `no-store` 与历史计数的关系、cache hit 时 `meta.comments` 重算、标签/标题搜索匹配规则、`/api/me/tags` 返回结构。
