@@ -21,6 +21,7 @@ import {
   readRepliesCache,
   writeContentCache,
   writeRepliesCache,
+  type CacheEntry,
   type ItemKind,
   type ItemState,
   type ListQuery,
@@ -141,8 +142,14 @@ async function loadCachedReplies(
   refresh: boolean
 ): Promise<{ replies: ReplyNode[]; fromCache: boolean }> {
   const extractor = getExtractor("cool18")
+  // 损坏/截断的回复缓存（JSON.parse 抛错）一律按 miss 处理，绝不让它拖垮正文页（刷新会覆盖写坏文件）
   if (!refresh) {
-    const cached = await readRepliesCache(DATA_DIR, tid)
+    let cached: CacheEntry<unknown> | null = null
+    try {
+      cached = await readRepliesCache(DATA_DIR, tid)
+    } catch {
+      cached = null
+    }
     if (cached && Array.isArray(cached.data)) {
       return { replies: cached.data as ReplyNode[], fromCache: true }
     }
@@ -153,7 +160,12 @@ async function loadCachedReplies(
     await writeRepliesCache(DATA_DIR, tid, replies)
     return { replies, fromCache: false }
   } catch {
-    const cached = await readRepliesCache(DATA_DIR, tid)
+    let cached: CacheEntry<unknown> | null = null
+    try {
+      cached = await readRepliesCache(DATA_DIR, tid)
+    } catch {
+      cached = null
+    }
     if (cached && Array.isArray(cached.data)) {
       return { replies: cached.data as ReplyNode[], fromCache: true }
     }
