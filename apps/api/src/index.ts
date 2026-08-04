@@ -203,8 +203,8 @@ async function handlePosts(url: URL): Promise<Response> {
     title,
     content: bodyHtml,
     meta,
+    links,
   } = extractor.extractContent(content.html)
-  const links = extractor.extractLinks(content.html)
 
   // cache hit / 刷新时以回复缓存重算评论数（extractContent 不回填 comments）
   if (repliesResult.replies.length > 0) {

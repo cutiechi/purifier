@@ -10,6 +10,7 @@ import {
   CategoryQuery,
   CategoryPage,
   RecommendSection,
+  ContentResponse,
   PostMeta,
   BookMeta,
   ReplyItem,
@@ -25,11 +26,7 @@ export class Cool18Extractor implements Extractor {
     return `https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=${tid}`
   }
 
-  extractContent(html: string): {
-    title: string
-    content: string
-    meta: PostMeta
-  } {
+  extractContent(html: string): ContentResponse {
     const $ = cheerio.load(html)
     const meta = this.extractPostMeta(html, $)
 
@@ -61,7 +58,51 @@ export class Cool18Extractor implements Extractor {
       title: title || "无标题",
       content,
       meta,
+      links: this.extractLinksFromDom($),
     }
+  }
+
+  /**
+   * 扩展链接：只收集「正文 pre 之外」的帖子链接。
+   * 正文里的链接保留在 content 中可点击，不再重复进此列表。
+   * 复用 extractContent 已加载的 Cheerio 实例，避免二次解析。
+   */
+  private extractLinksFromDom($: cheerio.CheerioAPI): ChapterLink[] {
+    const links: ChapterLink[] = []
+
+    $("#content-section a[href*='tid=']").each((_i, elem) => {
+      // 跳过正文 pre 内链接
+      if ($(elem).closest("pre").length > 0) return
+
+      const href = $(elem).attr("href") || ""
+      const tid = this.extractTid(href)
+      const title = $(elem).text().trim()
+      if (tid && title) {
+        links.push({ index: 0, title, tid })
+      }
+    })
+
+    // 去重：按 tid
+    const seen = new Set<string>()
+    const unique = links.filter((link) => {
+      if (seen.has(link.tid)) return false
+      seen.add(link.tid)
+      return true
+    })
+
+    // 按 tid 从小到大排序
+    unique.sort((a, b) => {
+      const aNum = parseInt(a.tid, 10) || 0
+      const bNum = parseInt(b.tid, 10) || 0
+      return aNum - bNum
+    })
+
+    // 重新赋值 index
+    unique.forEach((link, idx) => {
+      link.index = idx + 1
+    })
+
+    return unique
   }
 
   buildBookUrl(cid: string): string {
@@ -301,49 +342,6 @@ export class Cool18Extractor implements Extractor {
       (_, y, mo, d, h, mi) =>
         `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")} ${h.padStart(2, "0")}:${mi}`
     )
-  }
-
-  /**
-   * 扩展链接：只收集「正文 pre 之外」的帖子链接。
-   * 正文里的链接保留在 content 中可点击，不再重复进此列表。
-   */
-  extractLinks(html: string): ChapterLink[] {
-    const $ = cheerio.load(html)
-    const links: ChapterLink[] = []
-
-    $("#content-section a[href*='tid=']").each((_i, elem) => {
-      // 跳过正文 pre 内链接
-      if ($(elem).closest("pre").length > 0) return
-
-      const href = $(elem).attr("href") || ""
-      const tid = this.extractTid(href)
-      const title = $(elem).text().trim()
-      if (tid && title) {
-        links.push({ index: 0, title, tid })
-      }
-    })
-
-    // 去重：按 tid
-    const seen = new Set<string>()
-    const unique = links.filter((link) => {
-      if (seen.has(link.tid)) return false
-      seen.add(link.tid)
-      return true
-    })
-
-    // 按 tid 从小到大排序
-    unique.sort((a, b) => {
-      const aNum = parseInt(a.tid, 10) || 0
-      const bNum = parseInt(b.tid, 10) || 0
-      return aNum - bNum
-    })
-
-    // 重新赋值 index
-    unique.forEach((link, idx) => {
-      link.index = idx + 1
-    })
-
-    return unique
   }
 
   extractGoldLinks(html: string): ChapterLink[] {
@@ -660,13 +658,22 @@ export class Cool18Extractor implements Extractor {
   }
 
   private buildReplyTree(items: ReplyItem[], parentId: string): ReplyNode[] {
-    const children = items.filter(
-      (item) => String(item.uptid) === String(parentId)
-    )
-    return children.map((item) => ({
-      ...item,
-      children: this.buildReplyTree(items, item.tid),
-    }))
+    // 一次建 uptid → 子列表索引，避免每层递归都全表 filter（原实现 O(n²)）
+    const byUptid = new Map<string, ReplyItem[]>()
+    for (const item of items) {
+      const key = String(item.uptid)
+      const list = byUptid.get(key)
+      if (list) list.push(item)
+      else byUptid.set(key, [item])
+    }
+    const build = (id: string): ReplyNode[] => {
+      const children = byUptid.get(String(id)) ?? []
+      return children.map((item) => ({
+        ...item,
+        children: build(item.tid),
+      }))
+    }
+    return build(parentId)
   }
 
   async fetchCategoryPage(

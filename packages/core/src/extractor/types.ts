@@ -112,17 +112,13 @@ export interface Extractor {
   homeUrl: string
   buildUrl(tid: string): string
   buildBookUrl(cid: string): string
-  extractContent(html: string): {
-    title: string
-    content: string
-    meta: PostMeta
-  }
+  /** 解析正文并复用同一次 DOM 解析产出站外链接 */
+  extractContent(html: string): ContentResponse
   extractBookContent(html: string): {
     title: string
     content: string
     meta: BookMeta
   }
-  extractLinks(html: string): ChapterLink[]
   extractGoldLinks(html: string): ChapterLink[]
   extractHotPosts(html: string): HotPost[]
   extractCmtRankPosts(html: string): CmtRankPost[]
