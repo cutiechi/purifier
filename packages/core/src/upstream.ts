@@ -74,6 +74,10 @@ export const CONTENT_CACHE_HEADERS = {
   "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
 } as const
 
+export const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store",
+} as const
+
 export function jsonOk(
   data: unknown,
   headers: HeadersInit = LIST_CACHE_HEADERS

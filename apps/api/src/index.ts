@@ -7,11 +7,17 @@ import {
   CONTENT_CACHE_HEADERS,
   ExtractorError,
   LIST_CACHE_HEADERS,
+  NO_STORE_HEADERS,
   UpstreamTimeoutError,
+  Store,
   fetchUpstream,
   getExtractor,
   jsonError,
   jsonOk,
+  openDatabase,
+  type ItemKind,
+  type ItemState,
+  type ListQuery,
   type ReplyNode,
 } from "@workspace/core"
 
@@ -21,6 +27,8 @@ const HOST = process.env.HOSTNAME || "0.0.0.0"
 /** Vite build output; when present, non-/api routes serve the SPA. */
 const WEB_DIST =
   process.env.WEB_DIST || join(import.meta.dir, "../../web/dist")
+const DATA_DIR = process.env.DATA_DIR || "./data"
+const store = new Store(openDatabase(DATA_DIR))
 
 function toErrorResponse(err: unknown): Response {
   if (err instanceof UpstreamTimeoutError) {
@@ -33,6 +41,44 @@ function toErrorResponse(err: unknown): Response {
     return jsonError(err.message, 500)
   }
   return jsonError("unknown error", 500)
+}
+
+function requireGet(req: Request): void {
+  if (req.method !== "GET") {
+    throw new ExtractorError("method not allowed", 405)
+  }
+}
+
+function meKindParam(url: URL): ItemKind {
+  const kind = url.searchParams.get("kind")
+  if (kind !== "post" && kind !== "book") {
+    throw new ExtractorError("invalid kind", 400)
+  }
+  return kind
+}
+
+function meIdParam(url: URL): string {
+  const id = url.searchParams.get("id") ?? ""
+  if (!/^[A-Za-z0-9]+$/.test(id)) {
+    throw new ExtractorError("invalid id", 400)
+  }
+  return id
+}
+
+function meListQuery(url: URL): ListQuery {
+  const kindRaw = url.searchParams.get("kind")
+  let kind: ListQuery["kind"] = ""
+  if (kindRaw !== null) {
+    if (kindRaw !== "post" && kindRaw !== "book") {
+      throw new ExtractorError("invalid kind", 400)
+    }
+    kind = kindRaw
+  }
+  return {
+    q: url.searchParams.get("q")?.trim() || "",
+    kind,
+    page: parseInt(url.searchParams.get("page") || "1", 10) || 1,
+  }
 }
 
 function countReplies(nodes: ReplyNode[]): number {
@@ -114,6 +160,66 @@ async function handleHomeExtract(
   return jsonOk(pick(extractor, html), LIST_CACHE_HEADERS)
 }
 
+function handleMeHistory(url: URL): Response {
+  return jsonOk(store.listHistory(meListQuery(url)), NO_STORE_HEADERS)
+}
+
+function handleMeFavorites(url: URL): Response {
+  return jsonOk(store.listFavorites(meListQuery(url)), NO_STORE_HEADERS)
+}
+
+function handleMeTags(): Response {
+  return jsonOk({ tags: store.listTags() }, NO_STORE_HEADERS)
+}
+
+function handleMeItems(url: URL): Response {
+  const tag = url.searchParams.get("tag")?.trim()
+  if (!tag) return jsonError("missing tag parameter", 400)
+  return jsonOk(store.listByTag(tag, meListQuery(url)), NO_STORE_HEADERS)
+}
+
+function handleMeState(url: URL): Response {
+  const kind = meKindParam(url)
+  const id = meIdParam(url)
+  const state = store.getState(kind, id)
+  // 对象不存在返回 200 空状态（visit_count 0）：前端 useItemState 对 !res.ok 静默，
+  // 空状态与「未收藏/无标签」UI 等价；正文页打开会先 recordVisit 再查询，正常路径不会出现。
+  const empty: ItemState = {
+    kind,
+    id,
+    title: "",
+    url: "",
+    first_seen_at: 0,
+    last_visited_at: 0,
+    visit_count: 0,
+    favorited: false,
+    tags: [],
+  }
+  return jsonOk(state ?? empty, NO_STORE_HEADERS)
+}
+
+async function handleComments(): Promise<Response> {
+  const extractor = getExtractor("cool18")
+  const resp = await fetchUpstream(`${extractor.homeUrl}?act=cmtrank&y=1`)
+  if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
+  const html = await resp.text()
+  return jsonOk(
+    { posts: extractor.extractCmtRankPosts(html) },
+    LIST_CACHE_HEADERS
+  )
+}
+
+async function handleTrending(): Promise<Response> {
+  const extractor = getExtractor("cool18")
+  const resp = await fetchUpstream(`${extractor.homeUrl}?app=forum&act=hot`)
+  if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
+  const html = await resp.text()
+  return jsonOk(
+    { posts: extractor.extractHotPosts(html) },
+    LIST_CACHE_HEADERS
+  )
+}
+
 async function route(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const { pathname } = url
@@ -124,56 +230,56 @@ async function route(req: Request): Promise<Response> {
     if (spa) return spa
   }
 
-  if (req.method !== "GET") {
-    return jsonError("method not allowed", 405)
-  }
-
   try {
     switch (pathname) {
       case "/api/health":
+        requireGet(req)
         return Response.json({ status: "ok", runtime: "bun" })
       case "/api/posts":
+        requireGet(req)
         return await handlePosts(url)
       case "/api/books":
+        requireGet(req)
         return await handleBooks(url)
       case "/api/browse":
+        requireGet(req)
         return await handleBrowse(url)
       case "/api/categories":
+        requireGet(req)
         return await handleHomeExtract((ex, html) => ({
           links: ex.extractCategoryLinks(html),
         }))
       case "/api/featured":
+        requireGet(req)
         return await handleHomeExtract((ex, html) => ({
           links: ex.extractGoldLinks(html),
         }))
       case "/api/picks":
+        requireGet(req)
         return await handleHomeExtract((ex, html) => ({
           sections: ex.extractRecommendSections(html),
         }))
-      case "/api/comments": {
-        const extractor = getExtractor("cool18")
-        const resp = await fetchUpstream(
-          `${extractor.homeUrl}?act=cmtrank&y=1`
-        )
-        if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
-        const html = await resp.text()
-        return jsonOk(
-          { posts: extractor.extractCmtRankPosts(html) },
-          LIST_CACHE_HEADERS
-        )
-      }
-      case "/api/trending": {
-        const extractor = getExtractor("cool18")
-        const resp = await fetchUpstream(
-          `${extractor.homeUrl}?app=forum&act=hot`
-        )
-        if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
-        const html = await resp.text()
-        return jsonOk(
-          { posts: extractor.extractHotPosts(html) },
-          LIST_CACHE_HEADERS
-        )
-      }
+      case "/api/comments":
+        requireGet(req)
+        return await handleComments()
+      case "/api/trending":
+        requireGet(req)
+        return await handleTrending()
+      case "/api/me/history":
+        requireGet(req)
+        return handleMeHistory(url)
+      case "/api/me/favorites":
+        requireGet(req)
+        return handleMeFavorites(url)
+      case "/api/me/tags":
+        requireGet(req)
+        return handleMeTags()
+      case "/api/me/items":
+        requireGet(req)
+        return handleMeItems(url)
+      case "/api/me/state":
+        requireGet(req)
+        return handleMeState(url)
       default:
         return jsonError("not found", 404)
     }
