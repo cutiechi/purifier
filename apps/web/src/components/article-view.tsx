@@ -5,6 +5,15 @@ import { PostMetaBar, type PostMetaFields } from "@/components/post-meta"
 import { PostCard, PostList } from "@/components/post-card"
 import { readPath } from "@/lib/routes"
 
+function withParagraphs(html: string): string {
+  // 内容已由 extractPreHtml 清洗：仅转义文本 + 站内 /read|/book 锚点。
+  // 这里只处理字面 \n，不做二次 innerHTML 解析。
+  return html
+    .split(/\n{2,}/)
+    .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+    .join("")
+}
+
 export function ContentBody({ html }: { html: string }) {
   const navigate = useNavigate()
 
@@ -23,9 +32,9 @@ export function ContentBody({ html }: { html: string }) {
   )
 
   return (
-    <pre
-      className="content-body font-mono text-[14px] leading-[1.85] whitespace-pre-wrap text-foreground/85 sm:text-[15px] sm:leading-[1.9] [&_a]:text-sky-600 [&_a]:underline [&_a]:decoration-sky-600/35 [&_a]:underline-offset-2 hover:[&_a]:decoration-sky-600 dark:[&_a]:text-sky-400 dark:[&_a]:decoration-sky-400/40"
-      dangerouslySetInnerHTML={{ __html: html }}
+    <div
+      className="reading-body text-foreground/85"
+      dangerouslySetInnerHTML={{ __html: withParagraphs(html) }}
       onClick={onClick}
     />
   )

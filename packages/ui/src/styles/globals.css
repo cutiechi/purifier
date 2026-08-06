@@ -139,3 +139,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+.reading-body {
+  font-family: var(--reading-font, var(--font-serif));
+  font-size: var(--reading-font-size, 17px);
+  line-height: var(--reading-line-height, 1.8);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.reading-body a {
+  color: oklch(0.62 0.17 252);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dark .reading-body a {
+  color: oklch(0.74 0.15 232);
+}
+.reading-body p {
+  margin: 0 0 1em;
+}
+.reading-body p:last-child {
+  margin-bottom: 0;
+}
