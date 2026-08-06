@@ -1,7 +1,7 @@
 # 阅读页 UI 统一与进度条设计
 
 日期：2026-08-06
-状态：已通过 brainstorming，待写实施计划
+状态：已通过 brainstorming + review 修订，待写实施计划
 
 ## 与已有 spec 的关系
 
@@ -43,7 +43,7 @@
    - 定制 `<input type="range">` 的 CSS（替代裸滑块）
    - `Popover`——轻量浮层（自建，不引 radix）
 2. **统一操作浮层**：把 `ItemActions` 的全部操作（收藏/刷新/标签）+ 阅读偏好面板内容收敛进单个 `Popover`，trigger 是单个图标按钮。
-3. **进度条**：底部 fixed 细条，复用 `useReadingProgress` 的采样值。
+3. **进度条**：底部 fixed 全宽细条，复用 `useReadingProgress` 的采样值。
 
 ### 文件落点
 
@@ -55,8 +55,8 @@
 | 改 CSS | `packages/ui/src/styles/globals.css`（滑块样式，见 §2.2） |
 | 改写 | `apps/web/src/components/reading-settings-panel.tsx`（用原语重做，作为浮层下半部分的子组件） |
 | 改写 | `apps/web/src/components/item-actions.tsx`（全部操作 + 偏好收进 `Popover`） |
-| 改 | `apps/web/src/components/article-view.tsx`（`ArticleView` 加可选 `progress` prop，渲染底部进度条） |
-| 改 | `apps/web/src/hooks/use-reading-progress.ts`（对外返回 `progress` state） |
+| 改 | `apps/web/src/components/article-view.tsx`（`ArticleView` 加可选 `progress` prop，条件渲染底部进度条） |
+| 改 | `apps/web/src/hooks/use-reading-progress.ts`（对外返回 `progress` state；restore / id 重置也同步，见 §4.1） |
 | 改 | `apps/web/src/pages/ReadPage.tsx`、`apps/web/src/pages/BookPage.tsx`（传 `progress` 给 `ArticleView`） |
 
 ## §2 视觉原语
@@ -79,20 +79,56 @@ interface Props<T> {
 
 视觉（与标签 chip、`bg-muted/70` 操作按钮同语言）：
 
-- 容器：`inline-flex rounded-lg bg-muted/60 p-0.5`
-- 每项：`rounded-md px-2.5 py-1 text-xs`，移动端 `min-h-9`，桌面 `sm:min-h-0`——与收藏/刷新按钮同高同圆角
-- 选中项：`bg-card text-foreground shadow-sm`
-- 未选中：`text-muted-foreground hover:text-foreground`
-- 键盘：原生 `<button>`，自带 Tab/Enter/Space 无障碍
+- 容器：`inline-flex rounded-lg bg-muted/60 p-0.5`，`role="group"` + `aria-label`
+- 每项：原生 `<button>`，`rounded-md px-2.5 py-1 text-xs`，移动端 `min-h-9`，桌面 `sm:min-h-0`——与收藏/刷新按钮同高同圆角
+- 选中项：`bg-card text-foreground shadow-sm` + `aria-pressed={true}`
+- 未选中：`text-muted-foreground hover:text-foreground` + `aria-pressed={false}`
+- 键盘：原生 `<button>` 自带 Tab/Enter/Space；选中态用 `aria-pressed` 暴露给读屏
 
 ### 2.2 定制滑块（保留原生 `<input type="range">`）
 
 **决策：保留原生 `<input type="range">`，只加定制样式。** 原生滑块自带键盘/移动端无障碍和拖拽；自建 div 拖拽要重写 `pointerdown/move/up` + `keydown` + 触屏，风险高收益低。问题只出在裸样式不跟色板。
 
-在 `packages/ui/src/styles/globals.css` 追加（项目样式集中于此，所有 token 与 `.reading-body` 都在），用 `accent-color` + `-webkit-slider-thumb` 定制：
+在 `packages/ui/src/styles/globals.css` 追加（项目样式集中于此，所有 token 与 `.reading-body` 都在），用 `accent-color` 做基础兜底 + 跨浏览器伪元素定制。这是全站唯一 range，一次写全：
 
-- 轨道与拇指用 `--accent`/`--card`
-- 数值在标签右侧用 `tabular-nums` 显示（复用面板现有 `fontSize px` / `lineHeight.toFixed(1)` 写法）
+```css
+/* 阅读偏好滑块：webkit + moz 一致 */
+input[type="range"].reading-range {
+  accent-color: var(--accent);          /* 基础兜底（部分浏览器） */
+  appearance: none;
+  background: transparent;
+  height: 1.25rem;
+}
+input[type="range"].reading-range::-webkit-slider-runnable-track {
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+input[type="range"].reading-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -0.375rem;                /* (track 0.25 - thumb 1) / 2，负值居中 */
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.15);
+}
+input[type="range"].reading-range::-moz-range-track {
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+input[type="range"].reading-range::-moz-range-thumb {
+  height: 1rem;
+  width: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--card);
+}
+```
+
+数值在标签右侧用 `tabular-nums` 显示（复用面板现有 `fontSize px` / `lineHeight.toFixed(1)` 写法）。
 
 ### 2.3 Popover
 
@@ -109,11 +145,27 @@ interface Props {
 
 行为：
 
-- trigger 外包 `relative inline-flex`，面板 `absolute` 定位其下
+- trigger 外包 `relative inline-flex`，面板 `absolute z-50` 定位其下（`z-50` 与 `SiteHeader` 同级，避免被 sticky header 遮挡）
 - `align="end"`（默认，阅读页 trigger 在右侧）时面板 `right-0`，避免溢出视口右侧
-- 三路关闭：点外面（`pointerdown` listener）、按 Escape、再点 trigger toggle
+- **三路关闭**：点外面（`pointerdown` listener + contain 检测，面板内交互不冒泡关闭）、按 Escape（见 §2.4 优先级契约）、再点 trigger toggle
 - 用 `--popover`/`--popover-foreground` token，`rounded-xl border border-border shadow-lg p-3 min-w-[240px]`
+- **高度约束**：`max-h-[min(24rem,calc(100dvh-2rem))] overflow-y-auto`——小屏（iPhone SE 类）或系统大字号下内容超出视口时内部滚动，不裁切到不可用
 - **不做 portal**：阅读页 `<article>` 和 `<main>` 都没有 `overflow:hidden`，`absolute` 不会被裁剪。实测发现裁剪再升级 portal（YAGNI）
+
+### 2.4 Escape 优先级契约（与标签编辑态交互）
+
+`TagEditor` 在编辑态对 Escape 执行 `cancel()`。Popover 也监听 Escape 关闭。契约写死：
+
+- 标签编辑中：Esc **先**取消编辑（`TagEditor.cancel()`），**不**关 Popover；再次 Esc 才关 Popover
+- 实现：`TagEditor` input 的 `onKeyDown` Esc 调 `cancel()` 后 `e.stopPropagation()`，阻止冒泡到 Popover 的 Esc 关闭逻辑
+- 非编辑态：Esc 直接关 Popover
+
+### 2.5 无障碍最小集
+
+- `SegmentedControl`：容器 `role="group"` + `aria-label`；选中项 `aria-pressed={true}`，其余 `false`
+- `Popover` trigger：`aria-expanded={open}`、`aria-haspopup="dialog"`、`aria-label="阅读操作与偏好"`（trigger 现承载收藏 + 标签 + 偏好，不再是单纯「阅读设置」）
+- 关闭 Popover 后 `trigger.focus()`（焦点回到 trigger）
+- **故意不做焦点陷阱**：轻量菜单，Tab 可穿出；在文档声明此取舍，避免被当缺陷
 
 ## §3 统一操作浮层（合并操作区 + 阅读偏好）
 
@@ -123,7 +175,18 @@ interface Props {
 
 - 图标：lucide `Settings2`（与原齿轮一致，认知迁移成本低）
 - 形态：从圆形 `rounded-full border` 改为与刷新按钮同语言的方形图标按钮——`inline-flex size-8 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground`
-- **收藏状态可见性**（关键）：全收进浮层后，trigger 是唯一外部可见物，必须反映收藏状态。`state?.favorited` 为真时 trigger 套用收藏按钮现有的 amber 高亮（`text-amber-500 bg-amber-400/15 dark:text-amber-400`），并在 `Settings2` 旁叠一个 `Star size-3` 小图标。未收藏时中性 `bg-muted/70`。
+- **收藏状态可见性**：全收进浮层后，trigger 是唯一外部可见物，必须反映收藏状态。`state?.favorited` 为真时 trigger 套用收藏按钮现有的 amber 高亮（`text-amber-500 bg-amber-400/15 dark:text-amber-400`），并在 `Settings2` 旁叠一个 `Star size-3` 小图标。
+- **标签可见性**（避免收藏有补丁、标签无补丁的不对称）：`state?.tags?.length > 0` 时 trigger 右上角叠一个小 badge（`Tag size-3` 角标，或带标签数的 `size-3.5 rounded-full bg-muted text-[9px] tabular-nums` 小圆点）。与 Star 角标对称，弱提示「有标签」。
+- 无障碍：见 §2.5（`aria-expanded`/`aria-haspopup`/`aria-label`）
+
+trigger 三态示意：
+
+```
+默认：     [⚙]
+已收藏：   [⚙ ★]              ← amber 高亮 + Star
+有标签：   [⚙ ③]              ← Tag 角标（或带数小圆点）
+收藏+标签：[⚙ ★ ③]            ← 两个角标
+```
 
 ### 3.2 浮层内部结构
 
@@ -148,29 +211,31 @@ interface Props {
 操作按钮（收藏/刷新/标签）从胶囊形改为**全宽行式布局**，更适合菜单语境：
 
 - `flex items-center justify-between w-full rounded-lg px-3 py-2 text-sm hover:bg-accent`
-- 收藏行：左侧图标 + 文案（已收藏时文案「已收藏」+ amber 高亮整行；未收藏「收藏」），点击 toggle
+- 收藏行：左侧图标 + 文案（已收藏时文案「已收藏」+ amber 高亮整行；未收藏「收藏」），点击 toggle。**取消收藏的 `window.confirm` 保留**（既有行为，边界内不改文案/形态），但 confirm 期间**不关 Popover**——confirm 返回后浮层保持 open，方便继续操作
 - 刷新行：左侧 `IconRefreshCw`（`refreshing` 时 `animate-spin`）+ 文案「刷新」，点击 `onRefresh`
-- 标签行：显示 `TagChips`（现有 chip 预览）+「编辑」按钮；点编辑原地展开 input（复用 `TagEditor` 逻辑，但全宽布局）；保存调 `PUT /api/me/tags`
+- 标签行：显示 `TagChips`（现有 chip 预览）+「编辑」按钮；点编辑原地展开 input（复用 `TagEditor` 逻辑，但全宽布局）；保存调 `PUT /api/me/tags`。标签编辑态的 Escape 优先级见 §2.4
 
 ### 3.4 阅读偏好子组件（浮层下半部分）
 
-`reading-settings-panel.tsx` 改写为只渲染偏好那几行的子组件，作为浮层下半部分复用：
+`reading-settings-panel.tsx` 改写为只渲染偏好那几行的子组件，作为浮层下半部分复用。
+
+**嵌入 Popover 时无自身外壳**：去掉现状的 `rounded-xl border bg-card p-3`（浮层已有），仅 `flex flex-col gap-3` 行布局 + 「阅读偏好」小标题 + 各行 + 恢复默认。避免双重边框/内边距。
 
 | 字段 | 原控件 | 新控件 | 备注 |
 | --- | --- | --- | --- |
 | 字体（serif/sans/mono） | `<select>` | `SegmentedControl` | 3 项 |
-| 字号（14–22） | `<range>` | 定制 `<range>` + 右侧数值 | 数值 `tabular-nums` |
-| 行高（1.4–2.2） | `<range>` | 定制 `<range>` + 右侧数值 | 数值 `1.8` 格式 |
+| 字号（14–22） | `<range>` | 定制 `<range class="reading-range">` + 右侧数值 | 数值 `tabular-nums` |
+| 行高（1.4–2.2） | `<range>` | 定制 `<range class="reading-range">` + 右侧数值 | 数值 `1.8` 格式 |
 | 栏宽（normal/wide） | `<select>` | `SegmentedControl` | 2 项 |
 
 每行结构：图标 + 标签（左，`text-muted-foreground`）+ 控件（右），`gap-3`。标签图标沿用 `Type`/`Settings2`/`AlignLeft`/`Maximize2`（lucide，已 import）。
 
-底部「恢复默认」文字按钮：`text-xs text-muted-foreground hover:text-foreground`，调 `update(...DEFAULT_READING_SETTINGS)`。用户调乱字号后可一键回到 serif/17px/1.8/normal。
+底部「恢复默认」文字按钮：`text-xs text-muted-foreground hover:text-foreground`，调 `update(DEFAULT_READING_SETTINGS)`（整体替换）。用户调乱字号后可一键回到 serif/17px/1.8/normal。
 
 ### 3.5 ItemActions 改造后形态
 
 ```tsx
-<Popover trigger={<SettingsButton favorited={state?.favorited} />}>
+<Popover trigger={<SettingsButton favorited={state?.favorited} hasTags={(state?.tags?.length ?? 0) > 0} />}>
   <div className="flex flex-col gap-1">
     <FavoriteRow ... />
     <RefreshRow ... />
@@ -185,15 +250,23 @@ interface Props {
 
 ## §4 进度条
 
-### 4.1 数据来源
+### 4.1 数据来源（含恢复路径同步）
 
-复用现有 `useReadingProgress`。改造：hook 内部用 `lastProgress.current`（ref）存采样值只对内，现额外返回 `progress: number`（0–1）state 供进度条订阅：
+复用现有 `useReadingProgress`。改造：hook 内部用 `lastProgress.current`（ref）存采样值只对内，现额外返回 `progress: number`（0–1）state 供进度条订阅。
 
-- hook 内 `useState<number>(0)`，`onScroll` 里除了更新 `lastProgress.current` 也 `setProgress(p)`
-- 返回 `{ progress }`；`restore`/`flush` 逻辑完全不动
-- scroll 期间每帧 setState 是进度条的常见模式（`onScroll` 已 `{ passive: true }`，React 18 自动批处理）；若实测掉帧再加 rAF 节流，先按最简来
+**关键（review Issue 1）**：restore 路径用 `window.scrollTo` 定位，programmatic scroll 不触发 scroll event。若只在 `onScroll` 里 `setProgress`，打开已有进度的文章时进度条会卡在 0 直至用户再滚动。因此：
+
+- hook 内 `useState<number>(0)`
+- `onScroll` 里 `setProgress(p)`（与更新 `lastProgress.current` 同步）
+- **restore 分支**：双 rAF 的 `scrollTo` 之后 `setProgress(target)`（用恢复目标值，或 `computeProgress()`）
+- **id 切换重置**：在写入 effect 的 `lastProgress.current = null` 处，同时 `setProgress(0)`
+- 返回 `{ progress }`；`flush` 逻辑完全不动
+
+明确：**restore / id 重置也会更新 progress state**——这是 UI 同步，不属于 restore/flush 的写入逻辑改动。
 
 `ReadPage`/`BookPage` 从 `useReadingProgress(opts)` 解构出 `progress`，传给 `ArticleView`。
+
+短文兜底：`computeProgress() === null`（内容不足一屏，分母 ≤ 0）时 progress 保持 0——进度条为空，不误显示满条。
 
 ### 4.2 ReadingProgress 组件
 
@@ -204,23 +277,27 @@ function ReadingProgress({ progress }: { progress: number })
 // progress 已 clamp 到 0–1
 ```
 
-**定位：底部 fixed，宽度匹配阅读列宽**（非全屏宽、非 sticky）。理由：
+**定位：底部 fixed，全宽贴视口底**（review Issue 2）。理由：
 
 - sticky 在 `<article>` 内部放底部不可行——进度条作为 article 最后子元素，用户滚到文章末尾附近才进入视口，中段时在视口外下方看不到
-- fixed 贴视口底，阅读时始终可见；宽度匹配正文列宽，与正文视觉一体，随栏宽设置（normal/wide）变化
+- fixed 贴视口底，阅读时始终可见
+- **全宽**（非「与正文同宽」）——实现更简单，无 `PageShell` 水平 padding 对齐坑；也是阅读 app 常见做法（Kindle、Safari 阅读视图均为全宽底部条）
 
 ```
-            ═══════════════════════════   ← 居中，max-w-3xl/4xl，与正文对齐
+═══════════════════════════════════════   ← fixed bottom-0，贯穿视口底部
 ```
 
-实现：`fixed bottom-0 left-1/2 -translate-x-1/2` + 复用 `readingMaxWidthClass(maxWidth)`（`reading-settings.tsx:122`）。
+实现：`fixed inset-x-0 bottom-0`。
 
 填充条：
 
 - 容器：`h-0.5 w-full bg-transparent`（底色透明，仅填充条可见）
-- 填充：`h-full bg-foreground/30 transition-[width] duration-150 ease-out`，`style={{ width: \`${progress * 100}%\` }}`
+- 填充：`h-full bg-foreground/30`，`style={{ width: \`${progress * 100}%\` }}`
+- **无 width transition**（review Issue 8）——scroll 时连续 `setProgress` 再加 transition 会让条「拖在真实进度后面」；行业常见做法是无 transition
 - `progress === 0` 时 `width:0` 不占位；`progress === 1`（读完）保持满条（读完也是进度信息）
 - 颜色用 `bg-foreground/30` 而非品牌色——阅读场景需克制，且自动适配 dark/light
+
+**iOS 安全区**（review Issue 11）：容器用 `bottom: env(safe-area-inset-bottom, 0px)`（或等价内联样式），避免在带 Home Indicator 的设备上贴物理底边与系统手势条重叠。手动验收含真机 Safari。
 
 ### 4.3 挂载点
 
@@ -238,7 +315,7 @@ function ReadingProgress({ progress }: { progress: number })
 每步独立可验证、独立 commit：
 
 1. §2 视觉原语（`SegmentedControl` + 滑块 CSS + `Popover`）—— 纯新增，不影响现有 UI
-2. §4 进度条（hook 返回 progress + `ReadingProgress` 组件 + `ArticleView` prop + 两阅读页接入）—— 独立可验收
+2. §4 进度条（hook 返回 progress + restore 同步 + `ReadingProgress` 组件 + `ArticleView` prop + 两阅读页接入）—— 独立可验收
 3. §3 统一操作浮层（改写 `reading-settings-panel` + 改写 `item-actions` + 接入）—— 最后做，依赖 §2
 
 ## 验证
@@ -252,9 +329,15 @@ bun run build
 
 手动验收点：
 
-- 打开任意帖子/书库正文，底部出现进度条，滚动时填充随之变化，宽度与正文对齐
-- 切换栏宽（normal/wide），进度条宽度跟随
-- trigger 单个按钮，点击打开浮层；已收藏时 trigger 显 amber 高亮 + Star 角标
+- 打开任意帖子/书库正文，底部出现进度条，滚动时填充随之变化（无 transition 滞后）
+- **打开已有进度的文章**：进度条初始宽度 ≈ 已读比例（无需先滚动）
+- **不足一屏的短文**：进度条为空（0），不误显示满条
+- 进度条贯穿视口底部全宽；iOS 真机不与 Home Indicator 恶性重叠（safe-area 生效）
+- trigger 单个按钮，点击打开浮层；已收藏时 trigger 显 amber 高亮 + Star 角标；有标签时显 Tag 角标
 - 浮层内收藏 toggle、刷新、标签编辑、字体/字号/行高/栏宽、恢复默认全部可用
-- 点浮层外、按 Escape、再点 trigger 三路关闭均生效
+- **标签编辑中按 Esc**：先退出编辑；再 Esc 关浮层
+- 点浮层外、按 Escape、再点 trigger 三路关闭均生效；关闭后焦点回到 trigger
+- **小屏高度下**浮层可滚动、不裁切到不可用（max-h + overflow-y-auto）
+- 取消收藏 confirm 弹出时，confirm 返回后 Popover 仍 open
+- SegmentedControl 选中态可被读屏感知（`aria-pressed`）；trigger 有 `aria-expanded`/`aria-haspopup`
 - dark/light 模式下控件配色正确跟随
