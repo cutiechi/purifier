@@ -165,7 +165,7 @@ export function Popover(props: PopoverProps): JSX.Element
 
 ```tsx
 import { useEffect, useId, useRef, useState } from "react"
-import type { ReactNode, RefAttributes } from "react"
+import type { ReactNode } from "react"
 import { cn } from "@workspace/ui/lib/utils"
 
 interface PopoverProps {
@@ -188,38 +188,45 @@ export function Popover({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
 
-  // 点外面关闭：面板内交互不冒泡（wrapperRef contain 检测）
+  // 统一关闭：三路（外点 / Esc / toggle 关）共用，都回焦到 trigger。
+  // 不能各自直接 setOpen(false) —— 外点路径会漏 focus（review Issue 1）。
+  const close = () => {
+    setOpen(false)
+    // 下一帧回焦，避免与触发关闭的 click 同帧冲突
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }
+
+  // 点外面关闭：wrapperRef contain 检测，面板内交互不冒泡关闭
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: PointerEvent) => {
       if (!wrapperRef.current) return
       if (!wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false)
+        close()
       }
     }
     document.addEventListener("pointerdown", onPointerDown)
     return () => document.removeEventListener("pointerdown", onPointerDown)
   }, [open])
 
-  // Escape 关闭：面板内元素可 stopPropagation 拦截（如标签编辑态先取消编辑）
+  // Escape 关闭：若焦点在可编辑元素上，留给该元素自己处理（如标签编辑态先取消编辑），
+  // 不关层（review Issue 2 方案 1 —— 不依赖 stopPropagation 冒泡路径，更硬）。
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false)
-        triggerRef.current?.focus()
-      }
+      if (e.key !== "Escape") return
+      const t = e.target as HTMLElement | null
+      const editable =
+        t?.tagName === "INPUT" ||
+        t?.tagName === "TEXTAREA" ||
+        t?.isContentEditable === true
+      if (editable) return // 可编辑元素的 Esc 由它自己处理
+      close()
     }
+    // 必须 bubble 阶段监听（默认），capture 会先于 input 触发导致拦不住
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
   }, [open])
-
-  // 关闭后焦点回到 trigger（由 Esc 路径处理；这里处理 toggle 关闭路径）
-  const close = () => {
-    setOpen(false)
-    // toggle 关闭时也回焦，下一帧避免与 click 同帧冲突
-    requestAnimationFrame(() => triggerRef.current?.focus())
-  }
 
   return (
     <div ref={wrapperRef} className="relative inline-flex">
@@ -228,8 +235,10 @@ export function Popover({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
         aria-label={triggerAriaLabel}
         onClick={() => (open ? close() : setOpen(true))}
+        className="inline-flex rounded-lg p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {trigger}
       </button>
@@ -251,7 +260,12 @@ export function Popover({
 }
 ```
 
-注意：`trigger` 是 ReactNode（图标内容），Popover 自己包 `<button>` 以统一管理 `ref`/`aria`/`onClick`。trigger 元素本身不要再是 button。
+注意：
+- `trigger` 是 ReactNode（图标内容），Popover 自己包 `<button>` 以统一管理 `ref`/`aria`/`onClick`。trigger 元素本身不要再是 button
+- 外层 button 加 `inline-flex p-0 focus-visible:ring`（review Issue 3）——避免基线空隙、补键盘 focus 环
+- `aria-controls={open ? panelId : undefined}`（review Issue 5）关联合上 trigger 与面板
+- 三路关闭（外点 / Esc / toggle 关）统一走 `close()`，都回焦（review Issue 1）
+- Esc 路径对可编辑 target（input/textarea/contenteditable）直接 return，不关层（review Issue 2 方案 1）——比依赖 `stopPropagation` 冒泡路径更稳，capture 监听或 window 监听场景下都成立
 
 - [ ] **Step 2: typecheck**
 
@@ -394,8 +408,12 @@ const [progress, setProgress] = useState(0)
       requestAnimationFrame(() => {
         const doc = document.documentElement
         const max = doc.scrollHeight - window.innerHeight
-        if (max > 0) window.scrollTo(0, Math.round(target * max))
-        setProgress(target) // 恢复后立即同步进度条（programmatic scroll 不触发 scroll event）
+        if (max > 0) {
+          window.scrollTo(0, Math.round(target * max))
+          setProgress(target) // 恢复后立即同步进度条（programmatic scroll 不触发 scroll event）
+        } else {
+          setProgress(0) // 短文（max<=0）不显示进度，与 onScroll 兜底一致（review Issue 4）
+        }
       })
     )
 ```
@@ -1060,7 +1078,7 @@ function TagEditor({
             onKeyDown={(e) => {
               if (e.key === "Enter") void submit()
               if (e.key === "Escape") {
-                e.stopPropagation() // 先取消编辑，不关 Popover（spec §2.4）
+                e.stopPropagation() // 双保险：Popover 对可编辑 target 已直接 return，此处再 stopPropagation
                 cancel()
               }
             }}
@@ -1182,6 +1200,20 @@ git commit -m "feat(web): unify ItemActions into single Popover (actions + readi
 ---
 
 ## Self-Review
+
+### Plan review 修订（2026-08-06）
+
+plan review 的 7 个 issue 已全部处理：
+
+| Issue | 处理 | 位置 |
+| --- | --- | --- |
+| 1 (bug) 外点关闭不回焦 | 抽统一 `close()`，三路（外点/Esc/toggle 关）共用 + 回焦 | Task 2 |
+| 2 (bug) Esc 契约靠 stopPropagation 不稳 | Popover 对可编辑 target（input/textarea/contenteditable）直接 return；TagEditor stopPropagation 降级为双保险 | Task 2 + Task 6 |
+| 3 (suggestion) button 缺焦点样式 | 外层 button 加 `inline-flex p-0 focus-visible:ring` | Task 2 |
+| 4 (suggestion) restore 时 max≤0 仍 setProgress | max>0 才 setProgress(target)，else setProgress(0) | Task 4 Step 1 |
+| 5 (nit) aria-controls 缺 | trigger 加 `aria-controls={open ? panelId : undefined}` | Task 2 |
+| 6 (nit) RefAttributes 无用 import | 删除，只 import `ReactNode` | Task 2 |
+| 7 (nit) Task 5 中间态无外壳 | 接受不改（Task 6 覆盖前 intermediate commit 视觉略素，可接受） | — |
 
 ### Spec coverage
 
