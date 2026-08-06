@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -249,4 +250,76 @@ describe("listByTag", () => {
     expect(store.listByTag("科", {}).items).toHaveLength(0) // 精确匹配
     expect(store.listByTag("科幻", { kind: "book" }).items).toHaveLength(0)
   })
+})
+
+// 模拟旧库：用不含 read_progress 的 DDL 建库并写入一行
+function makeOldDatabase(dir: string): void {
+  const db = new Database(join(dir, "purifier.db"))
+  db.exec("PRAGMA journal_mode = WAL;")
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS items (
+      kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
+      id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_visited_at INTEGER NOT NULL,
+      visit_count INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (kind, id)
+    );
+    CREATE TABLE IF NOT EXISTS favorites (kind TEXT NOT NULL, id TEXT NOT NULL, favorited_at INTEGER NOT NULL, PRIMARY KEY (kind, id));
+    CREATE TABLE IF NOT EXISTS tags (kind TEXT NOT NULL, id TEXT NOT NULL, tag TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (kind, id, tag));
+  `)
+  db.query(
+    "INSERT INTO items (kind, id, title, url, first_seen_at, last_visited_at, visit_count) VALUES ('post', 't1', 'old', '/read/t1', 1, 1, 3)"
+  ).run()
+  db.close()
+}
+
+test("openDatabase migrates old DB: adds read_progress, preserves data", () => {
+  const dir = mkdtempSync(join(tmpdir(), "purifier-migrate-old-"))
+  try {
+    makeOldDatabase(dir)
+    // 确认旧库确实没有 read_progress
+    const before = new Database(join(dir, "purifier.db"))
+    const colsBefore = before.query("PRAGMA table_info(items)").all() as {
+      name: string
+    }[]
+    expect(colsBefore.map((c) => c.name)).not.toContain("read_progress")
+    before.close()
+
+    // 重新打开会触发迁移
+    const db = openDatabase(dir)
+    const cols = db.query("PRAGMA table_info(items)").all() as {
+      name: string
+    }[]
+    expect(cols.map((c) => c.name)).toContain("read_progress")
+    // 旧行数据保留
+    const row = db
+      .query("SELECT title, visit_count, read_progress FROM items WHERE id = 't1'")
+      .get() as { title: string; visit_count: number; read_progress: number | null }
+    expect(row.title).toBe("old")
+    expect(row.visit_count).toBe(3)
+    expect(row.read_progress).toBeNull() // 新列默认 NULL
+    db.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("openDatabase is idempotent when read_progress already exists", () => {
+  const dir = mkdtempSync(join(tmpdir(), "purifier-migrate-idem-"))
+  try {
+    const db1 = openDatabase(dir)
+    db1.close()
+    // 第二次打开同一库：PRAGMA 检测到列已存在，不再 ALTER，不报错
+    const db2 = openDatabase(dir)
+    const cols = db2.query("PRAGMA table_info(items)").all() as {
+      name: string
+    }[]
+    expect(cols.filter((c) => c.name === "read_progress")).toHaveLength(1)
+    db2.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
