@@ -377,3 +377,30 @@ test("recordVisit does not reset read_progress", () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test("deleteItem clears read_progress with the row", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    store.setProgress("post", "t1", 0.5)
+    store.deleteItem("post", "t1")
+    // 重新创建同 id：read_progress 必须是新行的 NULL，不是旧值
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("clearHistory clears read_progress for all rows", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    store.setProgress("post", "t1", 0.9)
+    store.clearHistory()
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
