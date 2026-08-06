@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  readFile,
-  readdir,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises"
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { ExtractorError } from "../extractor/types"
 import { ItemKind } from "./types"
@@ -27,25 +20,36 @@ export interface CacheEntry<T> {
 
 export function contentCachePath(
   dataDir: string,
+  site: string,
   kind: ItemKind,
-  id: string
+  id: string,
+  chapter?: number | string
 ): string {
+  assertSafeId(site)
   assertSafeId(id)
-  return join(dataDir, "cache", `${kind}-${id}.html`)
+  const ch = chapter !== undefined ? `-ch${chapter}` : ""
+  return join(dataDir, "cache", site, `${kind}-${id}${ch}.html`)
 }
 
-export function repliesCachePath(dataDir: string, id: string): string {
+export function repliesCachePath(
+  dataDir: string,
+  site: string,
+  id: string
+): string {
+  assertSafeId(site)
   assertSafeId(id)
-  return join(dataDir, "cache", `replies-${id}.json`)
+  return join(dataDir, "cache", site, `replies-${id}.json`)
 }
 
 /** 读正文/书库 HTML 缓存；无缓存返回 null */
 export async function readContentCache(
   dataDir: string,
+  site: string,
   kind: ItemKind,
-  id: string
+  id: string,
+  chapter?: number | string
 ): Promise<CacheEntry<string> | null> {
-  const path = contentCachePath(dataDir, kind, id)
+  const path = contentCachePath(dataDir, site, kind, id, chapter)
   try {
     const [data, info] = await Promise.all([readFile(path, "utf8"), stat(path)])
     return { data, mtimeMs: info.mtimeMs, sizeBytes: info.size }
@@ -57,20 +61,24 @@ export async function readContentCache(
 
 export async function writeContentCache(
   dataDir: string,
+  site: string,
   kind: ItemKind,
   id: string,
-  html: string
+  html: string,
+  chapter?: number | string
 ): Promise<void> {
-  await mkdir(join(dataDir, "cache"), { recursive: true })
-  await writeFile(contentCachePath(dataDir, kind, id), html, "utf8")
+  const path = contentCachePath(dataDir, site, kind, id, chapter)
+  await mkdir(join(dataDir, "cache", site), { recursive: true })
+  await writeFile(path, html, "utf8")
 }
 
 /** 读回复 JSON 缓存；无缓存返回 null（data 类型由调用方校验，损坏 JSON 抛错） */
 export async function readRepliesCache(
   dataDir: string,
+  site: string,
   id: string
 ): Promise<CacheEntry<unknown> | null> {
-  const path = repliesCachePath(dataDir, id)
+  const path = repliesCachePath(dataDir, site, id)
   try {
     const [raw, info] = await Promise.all([readFile(path, "utf8"), stat(path)])
     return {
@@ -86,28 +94,35 @@ export async function readRepliesCache(
 
 export async function writeRepliesCache(
   dataDir: string,
+  site: string,
   id: string,
   replies: unknown
 ): Promise<void> {
-  await mkdir(join(dataDir, "cache"), { recursive: true })
+  await mkdir(join(dataDir, "cache", site), { recursive: true })
   await writeFile(
-    repliesCachePath(dataDir, id),
+    repliesCachePath(dataDir, site, id),
     JSON.stringify(replies),
     "utf8"
   )
 }
 
-/** 清空 cache/ 目录下全部文件；返回删除数量；目录不存在返回 0 */
+/** 清空 cache/ 目录下全部文件（含 site 子目录）；返回删除数量；目录不存在返回 0 */
 export async function clearCache(dataDir: string): Promise<number> {
   const dir = join(dataDir, "cache")
-  let cleared = 0
   try {
-    for (const name of await readdir(dir)) {
-      await unlink(join(dir, name))
-      cleared++
-    }
+    const cleared = await countFiles(dir)
+    await rm(dir, { recursive: true, force: true })
+    return cleared
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
+    return 0
   }
-  return cleared
+}
+
+async function countFiles(dir: string): Promise<number> {
+  let n = 0
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    n += entry.isDirectory() ? await countFiles(join(dir, entry.name)) : 1
+  }
+  return n
 }
