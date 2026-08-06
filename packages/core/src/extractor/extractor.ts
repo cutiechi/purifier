@@ -12,6 +12,7 @@ import {
   CategoryPage,
   RecommendSection,
   ContentResponse,
+  BookContentResponse,
   PostMeta,
   BookMeta,
   ReplyItem,
@@ -111,11 +112,10 @@ export class Cool18Extractor implements Extractor {
   }
 
   /** 书库藏文 bookview 页 */
-  extractBookContent(html: string): {
-    title: string
-    content: string
-    meta: BookMeta
-  } {
+  extractBookContent(
+    html: string,
+    opts?: { chapter?: string }
+  ): BookContentResponse {
     const $ = cheerio.load(html)
 
     let title =
@@ -502,6 +502,14 @@ export class Cool18Extractor implements Extractor {
     }
 
     return ordered.filter((s) => s.links.length > 0)
+  }
+
+  async fetchHotHtml(): Promise<string> {
+    const resp = await fetchUpstream(`${this.homeUrl}?app=forum&act=hot`)
+    if (!resp.ok) {
+      throw new ExtractorError(`upstream error: ${resp.status}`, 502)
+    }
+    return resp.text()
   }
 
   extractHotPosts(html: string): HotPost[] {

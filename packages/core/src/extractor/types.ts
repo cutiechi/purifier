@@ -61,6 +61,16 @@ export interface BookContentResponse {
   title: string
   content: string
   meta: BookMeta
+  // —— xbookcn 扩展（可选，cool18 不填，行为不变）——
+  intro?: string
+  chapters?: ChapterLink[]
+  singleShot?: boolean
+  related?: ChapterLink[]
+  /** 章节正文页的书名（recordVisit 书名策略用）；目录页不需填 */
+  bookTitle?: string
+  chapterIndex?: number
+  prevChapter?: number
+  nextChapter?: number
 }
 
 export interface HomePage {
@@ -114,16 +124,19 @@ export interface Extractor {
   buildBookUrl(cid: string): string
   /** 解析正文并复用同一次 DOM 解析产出站外链接 */
   extractContent(html: string): ContentResponse
-  extractBookContent(html: string): {
-    title: string
-    content: string
-    meta: BookMeta
-  }
+  extractBookContent(
+    html: string,
+    opts?: { chapter?: string }
+  ): BookContentResponse
   extractGoldLinks(html: string): ChapterLink[]
   extractHotPosts(html: string): HotPost[]
   extractCmtRankPosts(html: string): CmtRankPost[]
   extractCategoryLinks(html: string): CategoryLink[]
   extractRecommendSections(html: string): RecommendSection[]
+  /** 热榜 HTML 来源（handleTrending 统一调用） */
+  fetchHotHtml(): Promise<string>
+  /** 章节 URL（xbookcn 用；cool18 不实现即 undefined，API 层可选链调用） */
+  buildChapterUrl?(cid: string, chapter: string | number): string
   fetchCategoryPage(query: CategoryQuery, page: number): Promise<CategoryPage>
   fetchHomeLinks(mtid: string): Promise<HomePage>
   fetchReplies(tid: string): Promise<ReplyNode[]>
