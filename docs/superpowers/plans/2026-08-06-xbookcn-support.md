@@ -515,25 +515,25 @@ if (needRebuild) {
 
 为下列方法首参加 `site: string`（参数顺序：site 在前）。SQL 的 `WHERE kind=? AND id=?` 改 `WHERE site=? AND kind=? AND id=?`，`ON CONFLICT(kind,id)` 改 `ON CONFLICT(site,kind,id)`：
 
-- `recordVisit(site, kind, id, title, url)` —— `title` 改为 `string | undefined`（review I2）：章节页无 bookTitle 时传 `undefined`，SQL 用 `COALESCE` 不覆盖已有 title：
+- `recordVisit(site, kind, id, title, url)` —— `title` 改为 `string | undefined`（review I2 + 复评 Important 1）：章节页无 bookTitle 时传 `undefined`，**必须绑成 SQL NULL**（不是 `?? url`——那会把书名盖成 URL，反而违背"不覆盖"意图）。新行 title 用 SQL `COALESCE(?4, ?5)` 兜底（NULL→url），冲突更新用 `COALESCE(?4, items.title)`（NULL→保留旧 title）：
   ```ts
   recordVisit(site: string, kind: ItemKind, id: string, title: string | undefined, url: string): void {
     const now = this.now()
     this.db
       .query(
         `INSERT INTO items (site, kind, id, title, url, first_seen_at, last_visited_at, visit_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1)
+         VALUES (?1, ?2, ?3, COALESCE(?4, ?5), ?5, ?6, ?6, 1)
          ON CONFLICT(site, kind, id) DO UPDATE SET
            title = COALESCE(?4, items.title),
            url = excluded.url,
            last_visited_at = excluded.last_visited_at,
            visit_count = visit_count + 1`
       )
-      // 新行 title 必填：首次插入时 title 不能 undefined
-      .run(site, kind, id, title ?? url, url, now)
+      // title === undefined → 绑 null（SQL NULL）；新行由 COALESCE(?4,?5) 用 url 兜底
+      .run(site, kind, id, title ?? null, url, now)
   }
   ```
-  （首次插入 title 用 `title ?? url` 兜底，避免 NOT NULL 约束失败；冲突更新时 `COALESCE(?4, items.title)`——传入 undefined 实为 NULL 则保留旧 title。）
+  **测试（Step 7 必加，复评 Important 1 要求）**：先 `recordVisit("1","book","X","书名","/url")`，再 `recordVisit("1","book","X",undefined,"/url")`，断言 `getState(...).title === "书名"`（未被覆盖成 url）。
 - `setProgress(site, kind, id, progress, chapter?)` —— 签名加 `chapter?: number`；SQL 改为同时写 `last_chapter`：
   ```ts
   setProgress(site: string, kind: ItemKind, id: string, progress: number, chapter?: number): boolean {
@@ -1552,4 +1552,4 @@ Run: `bun run dev`（需 HTTPS_PROXY 若上游不可达）
 
 **已知风险点：** Task 6 的 `sanitizeChapterHtml` 占位策略需仔细对齐 cool18 `extractPreHtml`（`extractor.ts:770-814`）；Task 4 旧库迁移顺序（read_progress ADD 先于 site 重建，且 PK 检测不能只看列）；Task 7 `buildChapterUrl` 需为接口可选成员（Task 2 补）；Task 6 选择器必须用真实 HTML 校对（review C4）；Task 3-6 期间 API 保留 name 版 getExtractor（review C1，Task 7 才切换）。
 
-**review 评审已修订项：** C1(Task 3 getExtractor 兼容) / C2(Task 4 迁移显式 site + PK 检测) / C3(Task 7 buildChapterUrl 可选链) / C4(Task 6 fixture/cidFromUrl/章标题/选择器契约) / I1(deleteItems 逐条 site) / I2(recordVisit COALESCE 不覆盖) / I3(BookPage 按 site 三分支) / I4(restoreId 含 chapter) / I5(AGENTS.md) / I6(搜索措辞) / S1(半残说明) / S2(fetchHotHtml 错误对齐) / S3(handlePosts 判定注释) 均已 inline 修订。
+**review 评审已修订项：** C1(Task 3 getExtractor 兼容) / C2(Task 4 迁移显式 site + PK 检测) / C3(Task 7 buildChapterUrl 可选链) / C4(Task 6 fixture/cidFromUrl/章标题/选择器契约) / I1(deleteItems 逐条 site) / I2(recordVisit COALESCE 不覆盖) / 复评1(recordVisit 绑定 title ?? null 而非 ?? url，避免书名被盖成 URL) / I3(BookPage 按 site 三分支) / I4(restoreId 含 chapter) / I5(AGENTS.md) / I6(搜索措辞) / S1(半残说明) / S2(fetchHotHtml 错误对齐) / S3(handlePosts 判定注释) 均已 inline 修订。
