@@ -5,6 +5,7 @@
 import { join } from "node:path"
 import {
   CONTENT_CACHE_HEADERS,
+  DEFAULT_SITE,
   ExtractorError,
   LIST_CACHE_HEADERS,
   NO_STORE_HEADERS,
@@ -13,15 +14,16 @@ import {
   assertSafeId,
   clearCache,
   fetchUpstream,
-  getExtractor,
   jsonError,
   jsonOk,
   openDatabase,
   readContentCache,
   readRepliesCache,
+  resolveSite,
   writeContentCache,
   writeRepliesCache,
   type CacheEntry,
+  type Extractor,
   type ItemKind,
   type ItemState,
   type ListQuery,
@@ -71,6 +73,22 @@ function meIdParam(url: URL): string {
   return id
 }
 
+/** 批量删除历史 body 单条：{site?, kind, id}；site 可选，缺省 API 层补 "1" */
+function isDeleteItem(
+  it: unknown
+): it is { site?: string; kind: "post" | "book"; id: string } {
+  if (!it || typeof it !== "object") return false
+  const kind = "kind" in it ? it.kind : undefined
+  const id = "id" in it ? it.id : undefined
+  const site = "site" in it ? it.site : undefined
+  return (
+    (kind === "post" || kind === "book") &&
+    typeof id === "string" &&
+    /^[A-Za-z0-9]+$/.test(id) &&
+    (site === undefined || typeof site === "string")
+  )
+}
+
 function meListQuery(url: URL): ListQuery {
   const kindRaw = url.searchParams.get("kind")
   let kind: ListQuery["kind"] = ""
@@ -84,6 +102,7 @@ function meListQuery(url: URL): ListQuery {
     q: url.searchParams.get("q")?.trim() || "",
     kind,
     page: parseInt(url.searchParams.get("page") || "1", 10) || 1,
+    site: url.searchParams.get("site") ?? undefined,
   }
 }
 
@@ -104,22 +123,24 @@ interface LoadedContent {
  * - 有 refresh：跳过缓存抓上游，成功覆盖缓存；失败回退旧缓存（stale），无旧缓存则抛错
  */
 async function loadCachedContent(
+  site: string,
   kind: ItemKind,
   id: string,
   refresh: boolean,
-  fetchFn: () => Promise<string>
+  fetchFn: () => Promise<string>,
+  chapter?: string
 ): Promise<LoadedContent> {
   if (!refresh) {
-    const cached = await readContentCache(DATA_DIR, kind, id)
+    const cached = await readContentCache(DATA_DIR, site, kind, id, chapter)
     if (cached) return { html: cached.data, fromCache: true, refreshed: false }
   }
   try {
     const html = await fetchFn()
-    await writeContentCache(DATA_DIR, kind, id, html)
+    await writeContentCache(DATA_DIR, site, kind, id, html, chapter)
     return { html, fromCache: false, refreshed: refresh }
   } catch (err) {
     if (!refresh) throw err
-    const cached = await readContentCache(DATA_DIR, kind, id)
+    const cached = await readContentCache(DATA_DIR, site, kind, id, chapter)
     if (cached) {
       return {
         html: cached.data,
@@ -138,15 +159,16 @@ async function loadCachedContent(
  * 两类上游失败，均按规格回退旧缓存 / 空数组，符合部分刷新矩阵第 2、4 行；不要改成只 catch 网络错误。
  */
 async function loadCachedReplies(
+  site: string,
   tid: string,
   refresh: boolean
 ): Promise<{ replies: ReplyNode[]; fromCache: boolean }> {
-  const extractor = getExtractor("cool18")
+  const extractor = resolveSite(site)
   // 损坏/截断的回复缓存（JSON.parse 抛错）一律按 miss 处理，绝不让它拖垮正文页（刷新会覆盖写坏文件）
   if (!refresh) {
     let cached: CacheEntry<unknown> | null = null
     try {
-      cached = await readRepliesCache(DATA_DIR, tid)
+      cached = await readRepliesCache(DATA_DIR, site, tid)
     } catch {
       cached = null
     }
@@ -157,12 +179,12 @@ async function loadCachedReplies(
   try {
     const raw = await extractor.fetchRepliesRaw(tid)
     const replies = extractor.parseReplies(raw, tid)
-    await writeRepliesCache(DATA_DIR, tid, replies)
+    await writeRepliesCache(DATA_DIR, site, tid, replies)
     return { replies, fromCache: false }
   } catch {
     let cached: CacheEntry<unknown> | null = null
     try {
-      cached = await readRepliesCache(DATA_DIR, tid)
+      cached = await readRepliesCache(DATA_DIR, site, tid)
     } catch {
       cached = null
     }
@@ -174,8 +196,16 @@ async function loadCachedReplies(
 }
 
 async function handlePosts(url: URL): Promise<Response> {
+  const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const extractor = resolveSite(site)
   const tid = url.searchParams.get("tid")
-  const extractor = getExtractor("cool18")
+
+  if (tid && siteId !== "1") {
+    // xbookcn 无帖子模型（review S3：两站阶段用 siteId!=="1" 可接受；
+    // 加第三站若有书站需改成按 extractor 能力判定，如 `extractor.name === "cool18"`）
+    return jsonError("xbookcn does not support posts", 404)
+  }
 
   if (!tid) {
     const mtid = url.searchParams.get("mtid") || "0"
@@ -189,14 +219,14 @@ async function handlePosts(url: URL): Promise<Response> {
   const pageUrl = extractor.buildUrl(tid)
 
   const [content, repliesResult] = await Promise.all([
-    loadCachedContent("post", tid, refresh, async () => {
+    loadCachedContent(siteId, "post", tid, refresh, async () => {
       const resp = await fetchUpstream(pageUrl)
       if (!resp.ok) {
         throw new ExtractorError(`upstream error: ${resp.status}`, 502)
       }
       return resp.text()
     }),
-    loadCachedReplies(tid, refresh),
+    loadCachedReplies(siteId, tid, refresh),
   ])
 
   const {
@@ -212,7 +242,7 @@ async function handlePosts(url: URL): Promise<Response> {
   }
 
   // 成功解析后记录访问（含 cache hit 与 stale 兜底）
-  store.recordVisit("post", tid, title, pageUrl)
+  store.recordVisit(siteId, "post", tid, title, pageUrl)
 
   const payload: Record<string, unknown> = {
     title,
@@ -235,41 +265,76 @@ async function handleBooks(url: URL): Promise<Response> {
   const cid = url.searchParams.get("cid")
   if (!cid) return jsonError("missing cid parameter", 400)
   assertSafeId(cid)
-
+  const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const extractor = resolveSite(site)
+  const chapter = url.searchParams.get("chapter") ?? undefined
+  if (chapter !== undefined) assertSafeId(chapter)
   const refresh = url.searchParams.get("refresh") === "1"
-  const extractor = getExtractor("cool18")
-  const pageUrl = extractor.buildBookUrl(cid)
 
-  const content = await loadCachedContent("book", cid, refresh, async () => {
-    const resp = await fetchUpstream(pageUrl, {
-      headers: { Referer: extractor.homeUrl },
-    })
-    if (!resp.ok) {
-      throw new ExtractorError(`upstream error: ${resp.status}`, 502)
-    }
-    return resp.text()
-  })
+  const pageUrl =
+    chapter && extractor.buildChapterUrl
+      ? extractor.buildChapterUrl(cid, chapter)
+      : extractor.buildBookUrl(cid)
 
-  const {
-    title,
-    content: bodyHtml,
-    meta,
-  } = extractor.extractBookContent(content.html)
+  const content = await loadCachedContent(
+    siteId,
+    "book",
+    cid,
+    refresh,
+    async () => {
+      const resp = await fetchUpstream(pageUrl, {
+        headers: { Referer: extractor.homeUrl },
+      })
+      if (!resp.ok) {
+        throw new ExtractorError(`upstream error: ${resp.status}`, 502)
+      }
+      return resp.text()
+    },
+    chapter
+  )
 
-  store.recordVisit("book", cid, title, pageUrl)
+  const result = extractor.extractBookContent(
+    content.html,
+    chapter ? { chapter } : undefined
+  )
+
+  // 书名策略（review I2）：有 bookTitle 用书名；无 bookTitle 时不覆盖已有 title。
+  // recordVisit 改造为：title 传 undefined 时 SQL 不动 title 列（见 Task 4 recordVisit）。
+  const visitTitle = result.bookTitle ?? (chapter ? undefined : result.title)
+  store.recordVisit(
+    siteId,
+    "book",
+    cid,
+    visitTitle,
+    extractor.buildBookUrl(cid)
+  )
 
   const payload: Record<string, unknown> = {
-    title,
-    content: bodyHtml,
-    meta,
+    title: result.title,
+    content: result.content,
+    meta: result.meta,
     url: pageUrl,
     cid,
+  }
+  // xbookcn 扩展字段（cool18 这些为 undefined，JSON 里自然省略）
+  const extKeys = [
+    "intro",
+    "chapters",
+    "singleShot",
+    "related",
+    "chapterIndex",
+    "prevChapter",
+    "nextChapter",
+  ] as const
+  for (const k of extKeys) {
+    const v = result[k]
+    if (v !== undefined) payload[k] = v
   }
   if (refresh && !content.refreshed) {
     payload.stale = true
     payload.refreshError = content.refreshError
   }
-
   const useNoStore = content.fromCache || refresh
   return jsonOk(payload, useNoStore ? NO_STORE_HEADERS : CONTENT_CACHE_HEADERS)
 }
@@ -281,15 +346,18 @@ async function handleBrowse(url: URL): Promise<Response> {
   const query = type ? { type } : q ? { keywords: q } : null
   if (!query) return jsonError("missing type or q parameter", 400)
 
-  const extractor = getExtractor("cool18")
+  const site = url.searchParams.get("site") ?? undefined
+  const extractor = resolveSite(site)
   const result = await extractor.fetchCategoryPage(query, page)
   return jsonOk(result, LIST_CACHE_HEADERS)
 }
 
 async function handleHomeExtract(
-  pick: (extractor: ReturnType<typeof getExtractor>, html: string) => unknown
+  url: URL,
+  pick: (extractor: Extractor, html: string) => unknown
 ): Promise<Response> {
-  const extractor = getExtractor("cool18")
+  const site = url.searchParams.get("site") ?? undefined
+  const extractor = resolveSite(site)
   const resp = await fetchUpstream(extractor.homeUrl)
   if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
   const html = await resp.text()
@@ -302,14 +370,15 @@ function handleMeHistory(url: URL): Response {
 
 /**
  * 删除历史：
- * - ?all=1 → 清空全部
- * - ?kind=&id= → 删除单条
- * - body { items: [{kind,id}] } → 批量（清空本页）
+ * - ?all=1 → 清空全部（可带 ?site= 只清该站）
+ * - ?kind=&id= → 删除单条（可带 ?site=）
+ * - body { items: [{site?,kind,id}] } → 批量（清空本页；每条独立 site）
  */
 async function handleHistoryDelete(req: Request): Promise<Response> {
   const url = new URL(req.url)
+  const site = url.searchParams.get("site") ?? undefined
   if (url.searchParams.get("all") === "1") {
-    const removed = store.clearHistory()
+    const removed = store.clearHistory(site)
     return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
   }
 
@@ -318,7 +387,7 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
   if (kindRaw !== null || idRaw !== null) {
     const kind = meKindParam(url)
     const id = meIdParam(url)
-    const existed = store.deleteItem(kind, id)
+    const existed = store.deleteItem(site ?? "1", kind, id)
     return jsonOk({ ok: true, removed: existed ? 1 : 0 }, NO_STORE_HEADERS)
   }
 
@@ -327,28 +396,22 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
     body = await req.json()
   } catch {
     return jsonError(
-      "missing all=1, kind+id, or JSON body { items: [{kind,id}] }",
+      "missing all=1, kind+id, or JSON body { items: [{site?,kind,id}] }",
       400
     )
   }
-  const items = (body as { items?: unknown })?.items
-  if (
-    !Array.isArray(items) ||
-    !items.every(
-      (it) =>
-        it &&
-        typeof it === "object" &&
-        ((it as { kind?: unknown }).kind === "post" ||
-          (it as { kind?: unknown }).kind === "book") &&
-        typeof (it as { id?: unknown }).id === "string" &&
-        /^[A-Za-z0-9]+$/.test((it as { id: string }).id)
-    )
-  ) {
-    return jsonError("items must be {kind,id}[]", 400)
+  const items =
+    body && typeof body === "object" && "items" in body ? body.items : undefined
+  const valid = Array.isArray(items) ? items.filter(isDeleteItem) : []
+  if (!Array.isArray(items) || valid.length !== items.length) {
+    return jsonError("items must be {site?,kind,id}[]", 400)
   }
-  const pairs = (items as Array<{ kind: "post" | "book"; id: string }>).map(
-    (it) => ({ kind: it.kind, id: it.id })
-  )
+  // review I1：每条带自己的 site（缺省 "1"），跨站"清空本页"不会删错站
+  const pairs = valid.map((it) => ({
+    site: it.site ?? "1",
+    kind: it.kind,
+    id: it.id,
+  }))
   const removed = store.deleteItems(pairs)
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
 }
@@ -357,8 +420,9 @@ function handleMeFavorites(url: URL): Response {
   return jsonOk(store.listFavorites(meListQuery(url)), NO_STORE_HEADERS)
 }
 
-function handleMeTags(): Response {
-  return jsonOk({ tags: store.listTags() }, NO_STORE_HEADERS)
+function handleMeTags(url: URL): Response {
+  const site = url.searchParams.get("site") ?? undefined
+  return jsonOk({ tags: store.listTags(site) }, NO_STORE_HEADERS)
 }
 
 function handleMeItems(url: URL): Response {
@@ -370,10 +434,12 @@ function handleMeItems(url: URL): Response {
 function handleMeState(url: URL): Response {
   const kind = meKindParam(url)
   const id = meIdParam(url)
-  const state = store.getState(kind, id)
+  const siteId = url.searchParams.get("site") ?? DEFAULT_SITE
+  const state = store.getState(siteId, kind, id)
   // 对象不存在返回 200 空状态（visit_count 0）：前端 useItemState 对 !res.ok 静默，
   // 空状态与「未收藏/无标签」UI 等价；正文页打开会先 recordVisit 再查询，正常路径不会出现。
   const empty: ItemState = {
+    site: siteId,
     kind,
     id,
     title: "",
@@ -384,6 +450,7 @@ function handleMeState(url: URL): Response {
     favorited: false,
     tags: [],
     read_progress: null,
+    lastChapter: null,
   }
   return jsonOk(state ?? empty, NO_STORE_HEADERS)
 }
@@ -395,11 +462,21 @@ async function handleFavoriteWrite(
   const url = new URL(req.url)
   const kind = meKindParam(url)
   const id = meIdParam(url)
+  // site 走 body（Task 10 前端 PUT body 带 site）；无 body（旧客户端）默认 "1"
+  let site = "1"
+  try {
+    const body: unknown = await req.json()
+    if (body && typeof body === "object" && "site" in body) {
+      if (typeof body.site === "string") site = body.site
+    }
+  } catch {
+    // 无 body → site 保持默认 "1"
+  }
   if (favorite) {
-    const ok = store.addFavorite(kind, id)
+    const ok = store.addFavorite(site, kind, id)
     if (!ok) return jsonError("item not found", 404)
   } else {
-    store.removeFavorite(kind, id)
+    store.removeFavorite(site, kind, id)
   }
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
 }
@@ -411,19 +488,26 @@ async function handleTagsWrite(req: Request): Promise<Response> {
   } catch {
     return jsonError("invalid json body", 400)
   }
-  const b = (body ?? {}) as { kind?: unknown; id?: unknown; tags?: unknown }
-  if (b.kind !== "post" && b.kind !== "book") {
+  if (!body || typeof body !== "object") {
+    return jsonError("invalid json body", 400)
+  }
+  const kind = "kind" in body ? body.kind : undefined
+  const id = "id" in body ? body.id : undefined
+  const tags = "tags" in body ? body.tags : undefined
+  const site = "site" in body ? body.site : undefined
+  if (kind !== "post" && kind !== "book") {
     return jsonError("invalid kind", 400)
   }
-  if (typeof b.id !== "string" || !/^[A-Za-z0-9]+$/.test(b.id)) {
+  if (typeof id !== "string" || !/^[A-Za-z0-9]+$/.test(id)) {
     return jsonError("invalid id", 400)
   }
-  if (!Array.isArray(b.tags) || !b.tags.every((t) => typeof t === "string")) {
+  if (!Array.isArray(tags) || !tags.every((t) => typeof t === "string")) {
     return jsonError("tags must be string[]", 400)
   }
-  const tags = store.setTags(b.kind, b.id, b.tags as string[])
-  if (tags === null) return jsonError("item not found", 404)
-  return jsonOk({ ok: true, tags }, NO_STORE_HEADERS)
+  const siteId = typeof site === "string" ? site : "1"
+  const result = store.setTags(siteId, kind, id, tags)
+  if (result === null) return jsonError("item not found", 404)
+  return jsonOk({ ok: true, tags: result }, NO_STORE_HEADERS)
 }
 
 async function handleProgressWrite(req: Request): Promise<Response> {
@@ -433,30 +517,42 @@ async function handleProgressWrite(req: Request): Promise<Response> {
   } catch {
     return jsonError("invalid json body", 400)
   }
-  const b = (body ?? {}) as {
-    kind?: unknown
-    id?: unknown
-    progress?: unknown
+  if (!body || typeof body !== "object") {
+    return jsonError("invalid json body", 400)
   }
-  if (b.kind !== "post" && b.kind !== "book") {
+  const kind = "kind" in body ? body.kind : undefined
+  const id = "id" in body ? body.id : undefined
+  const progress = "progress" in body ? body.progress : undefined
+  const site = "site" in body ? body.site : undefined
+  const chapter = "chapter" in body ? body.chapter : undefined
+  if (kind !== "post" && kind !== "book") {
     return jsonError("invalid kind", 400)
   }
-  if (typeof b.id !== "string" || !/^[A-Za-z0-9]+$/.test(b.id)) {
+  if (typeof id !== "string" || !/^[A-Za-z0-9]+$/.test(id)) {
     return jsonError("invalid id", 400)
   }
-  if (typeof b.progress !== "number" || !Number.isFinite(b.progress)) {
+  if (typeof progress !== "number" || !Number.isFinite(progress)) {
     return jsonError("progress must be a finite number", 400)
   }
-  const ok = store.setProgress(b.kind, b.id, b.progress)
+  let chapterNum: number | undefined
+  if (chapter !== undefined) {
+    if (typeof chapter !== "number" || !Number.isFinite(chapter)) {
+      return jsonError("chapter must be a finite number", 400)
+    }
+    chapterNum = chapter
+  }
+  const siteId = typeof site === "string" ? site : "1"
+  const ok = store.setProgress(siteId, kind, id, progress, chapterNum)
   if (!ok) return jsonError("item not found", 404)
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
 }
 
-/** 全局删除某一标签（所有对象上的该标签行） */
+/** 全局删除某一标签（所有对象上的该标签行）；可带 ?site= 只删该站 */
 function handleTagDelete(url: URL): Response {
   const tag = url.searchParams.get("tag")?.trim()
   if (!tag) return jsonError("missing tag parameter", 400)
-  const removed = store.deleteTag(tag)
+  const site = url.searchParams.get("site") ?? undefined
+  const removed = store.deleteTag(site, tag)
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
 }
 
@@ -465,8 +561,9 @@ async function handleCacheClear(): Promise<Response> {
   return jsonOk({ cleared }, NO_STORE_HEADERS)
 }
 
-async function handleComments(): Promise<Response> {
-  const extractor = getExtractor("cool18")
+async function handleComments(url: URL): Promise<Response> {
+  const site = url.searchParams.get("site") ?? undefined
+  const extractor = resolveSite(site)
   const resp = await fetchUpstream(`${extractor.homeUrl}?act=cmtrank&y=1`)
   if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
   const html = await resp.text()
@@ -476,12 +573,20 @@ async function handleComments(): Promise<Response> {
   )
 }
 
-async function handleTrending(): Promise<Response> {
-  const extractor = getExtractor("cool18")
-  const resp = await fetchUpstream(`${extractor.homeUrl}?app=forum&act=hot`)
-  if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
-  const html = await resp.text()
-  return jsonOk({ posts: extractor.extractHotPosts(html) }, LIST_CACHE_HEADERS)
+async function handleTrending(url: URL): Promise<Response> {
+  const site = url.searchParams.get("site") ?? undefined
+  const extractor = resolveSite(site)
+  try {
+    const html = await extractor.fetchHotHtml()
+    return jsonOk(
+      { posts: extractor.extractHotPosts(html) },
+      LIST_CACHE_HEADERS
+    )
+  } catch (err) {
+    if (err instanceof ExtractorError) throw err
+    const status = err instanceof UpstreamTimeoutError ? 504 : 502
+    return jsonError(`upstream error`, status)
+  }
 }
 
 async function route(req: Request): Promise<Response> {
@@ -510,25 +615,25 @@ async function route(req: Request): Promise<Response> {
         return await handleBrowse(url)
       case "/api/categories":
         requireGet(req)
-        return await handleHomeExtract((ex, html) => ({
+        return await handleHomeExtract(url, (ex, html) => ({
           links: ex.extractCategoryLinks(html),
         }))
       case "/api/featured":
         requireGet(req)
-        return await handleHomeExtract((ex, html) => ({
+        return await handleHomeExtract(url, (ex, html) => ({
           links: ex.extractGoldLinks(html),
         }))
       case "/api/picks":
         requireGet(req)
-        return await handleHomeExtract((ex, html) => ({
+        return await handleHomeExtract(url, (ex, html) => ({
           sections: ex.extractRecommendSections(html),
         }))
       case "/api/comments":
         requireGet(req)
-        return await handleComments()
+        return await handleComments(url)
       case "/api/trending":
         requireGet(req)
-        return await handleTrending()
+        return await handleTrending(url)
       case "/api/me/history": {
         if (req.method === "GET") return handleMeHistory(url)
         if (req.method === "DELETE") return await handleHistoryDelete(req)
@@ -542,7 +647,7 @@ async function route(req: Request): Promise<Response> {
         throw new ExtractorError("method not allowed", 405)
       }
       case "/api/me/tags": {
-        if (req.method === "GET") return handleMeTags()
+        if (req.method === "GET") return handleMeTags(url)
         if (req.method === "PUT") return await handleTagsWrite(req)
         if (req.method === "DELETE") return handleTagDelete(url)
         throw new ExtractorError("method not allowed", 405)
