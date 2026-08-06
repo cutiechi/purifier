@@ -18,6 +18,13 @@
  * | Tags        | `/tags?tag=&q=&kind=&page=`  |
  */
 
+export type SiteId = string
+export const DEFAULT_SITE: SiteId = "1"
+export const SITES: Record<SiteId, { label: string }> = {
+  "1": { label: "论坛" },
+  "2": { label: "书库" },
+}
+
 export const routes = {
   home: "/",
   featured: "/featured",
@@ -51,12 +58,26 @@ export const api = {
   health: "/api/health",
 } as const
 
-export function readPath(tid: string): string {
-  return `/read/${encodeURIComponent(tid)}`
+function withSite(params: URLSearchParams, site?: string) {
+  if (site && site !== DEFAULT_SITE) params.set("site", site)
 }
 
-export function bookPath(cid: string): string {
-  return `/book/${encodeURIComponent(cid)}`
+export function readPath(tid: string, site?: SiteId): string {
+  const p = new URLSearchParams()
+  withSite(p, site)
+  const qs = p.toString()
+  return `/read/${encodeURIComponent(tid)}${qs ? `?${qs}` : ""}`
+}
+
+export function bookPath(
+  cid: string,
+  opts?: { site?: SiteId; chapter?: string }
+): string {
+  const p = new URLSearchParams()
+  withSite(p, opts?.site)
+  if (opts?.chapter) p.set("chapter", opts.chapter)
+  const qs = p.toString()
+  return `/book/${encodeURIComponent(cid)}${qs ? `?${qs}` : ""}`
 }
 
 /** Category / column listing (filtered). */
@@ -64,8 +85,10 @@ export function browsePath(opts: {
   type?: string | null
   q?: string | null
   page?: number
+  site?: SiteId
 }): string {
   const params = new URLSearchParams()
+  withSite(params, opts.site)
   if (opts.type) params.set("type", opts.type)
   if (opts.q) params.set("q", opts.q)
   if (opts.page && opts.page > 1) params.set("page", String(opts.page))
@@ -73,9 +96,14 @@ export function browsePath(opts: {
   return qs ? `${routes.browse}?${qs}` : routes.browse
 }
 
-export function searchPath(opts: { q: string; page?: number }): string {
+export function searchPath(opts: {
+  q: string
+  page?: number
+  site?: SiteId
+}): string {
   const params = new URLSearchParams()
   params.set("q", opts.q)
+  withSite(params, opts.site)
   if (opts.page && opts.page > 1) params.set("page", String(opts.page))
   return `${routes.search}?${params.toString()}`
 }
@@ -125,52 +153,62 @@ export const NAV_ITEMS = [
   {
     href: routes.home,
     label: "首页",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.home,
   },
   {
     href: routes.categories,
     label: "分类",
+    sites: ["1", "2"],
     match: (p: string) =>
       p === routes.categories || p === routes.browse || p.startsWith("/browse"),
   },
   {
     href: routes.featured,
     label: "精华",
+    sites: ["1"],
     match: (p: string) => p === routes.featured,
   },
   {
     href: routes.picks,
     label: "扫文",
+    sites: ["1"],
     match: (p: string) => p === routes.picks,
   },
   {
     href: routes.comments,
     label: "评论",
+    sites: ["1"],
     match: (p: string) => p === routes.comments,
   },
   {
     href: routes.trending,
     label: "人气",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.trending,
   },
   {
     href: routes.search,
     label: "搜索",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.search,
   },
   {
     href: routes.history,
     label: "历史",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.history,
   },
   {
     href: routes.favorites,
     label: "收藏",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.favorites,
   },
   {
     href: routes.tags,
     label: "标签",
+    sites: ["1", "2"],
     match: (p: string) => p === routes.tags,
   },
 ] as const
