@@ -1,6 +1,11 @@
-import { Settings2, Type, AlignLeft, Maximize2 } from "lucide-react"
-import { useReadingSettings } from "@/components/reading-settings"
-import type { ReadingFont, ReadingMaxWidth } from "@/components/reading-settings"
+import { Type, Settings2, AlignLeft, Maximize2, RotateCcw } from "lucide-react"
+import { SegmentedControl } from "@/components/ui/segmented-control"
+import {
+  useReadingSettings,
+  DEFAULT_READING_SETTINGS,
+  type ReadingFont,
+  type ReadingMaxWidth,
+} from "@/components/reading-settings"
 
 const FONTS: { value: ReadingFont; label: string }[] = [
   { value: "serif", label: "衬线" },
@@ -16,30 +21,29 @@ const WIDTHS: { value: ReadingMaxWidth; label: string }[] = [
 export function ReadingSettingsPanel() {
   const { settings, update } = useReadingSettings()
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 text-sm">
-      <label className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-3">
+      <div className="text-xs font-medium text-muted-foreground">阅读偏好</div>
+
+      <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Type className="size-3.5" /> 字体
         </span>
-        <select
-          className="rounded-md border border-border bg-background px-2 py-1"
+        <SegmentedControl
+          aria-label="字体"
+          options={FONTS}
           value={settings.font}
-          onChange={(e) => update({ font: e.target.value as ReadingFont })}
-        >
-          {FONTS.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={(font) => update({ font })}
+        />
+      </div>
 
       <label className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <Settings2 className="size-3.5" /> 字号 {settings.fontSize}px
+          <Settings2 className="size-3.5" /> 字号
+          <span className="tabular-nums text-foreground">{settings.fontSize}px</span>
         </span>
         <input
           type="range"
+          className="reading-range"
           min={14}
           max={22}
           step={1}
@@ -50,10 +54,14 @@ export function ReadingSettingsPanel() {
 
       <label className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-muted-foreground">
-          <AlignLeft className="size-3.5" /> 行高 {settings.lineHeight.toFixed(1)}
+          <AlignLeft className="size-3.5" /> 行高
+          <span className="tabular-nums text-foreground">
+            {settings.lineHeight.toFixed(1)}
+          </span>
         </span>
         <input
           type="range"
+          className="reading-range"
           min={1.4}
           max={2.2}
           step={0.1}
@@ -62,24 +70,27 @@ export function ReadingSettingsPanel() {
         />
       </label>
 
-      <label className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <Maximize2 className="size-3.5" /> 栏宽
         </span>
-        <select
-          className="rounded-md border border-border bg-background px-2 py-1"
+        <SegmentedControl
+          aria-label="栏宽"
+          options={WIDTHS}
           value={settings.maxWidth}
-          onChange={(e) =>
-            update({ maxWidth: e.target.value as ReadingMaxWidth })
-          }
-        >
-          {WIDTHS.map((w) => (
-            <option key={w.value} value={w.value}>
-              {w.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={(maxWidth) => update({ maxWidth })}
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => update(DEFAULT_READING_SETTINGS)}
+        className="self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span className="inline-flex items-center gap-1">
+          <RotateCcw className="size-3" /> 恢复默认
+        </span>
+      </button>
     </div>
   )
 }
