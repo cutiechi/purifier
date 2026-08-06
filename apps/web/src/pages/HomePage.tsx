@@ -31,6 +31,7 @@ export default function HomePage() {
   const nextMtidRef = useRef<string | null>(null)
   const hasMoreRef = useRef(true)
   const loadingMoreRef = useRef(false)
+  const seqRef = useRef(0)
 
   useEffect(() => {
     nextMtidRef.current = nextMtid
@@ -43,12 +44,15 @@ export default function HomePage() {
     setLoadingMore(true)
     setLoadMoreError("")
 
+    const seq = seqRef.current
     try {
       const mtid = nextMtidRef.current
       const res = await fetch(
         `${api.posts}?mtid=${mtid ?? "0"}&site=${site}`
       )
       const json = (await res.json()) as HomeResponse
+      // 换站/重拉（fetchFirstPage）会递增 seq；过期响应直接丢弃，避免混入旧站数据
+      if (seq !== seqRef.current) return
       if (!res.ok) {
         setLoadMoreError((json as { error?: string }).error || "请求失败")
         return
@@ -59,7 +63,9 @@ export default function HomePage() {
       })
       setNextMtid(json.nextMtid)
     } catch (e) {
-      setLoadMoreError(e instanceof Error ? e.message : "未知错误")
+      if (seq === seqRef.current) {
+        setLoadMoreError(e instanceof Error ? e.message : "未知错误")
+      }
     } finally {
       loadingMoreRef.current = false
       setLoadingMore(false)
@@ -67,6 +73,7 @@ export default function HomePage() {
   }, [site])
 
   const fetchFirstPage = useCallback(async () => {
+    seqRef.current++ // 使在途 loadMore 响应失效（含换站场景）
     setInitialLoading(true)
     setError("")
     setLoadMoreError("")
