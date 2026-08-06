@@ -103,7 +103,8 @@ export function ItemActions({
   const hasTags = (state?.tags?.length ?? 0) > 0
 
   return (
-    <Popover
+    <div className="flex justify-end">
+      <Popover
       align="end"
       triggerAriaLabel="阅读操作与偏好"
       trigger={
@@ -175,7 +176,8 @@ export function ItemActions({
         {/* 阅读偏好 */}
         <ReadingSettingsPanel />
       </div>
-    </Popover>
+      </Popover>
+    </div>
   )
 }
 
