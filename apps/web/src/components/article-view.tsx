@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { IconExternal } from "@/components/icons"
 import { PostMetaBar, type PostMetaFields } from "@/components/post-meta"
 import { PostCard, PostList } from "@/components/post-card"
+import { ReadingProgress } from "@/components/reading-progress"
 import { readPath } from "@/lib/routes"
 
 function withParagraphs(html: string): string {
@@ -62,6 +63,7 @@ export function ArticleView({
   currentTid,
   actions,
   footer,
+  progress,
 }: {
   title: string
   meta?: PostMetaFields
@@ -70,6 +72,7 @@ export function ArticleView({
   currentTid?: string
   actions?: ReactNode
   footer?: ReactNode
+  progress?: number
 }) {
   return (
     <article className="rounded-2xl border border-border/80 bg-card/90 p-4 shadow-sm sm:rounded-3xl sm:p-8 md:p-10">
@@ -88,6 +91,8 @@ export function ArticleView({
       <ContentBody html={contentHtml} />
 
       {footer}
+
+      {progress !== undefined && <ReadingProgress progress={progress} />}
     </article>
   )
 }

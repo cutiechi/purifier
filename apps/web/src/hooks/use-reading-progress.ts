@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "@/lib/routes"
 
 const WRITE_DEBOUNCE_MS = 1500
@@ -19,6 +19,7 @@ export function useReadingProgress(
     restore: number | null | undefined
   }
 ) {
+  const [progress, setProgress] = useState(0)
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastProgress = useRef<number | null>(null)
   const lastSent = useRef<number | null>(null)
@@ -47,7 +48,12 @@ export function useReadingProgress(
       requestAnimationFrame(() => {
         const doc = document.documentElement
         const max = doc.scrollHeight - window.innerHeight
-        if (max > 0) window.scrollTo(0, Math.round(target * max))
+        if (max > 0) {
+          window.scrollTo(0, Math.round(target * max))
+          setProgress(target) // 恢复后立即同步进度条（programmatic scroll 不触发 scroll event）
+        } else {
+          setProgress(0) // 短文（max<=0）不显示进度，与 onScroll 兜底一致（review Issue 4）
+        }
       })
     )
     return () => cancelAnimationFrame(raf2)
@@ -62,6 +68,7 @@ export function useReadingProgress(
     // id 变化时（同组件实例复用）重置采样，避免串用上一篇的进度
     lastProgress.current = null
     lastSent.current = null
+    setProgress(0)
 
     const flush = async () => {
       const p = lastProgress.current
@@ -83,7 +90,10 @@ export function useReadingProgress(
 
     const onScroll = () => {
       const p = computeProgress()
-      if (p !== null) lastProgress.current = p
+      if (p !== null) {
+        lastProgress.current = p
+        setProgress(p)
+      }
       if (writeTimer.current) clearTimeout(writeTimer.current)
       writeTimer.current = setTimeout(flush, WRITE_DEBOUNCE_MS)
     }
@@ -95,4 +105,6 @@ export function useReadingProgress(
       void flush()
     }
   }, [opts.ready, kind, id])
+
+  return { progress }
 }

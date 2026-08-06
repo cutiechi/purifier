@@ -28,7 +28,7 @@ export default function ReadPage() {
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
-  useReadingProgress("post", tid, {
+  const { progress } = useReadingProgress("post", tid, {
     ready: loadedTid === tid, // 当前 tid 内容已挂载（按 id 区分，避免串用上一篇）
     stateReady: state !== null && state.id === tid, // 当前文章的 state GET 已完成
     restore: state?.id === tid ? state.read_progress : undefined,
@@ -89,6 +89,7 @@ export default function ReadPage() {
               contentHtml={content.content}
               sourceUrl={content.url}
               currentTid={tid}
+              progress={progress}
               actions={
                 <ItemActions
                   kind="post"

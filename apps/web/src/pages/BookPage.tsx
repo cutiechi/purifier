@@ -24,7 +24,7 @@ export default function BookPage() {
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
-  useReadingProgress("book", cid, {
+  const { progress } = useReadingProgress("book", cid, {
     ready: loadedCid === cid, // 当前 cid 内容已挂载（按 id 区分，避免串用上一篇）
     stateReady: state !== null && state.id === cid, // 当前文章的 state GET 已完成
     restore: state?.id === cid ? state.read_progress : undefined,
@@ -84,6 +84,7 @@ export default function BookPage() {
               meta={{ author: book.meta?.author }}
               contentHtml={book.content}
               sourceUrl={book.url}
+              progress={progress}
               actions={
                 <ItemActions
                   kind="book"
