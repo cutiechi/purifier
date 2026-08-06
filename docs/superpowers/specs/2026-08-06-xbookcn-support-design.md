@@ -2,7 +2,8 @@
 
 - 日期：2026-08-06
 - 状态：已确认，待实现（**全能力覆盖**：站上有的内容能力 Purifier 全支持）
-- 修订：2026-08-06 — Chrome 实测后将搜索/热读榜/相关推荐/单篇纳入范围；并吸收 review Critical 项
+- 修订 1：2026-08-06 — Chrome 实测后将搜索/热读榜/相关推荐/单篇纳入范围；吸收 review Critical 项
+- 修订 2：2026-08-06 — 吸收复评 Important：进度方案 A（`last_chapter` 列 + 章号匹配恢复）、`BookContentResponse.bookTitle`、`Extractor.fetchHotHtml`
 
 ## 背景与目标
 
@@ -217,6 +218,12 @@ export class XbookcnExtractor implements Extractor {
    */
   extractHotPosts(html: string): HotPost[] { ... }
 
+  /** 热榜 HTML 来源：xbookcn 抓 `/`（首页含侧栏热榜）。cool18 抓 `?app=forum&act=hot`。 */
+  async fetchHotHtml(): Promise<string> {
+    const resp = await fetchUpstream(this.homeUrl)
+    return resp.text()
+  }
+
   // —— 上游无对等 ——
   extractGoldLinks(): ChapterLink[] {
     throw notSupported("gold/featured links")
@@ -269,6 +276,8 @@ export interface BookContentResponse {
   prevChapter?: number
   nextChapter?: number
   related?: ChapterLink[] // 相关推荐（目录页）
+  /** 章节正文页的书名（用于 recordVisit 书名策略）；目录页不需填 */
+  bookTitle?: string
   // 可选展示：字数/章数文案，不强制
   wordCountLabel?: string
   chapterCount?: number
@@ -280,6 +289,8 @@ export interface Extractor {
     html: string,
     opts?: { chapter?: string }
   ): BookContentResponse
+  /** 热榜 HTML 来源（handleTrending 统一调用，避免 API 层硬编码站特定 URL） */
+  fetchHotHtml(): Promise<string>
 }
 ```
 
@@ -293,36 +304,43 @@ export interface Extractor {
 
 1. `PRAGMA table_info` 无 `site` → `ADD COLUMN site TEXT NOT NULL DEFAULT '1'`。
 2. 检测主键是否已含 `site`（或用 user_version / 标记表）；若否：
-   - `CREATE TABLE items_new (... PRIMARY KEY (site, kind, id))`
-   - `INSERT INTO items_new SELECT ... FROM items`（site 已 DEFAULT '1'）
-   - 换表名；favorites / tags 同理。
+   - `CREATE TABLE items_new (... PRIMARY KEY (site, kind, id), last_chapter INTEGER)`（`last_chapter` 可空，见进度语义）
+   - `INSERT INTO items_new SELECT ..., NULL AS last_chapter FROM items`（site 已 DEFAULT '1'；旧数据无章号信息）
+   - 换表名；favorites / tags 同理（这两表不需 last_chapter）。
 3. 索引重建：`idx_items_visited` 等带 site 前缀可选。
+
+新库的 DDL 直接含 `last_chapter INTEGER`（可空）。cool18 的书库（整本一页）不写该列，留空。
 
 `store.ts` 全部方法加 `site`（写路径必填；列表 query 可选 site，不传=跨站）。`ON CONFLICT(site, kind, id)`。JOIN / `tagsFor` key 含 site。
 
 **章节访问与 recordVisit**：
 
 - 请求带 `chapter` 时仍记 `(site, book, cid)` **一行**。
-- **title** 优先用书名：章节响应可同时带 `bookTitle`（从章页「欲望夜」链或面包屑解析），无则不覆盖已有 title（SQL `title = COALESCE(NULLIF(excluded.title,''), items.title)` 或 API 层传入目录缓存的书名）。
+- **title 必须用书名**（不用章节名）：`extractChapter` 从章页「返回书页」/面包屑链解析书名填入 `BookContentResponse.bookTitle`（见 §3）；`handleBooks` 在带 `chapter` 时 `recordVisit(..., bookTitle, buildBookUrl(cid))`。`bookTitle` 缺失时 API 层从目录缓存或 items 现有 title 回退（SQL `COALESCE(NULLIF(excluded.title,''), items.title)`）。
 - **url** 固定目录 URL `buildBookUrl(cid)`，不写章节 URL。
 - `visit_count`：章节与目录访问都 +1 可接受（书级活跃度）。
 
-**进度语义（拍板）**：
+**进度语义（拍板：方案 A 服务端记章）**：
 
-- 继续使用现有 `read_progress REAL`（0..1 **页内滚动**）。
-- site=2：**仅章节正文页**启用 `useReadingProgress`；目录页不写进度。
-- **不**把 progress 解释成「第 n 章」；重新打开历史默认进**目录页**（`bookPath(cid,{site})` 无 chapter）。若需「续读章节」作为后续增强，另开字段 `last_chapter`，不在本次范围。
-- 与验证清单一致：章内滚动可恢复（同章再进时），跨会话从历史进书仍是目录。
+进度由两个列共同表达：`read_progress REAL`（0..1 章内滚动比例）+ `last_chapter INTEGER`（可空，记录上次阅读章号）。
+
+- `setProgress(site, kind, id, progress, chapter?)`：写 `read_progress=progress`；**当 `chapter` 给定时**同步写 `last_chapter=Number(chapter)`，无 chapter（如 cool18 整本、xbookcn 目录页）不更新 last_chapter。
+- site=2：**仅章节正文页**调用 `useReadingProgress(cid, chapter)`；目录页不写进度。
+- **滚动恢复条件**：重新进入某章时，仅当 `当前章号 === items.last_chapter` 才 `restore` 到 `read_progress`；章号不符则从顶部开始（避免跨章错误恢复）。
+- `getState` 响应增加 `lastChapter: number | null`，前端 `useReadingProgress` 依此判断是否恢复。
+- 历史列表仍按书级（cid）一行展示；重新打开历史默认进**目录页**（`bookPath(cid,{site})` 无 chapter）。进度条在历史卡片上表示"该书某章读到 X%"，章号从 `last_chapter` 可知但点击仍进目录——「续读上次章节」按钮可作为前端增强（用 `last_chapter` 拼 `?chapter=`），非阻塞。
+- cool18 书库（site=1 整本一页）：不传 chapter，`last_chapter` 留空，进度行为与现状完全一致。
 
 ### 5. API 层
 
 - 所有内容 handler：`const site = url.searchParams.get("site") ?? undefined` → `resolveSite(site)`。
 - **`handlePosts(tid)`**：site=2 时**短路 404**（不 `loadCachedReplies`、不抓 cool18）。仅 `mtid` 列表走 `fetchHomeLinks`。
-- **`handleBooks`**：读 `chapter`；抓取 URL 为 `buildChapterUrl` 或 `buildBookUrl`；响应展开 `intro/chapters/related/prev/next/singleShot` 等。
+- **`handleBooks`**：读 `chapter`；抓取 URL 为 `buildChapterUrl` 或 `buildBookUrl`；响应展开 `intro/chapters/related/prev/next/singleShot/bookTitle` 等。`recordVisit` 用 `bookTitle`（见 §4）。
 - **`handleBrowse`**：`q` 走搜索；`type` 走标签。
-- **`handleTrending`**：site=2 抓 `homeUrl`，`extractHotPosts`。
+- **`handleTrending`**：两站"热榜 HTML 来源"不同——cool18 是 `homeUrl?app=forum&act=hot`，xbookcn 是 `homeUrl`（首页含热读榜侧栏）。为避免 API 层硬编码 URL 又只换 extractor，把"取热榜 HTML"收进 extractor：新增 `Extractor.fetchHotHtml(): Promise<string>`（cool18 抓 `?app=forum&act=hot`，xbookcn 抓 `/`），`handleTrending` 统一调它再 `extractHotPosts(html)`。同理 `handleFeatured`/`handleComments`/`handlePicks` 的 HTML 来源也走 extractor（或各自 `extractXxx` 已接收 html 参数则由调用方抓）。**本次最小实现**：先给 `fetchHotHtml`，其余 homeExtract 类维持现状（它们已接收 html，由 handler 抓 `homeUrl`）。
 - **`handleComments` / featured / picks`**：site=2 随 extractor 404（或显式 404）。
-- **`/api/me/*`**：query/body 透传 `site`（默认 `"1"`）；列表 item 返回 `site`；批量 delete 的 items 含 `site?`。
+- **`/api/me/*`**：query/body 透传 `site`（默认 `"1"`）；列表 item 返回 `site` + `lastChapter`；批量 delete 的 items 含 `site?`。
+- **`PUT /api/me/progress`**：body 增加 `chapter?` 字段，透传给 `setProgress(site, kind, id, progress, chapter)`（方案 A）。
 
 **缓存 key**（修正 review C1/C2）：
 
@@ -378,33 +396,33 @@ export interface Extractor {
 ### 7. 测试
 
 - `xbookcn.test.ts`：fixtures 入库 `packages/core/src/extractor/fixtures/xbookcn/`（裁剪最小 HTML，勿整页大文件）。覆盖：
-  - extractToc / 单篇 / extractChapter
+  - extractToc / 单篇 / extractChapter（含 `bookTitle` 从面包屑解析）
   - 外链剥离、章内链改写
   - extractCategoryLinks（url 含 site=2）
   - fetchHomeLinks 游标语义（可用 stub fetch）
   - extractHotPosts
   - fetchCategoryPage 搜索 vs 标签 URL 拼装
-- `store.test.ts`：site CRUD、隔离、迁移后 PK/ON CONFLICT
+- `store.test.ts`：site CRUD、隔离、迁移后 PK/ON CONFLICT；**`setProgress` 带 chapter 写 last_chapter、不带则不动**；`getState` 返回 lastChapter
 - `sites.test.ts`：resolve / 未知 id
-- `extractor.test.ts`：cool18 新签名回归
+- `extractor.test.ts`：cool18 新签名回归（opts 忽略）；`fetchHotHtml` 两站 URL 正确
 - `cache.test.ts`：site + chapter 分文件不互盖
 
 ## 改动清单（按依赖顺序）
 
-1. `types.ts` — `BookContentResponse` 扩展；`extractBookContent` opts
+1. `types.ts` — `BookContentResponse` 扩展（含 `bookTitle`/`singleShot`/`related` 等）；`Extractor` 加 `fetchHotHtml`；`extractBookContent` opts
 2. `extractor/utils.ts` — 共享清洗
-3. `extractor.ts` — Cool18 适配；import utils
-4. `xbookcn.ts` — 全能力实现
+3. `extractor.ts` — Cool18 适配：`extractBookContent` opts 忽略；实现 `fetchHotHtml`（抓 `?app=forum&act=hot`）；import utils
+4. `xbookcn.ts` — 全能力实现（含 `extractChapter` 解析 `bookTitle`、`fetchHotHtml` 抓 `/`）
 5. `sites.ts` + `index.ts`
-6. `db.ts` — site 列 + **重建 PK** 迁移
-7. `store.ts` + `types.ts`（ListItem.site）
+6. `db.ts` — site 列 + `last_chapter` 列 + **重建 PK** 迁移
+7. `store.ts` — `setProgress(site,kind,id,progress,chapter?)` 写 last_chapter；`getState` 返回 lastChapter；`ListItem` 加 site + lastChapter
 8. `cache.ts` — site/chapter 路径
-9. `apps/api/src/index.ts` — site 贯穿、books chapter、posts 短路、me 透传
+9. `apps/api/src/index.ts` — site 贯穿；`handleTrending` 走 `extractor.fetchHotHtml()`；`handleBooks` recordVisit 用 bookTitle；`PUT /api/me/progress` 透传 chapter；posts 短路；me 透传
 10. `routes.ts` + `use-site` + `site-switcher`
 11. 列表页 / BookPage / Trending / Search / Categories / Browse — site 与 book 链
-12. `item-actions` / `use-reading-progress` / me 卡片 — site
+12. `use-reading-progress` — 接收 chapter，仅当 `当前章===lastChapter` 才 restore；`item-actions` / me 卡片带 site
 13. `site-header` — NAV 按 site 过滤
-14. 测试 + fixtures
+14. 测试 + fixtures（含进度跨章恢复、bookTitle 解析、fetchHotHtml）
 15. 更新 `Agents.md` API 表：`site`、`chapter`、xbookcn 行为
 
 ## 验证
@@ -425,8 +443,9 @@ bun run dev
 - [ ] 多章目录 + 章节正文 + 上下章 + 相关推荐
 - [ ] 单篇：目录 CTA → chapter=1 正文
 - [ ] 正文无站外推广链；章链带 site=2
-- [ ] 收藏/历史书级；列表带 site；重新打开进目录
-- [ ] 章节页滚动进度可恢复；目录不写脏书名
+- [ ] 收藏/历史书级；列表带 site + lastChapter；重新打开进目录
+- [ ] 章节页滚动进度：**同章再进恢复**到上次位置；**换章不误恢复**（从顶部开始）；目录页不写进度
+- [ ] 历史书名是书名（非章节名）；章页 recordVisit 不污染 title
 - [ ] 导航无精华/扫文/评论；有搜索/人气
 - [ ] 切回 site=1，cool18 全功能正常
 
