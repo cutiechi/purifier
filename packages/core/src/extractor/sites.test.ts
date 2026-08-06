@@ -7,6 +7,9 @@ describe("resolveSite", () => {
     expect(e.name).toBe("cool18")
     expect(resolveSite(DEFAULT_SITE).name).toBe("cool18")
   })
+  test("site 2 resolves to xbookcn", () => {
+    expect(resolveSite("2").name).toBe("xbookcn")
+  })
   test("unknown id throws 400", () => {
     expect(() => resolveSite("99")).toThrow(/unknown site/)
   })
