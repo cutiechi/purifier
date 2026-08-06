@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
-import { Settings2 } from "lucide-react"
+import { Settings2, Star, Tag } from "lucide-react"
 import { IconRefreshCw, IconStar } from "@/components/icons"
-import { TagChips } from "@/components/tag-chips"
+import { Popover } from "@/components/ui/popover"
 import { ReadingSettingsPanel } from "@/components/reading-settings-panel"
+import { TagChips } from "@/components/tag-chips"
 import { api } from "@/lib/routes"
+import { cn } from "@workspace/ui/lib/utils"
 
 export interface ItemState {
   kind: "post" | "book"
@@ -56,12 +58,12 @@ export function ItemActions({
   refreshing: boolean
 }) {
   const [busy, setBusy] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
 
   const toggleFavorite = async () => {
     if (state?.favorited) {
       const title = state.title?.trim() || "该条目"
       if (!window.confirm(`取消收藏「${title}」？`)) return
+      // confirm 期间不关 Popover：confirm 是系统模态，返回后浮层保持 open
     }
     setBusy(true)
     try {
@@ -97,61 +99,83 @@ export function ItemActions({
     }
   }
 
+  const favorited = state?.favorited ?? false
+  const hasTags = (state?.tags?.length ?? 0) > 0
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={() => void toggleFavorite()}
-        disabled={busy}
-        className={[
-          "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 sm:min-h-0",
-          state?.favorited
-            ? "bg-amber-400/15 text-amber-600 hover:bg-amber-400/25 dark:text-amber-400"
-            : "bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground",
-        ].join(" ")}
-      >
-        <IconStar size={13} filled={state?.favorited} />
-        {state?.favorited ? "已收藏" : "收藏"}
-      </button>
+    <Popover
+      align="end"
+      triggerAriaLabel="阅读操作与偏好"
+      trigger={
+        <span
+          className={cn(
+            "relative inline-flex size-8 items-center justify-center rounded-lg transition-colors",
+            favorited
+              ? "bg-amber-400/15 text-amber-600 dark:text-amber-400"
+              : "bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
+        >
+          <Settings2 className="size-4" />
+          {favorited && (
+            <Star
+              className="absolute -right-0.5 -top-0.5 size-2.5 fill-current"
+              aria-hidden
+            />
+          )}
+          {hasTags && (
+            <Tag
+              className="absolute -bottom-0.5 -right-0.5 size-2.5"
+              aria-hidden
+            />
+          )}
+        </span>
+      }
+    >
+      <div className="flex w-72 flex-col gap-1">
+        {/* 收藏 */}
+        <button
+          type="button"
+          onClick={() => void toggleFavorite()}
+          disabled={busy}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50",
+            favorited
+              ? "text-amber-600 hover:bg-amber-400/10 dark:text-amber-400"
+              : "hover:bg-accent"
+          )}
+        >
+          <IconStar size={14} filled={favorited} />
+          {favorited ? "已收藏" : "收藏"}
+        </button>
 
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50 sm:min-h-0"
-      >
-        <IconRefreshCw
-          size={13}
-          className={refreshing ? "animate-spin" : undefined}
+        {/* 刷新 */}
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
+        >
+          <IconRefreshCw
+            size={14}
+            className={refreshing ? "animate-spin" : undefined}
+          />
+          刷新
+        </button>
+
+        {/* 标签 */}
+        <TagEditor
+          tags={state?.tags ?? []}
+          onSave={saveTags}
+          onRemove={(tag) => void removeTag(tag)}
+          removing={removing}
         />
-        刷新
-      </button>
 
-      <TagEditor
-        tags={state?.tags ?? []}
-        onSave={saveTags}
-        onRemove={(tag) => void removeTag(tag)}
-        removing={removing}
-      />
+        <div className="my-2 border-t border-border" />
 
-      <button
-        type="button"
-        onClick={() => setShowSettings((v) => !v)}
-        aria-label="阅读设置"
-        className={`inline-flex size-8 items-center justify-center rounded-full border transition ${
-          showSettings
-            ? "border-foreground/40 bg-foreground/10"
-            : "border-border hover:bg-muted"
-        }`}
-      >
-        <Settings2 className="size-4" />
-      </button>
-      {showSettings && (
-        <div className="w-full">
-          <ReadingSettingsPanel />
-        </div>
-      )}
-    </div>
+        {/* 阅读偏好 */}
+        <ReadingSettingsPanel />
+      </div>
+    </Popover>
   )
 }
 
@@ -200,48 +224,62 @@ function TagEditor({
 
   if (editing) {
     return (
-      <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void submit()
-            if (e.key === "Escape") cancel()
-          }}
-          placeholder="多个标签用逗号分隔"
-          className="h-9 w-44 max-w-full min-w-0 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60 sm:h-8 sm:w-52"
-        />
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={busy}
-          className="min-h-9 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-foreground disabled:opacity-50 sm:min-h-0"
-        >
-          保存
-        </button>
-        <button
-          type="button"
-          onClick={cancel}
-          disabled={busy}
-          className="min-h-9 rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground sm:min-h-0"
-        >
-          取消
-        </button>
-      </span>
+      <div className="flex flex-col gap-1.5 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submit()
+              if (e.key === "Escape") {
+                e.stopPropagation() // 双保险：Popover 对可编辑 target 已直接 return，此处再 stopPropagation
+                cancel()
+              }
+            }}
+            placeholder="多个标签用逗号分隔"
+            className="h-8 w-full min-w-0 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={busy}
+            className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-foreground disabled:opacity-50"
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={busy}
+            className="rounded-lg bg-muted/70 px-2.5 py-1 text-xs font-medium text-muted-foreground disabled:opacity-50"
+          >
+            取消
+          </button>
+        </div>
+      </div>
     )
   }
 
   return (
-    <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">
-      <TagChips tags={tags} onRemove={onRemove} removing={removing} />
-      <button
-        type="button"
-        onClick={open}
-        className="min-h-9 rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:min-h-0"
-      >
-        编辑标签
-      </button>
-    </span>
+    <div className="flex flex-col gap-1.5 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">标签</span>
+        <button
+          type="button"
+          onClick={open}
+          className="rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          编辑
+        </button>
+      </div>
+      {tags.length > 0 ? (
+        <TagChips tags={tags} onRemove={onRemove} removing={removing} />
+      ) : (
+        <span className="text-xs text-muted-foreground/60">无标签</span>
+      )}
+    </div>
   )
 }
