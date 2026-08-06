@@ -4,6 +4,7 @@ import { IconRefreshCw, IconStar } from "@/components/icons"
 import { Popover } from "@/components/ui/popover"
 import { ReadingSettingsPanel } from "@/components/reading-settings-panel"
 import { TagChips } from "@/components/tag-chips"
+import { useSite } from "@/hooks/use-site"
 import { api } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -18,16 +19,19 @@ export interface ItemState {
   favorited: boolean
   tags: string[]
   read_progress: number | null
+  site: string
+  lastChapter: number | null
 }
 
-/** 打开页面时回填 /api/me/state */
+/** 打开页面时回填 /api/me/state（按站点区分，避免跨站串用 state） */
 export function useItemState(kind: "post" | "book", id: string) {
+  const site = useSite()
   const [state, setState] = useState<ItemState | null>(null)
   const reload = useCallback(async () => {
     if (!id) return
     try {
       const res = await fetch(
-        `${api.meState}?kind=${kind}&id=${encodeURIComponent(id)}`
+        `${api.meState}?kind=${kind}&id=${encodeURIComponent(id)}&site=${site}`
       )
       if (!res.ok) return
       const json = (await res.json()) as ItemState
@@ -35,7 +39,7 @@ export function useItemState(kind: "post" | "book", id: string) {
     } catch {
       // 状态读取失败静默，不影响正文展示
     }
-  }, [kind, id])
+  }, [kind, id, site])
   useEffect(() => {
     void reload()
   }, [reload])
@@ -57,6 +61,7 @@ export function ItemActions({
   onRefresh: () => void
   refreshing: boolean
 }) {
+  const site = useSite()
   const [busy, setBusy] = useState(false)
 
   const toggleFavorite = async () => {
@@ -70,7 +75,11 @@ export function ItemActions({
       const method = state?.favorited ? "DELETE" : "PUT"
       const res = await fetch(
         `${api.meFavorites}?kind=${kind}&id=${encodeURIComponent(id)}`,
-        { method }
+        {
+          method,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ site }),
+        }
       )
       if (res.ok) await reload()
     } finally {
@@ -82,7 +91,7 @@ export function ItemActions({
     const res = await fetch(api.meTags, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, id, tags }),
+      body: JSON.stringify({ kind, id, tags, site }),
     })
     if (res.ok) await reload()
     return res.ok

@@ -1,33 +1,64 @@
 import { useCallback, useEffect, useState } from "react"
-import { useParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
+import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
-import { api } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { api, bookPath } from "@/lib/routes"
+
+interface ChapterLink {
+  index: number
+  title: string
+  tid: string
+}
 
 interface BookData {
   title: string
   content: string
   meta: { author: string | null }
   url: string
+  intro?: string
+  chapters?: ChapterLink[]
+  singleShot?: boolean
+  related?: ChapterLink[]
+  bookTitle?: string
+  prevChapter?: number
+  nextChapter?: number
 }
 
 export default function BookPage() {
   const { cid = "" } = useParams<{ cid: string }>()
+  const [params] = useSearchParams()
+  const chapter = params.get("chapter") ?? undefined
+  const site = useSite()
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("book", cid)
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
-  const [loadedCid, setLoadedCid] = useState("")
+  const [loadedKey, setLoadedKey] = useState("")
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
+
+  // 三个显式分支（review I3）：第一刀按 site 切，绝不只用"有无 chapter"当第一刀，
+  // 否则 cool18（site=1、无 chapter）会误进目录 UI。
+  const isToc = site === "2" && !chapter // xbookcn 目录页
+  const isChapterBody = site === "2" && !!chapter // xbookcn 章节正文
+  const isCool18Book = site === "1" // cool18 整本一页（现有 ArticleView 路径）
+
+  // ready 按"书+章"（loadedKey）判定：换章时 content 尚未挂载前 ready=false，
+  // 避免恢复决策/进度采样串到上一章；目录页恒不跟踪进度（review I4 配套）。
+  const currentKey = `${site}:${cid}:${chapter ?? ""}`
   const { progress } = useReadingProgress("book", cid, {
-    ready: loadedCid === cid, // 当前 cid 内容已挂载（按 id 区分，避免串用上一篇）
-    stateReady: state !== null && state.id === cid, // 当前文章的 state GET 已完成
+    ready: (isChapterBody || isCool18Book) && loadedKey === currentKey,
+    stateReady: state !== null && state.id === cid, // 当前书籍的 state GET 已完成
     restore: state?.id === cid ? state.read_progress : undefined,
+    chapter: isChapterBody ? chapter : undefined,
+    restoreChapter: state?.id === cid ? state.lastChapter : null,
+    site,
   })
 
   const fetchBook = useCallback(
@@ -39,7 +70,7 @@ export default function BookPage() {
       setError("")
       try {
         const res = await fetch(
-          `${api.books}?cid=${encodeURIComponent(cid)}${refresh ? "&refresh=1" : ""}`
+          `${api.books}?cid=${encodeURIComponent(cid)}&site=${site}${chapter ? `&chapter=${chapter}` : ""}${refresh ? "&refresh=1" : ""}`
         )
         const json = await res.json()
         if (!res.ok) {
@@ -47,7 +78,7 @@ export default function BookPage() {
           return
         }
         setBook(json)
-        setLoadedCid(cid)
+        setLoadedKey(`${site}:${cid}:${chapter ?? ""}`)
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
@@ -56,12 +87,23 @@ export default function BookPage() {
         else setLoading(false)
       }
     },
-    [cid]
+    [cid, site, chapter]
   )
 
   useEffect(() => {
     fetchBook()
   }, [fetchBook])
+
+  const actions = (
+    <ItemActions
+      kind="book"
+      id={cid}
+      state={state}
+      reload={reload}
+      onRefresh={() => void fetchBook({ refresh: true })}
+      refreshing={refreshing}
+    />
+  )
 
   return (
     <PageShell showBack maxWidth={settings.maxWidth}>
@@ -79,23 +121,133 @@ export default function BookPage() {
                 {refreshNotice}
               </div>
             )}
-            <ArticleView
-              title={book.title}
-              meta={{ author: book.meta?.author }}
-              contentHtml={book.content}
-              sourceUrl={book.url}
-              progress={progress}
-              actions={
-                <ItemActions
-                  kind="book"
-                  id={cid}
-                  state={state}
-                  reload={reload}
-                  onRefresh={() => void fetchBook({ refresh: true })}
-                  refreshing={refreshing}
-                />
-              }
-            />
+            {isCool18Book && (
+              <ArticleView
+                title={book.title}
+                meta={{ author: book.meta?.author }}
+                contentHtml={book.content}
+                sourceUrl={book.url}
+                progress={progress}
+                actions={actions}
+              />
+            )}
+            {isToc && (
+              <div className="flex flex-col gap-6">
+                <header className="flex flex-col gap-1">
+                  <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                    {book.title}
+                  </h1>
+                  {book.meta?.author && (
+                    <span className="text-sm text-muted-foreground">
+                      作者：{book.meta.author}
+                    </span>
+                  )}
+                </header>
+                {book.intro && (
+                  <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/80">
+                    {book.intro}
+                  </p>
+                )}
+                {book.singleShot ? (
+                  <Link
+                    to={bookPath(cid, { site, chapter: "1" })}
+                    className="inline-flex items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent/80"
+                  >
+                    开始阅读
+                  </Link>
+                ) : (
+                  (book.chapters ?? []).length > 0 && (
+                    <PostList>
+                      {(book.chapters ?? []).map((ch) => (
+                        <PostCard
+                          key={ch.index}
+                          href={bookPath(cid, {
+                            site,
+                            chapter: String(ch.index),
+                          })}
+                          title={ch.title}
+                          leading={
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-medium text-muted-foreground tabular-nums">
+                              {ch.index}
+                            </span>
+                          }
+                        />
+                      ))}
+                    </PostList>
+                  )
+                )}
+                {book.related && book.related.length > 0 && (
+                  <section>
+                    <h3 className="mb-3 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                      相关推荐
+                    </h3>
+                    <PostList>
+                      {book.related.map((r) => (
+                        <PostCard
+                          key={r.tid}
+                          href={bookPath(r.tid, { site })}
+                          title={r.title}
+                          leading={
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-medium text-muted-foreground tabular-nums">
+                              {r.index}
+                            </span>
+                          }
+                        />
+                      ))}
+                    </PostList>
+                  </section>
+                )}
+              </div>
+            )}
+            {isChapterBody && (
+              <ArticleView
+                title={book.title}
+                meta={book.meta}
+                contentHtml={book.content}
+                sourceUrl={book.url}
+                progress={progress}
+                actions={actions}
+                footer={
+                  (book.prevChapter !== undefined ||
+                    book.nextChapter !== undefined) && (
+                    <nav className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
+                      {book.prevChapter !== undefined ? (
+                        <Link
+                          to={bookPath(cid, {
+                            site,
+                            chapter: String(book.prevChapter),
+                          })}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          ←上一章
+                        </Link>
+                      ) : (
+                        <span />
+                      )}
+                      <Link
+                        to={bookPath(cid, { site })}
+                        className="inline-flex items-center rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        返回书页
+                      </Link>
+                      {book.nextChapter !== undefined ? (
+                        <Link
+                          to={bookPath(cid, {
+                            site,
+                            chapter: String(book.nextChapter),
+                          })}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          下一章→
+                        </Link>
+                      ) : (
+                        <span />
+                      )}
+                    </nav>
+                  )
+                }
+              />
+            )}
           </>
         )}
       </AsyncBody>
