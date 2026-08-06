@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
-import { api, readPath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { api, bookPath, readPath } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -18,6 +19,7 @@ interface HomeResponse {
 }
 
 export default function HomePage() {
+  const site = useSite()
   const [links, setLinks] = useState<ChapterLink[]>([])
   const [nextMtid, setNextMtid] = useState<string | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -43,7 +45,9 @@ export default function HomePage() {
 
     try {
       const mtid = nextMtidRef.current
-      const res = await fetch(`${api.posts}?mtid=${mtid ?? "0"}`)
+      const res = await fetch(
+        `${api.posts}?mtid=${mtid ?? "0"}&site=${site}`
+      )
       const json = (await res.json()) as HomeResponse
       if (!res.ok) {
         setLoadMoreError((json as { error?: string }).error || "请求失败")
@@ -60,7 +64,7 @@ export default function HomePage() {
       loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [])
+  }, [site])
 
   const fetchFirstPage = useCallback(async () => {
     setInitialLoading(true)
@@ -69,7 +73,7 @@ export default function HomePage() {
     setLinks([])
     setNextMtid(null)
     try {
-      const res = await fetch(api.posts)
+      const res = await fetch(`${api.posts}?site=${site}`)
       const json = (await res.json()) as HomeResponse
       if (!res.ok) {
         setError((json as { error?: string }).error || "请求失败")
@@ -82,7 +86,7 @@ export default function HomePage() {
     } finally {
       setInitialLoading(false)
     }
-  }, [])
+  }, [site])
 
   useEffect(() => {
     fetchFirstPage()
@@ -127,7 +131,11 @@ export default function HomePage() {
           {links.map((link) => (
             <ListPostCard
               key={link.tid}
-              href={readPath(link.tid)}
+              href={
+                site === "2"
+                  ? bookPath(link.tid, { site })
+                  : readPath(link.tid, site)
+              }
               rawTitle={link.title}
               showGenre
             />

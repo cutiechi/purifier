@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
+import { useSite } from "@/hooks/use-site"
 import { api } from "@/lib/routes"
 
 function normalize(raw: CategoryItem): CategoryItem {
@@ -18,8 +19,9 @@ function normalize(raw: CategoryItem): CategoryItem {
 }
 
 export default function CategoriesPage() {
+  const site = useSite()
   const { items, loading, error, reload } = useAsyncList(
-    api.categories,
+    `${api.categories}?site=${site}`,
     (json) => ((json.links as CategoryItem[]) ?? []).map(normalize)
   )
 

@@ -14,6 +14,8 @@ export interface MeListItem {
   id: string
   title: string
   url: string
+  site: string
+  lastChapter?: number | null
   last_visited_at?: number
   favorited_at?: number
   visit_count: number
@@ -29,7 +31,10 @@ export function MeItemCard({
   item: MeListItem
   trailing?: ReactNode
 }) {
-  const href = item.kind === "post" ? readPath(item.id) : bookPath(item.id)
+  const href =
+    item.kind === "post"
+      ? readPath(item.id, item.site)
+      : bookPath(item.id, { site: item.site })
   const time = item.last_visited_at ?? item.favorited_at
   return (
     <div className="group flex flex-col rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">

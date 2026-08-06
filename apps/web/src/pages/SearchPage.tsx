@@ -7,7 +7,8 @@ import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { IconSearch } from "@/components/icons"
-import { api, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { api, bookPath, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -23,6 +24,7 @@ interface BrowseResponse {
 function SearchContent() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const site = useSite()
   const q = parseQuery(searchParams)
   const pageParam = parsePage(searchParams)
 
@@ -44,7 +46,7 @@ function SearchContent() {
     setError("")
     try {
       const res = await fetch(
-        `${api.browse}?q=${encodeURIComponent(keyword)}&page=${p}`
+        `${api.browse}?q=${encodeURIComponent(keyword)}&site=${site}&page=${p}`
       )
       const json = (await res.json()) as BrowseResponse
       if (seq !== seqRef.current) return
@@ -61,7 +63,7 @@ function SearchContent() {
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [])
+  }, [site])
 
   useEffect(() => {
     if (!q) {
@@ -75,7 +77,7 @@ function SearchContent() {
   }, [q, pageParam, loadPage])
 
   function goTo(keyword: string, p: number) {
-    navigate(searchPath({ q: keyword, page: p }))
+    navigate(searchPath({ q: keyword, page: p, site }))
   }
 
   return (
@@ -142,7 +144,11 @@ function SearchContent() {
             {links.map((link) => (
               <ListPostCard
                 key={link.tid}
-                href={readPath(link.tid)}
+                href={
+                  site === "2"
+                    ? bookPath(link.tid, { site })
+                    : readPath(link.tid, site)
+                }
                 rawTitle={link.title}
                 showGenre
               />

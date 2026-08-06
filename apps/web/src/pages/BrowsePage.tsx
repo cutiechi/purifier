@@ -13,7 +13,8 @@ import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
-import { api, browsePath, parsePage, parseQuery, readPath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { api, bookPath, browsePath, parsePage, parseQuery, readPath } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -29,6 +30,7 @@ interface BrowseResponse {
 function BrowseContent() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const site = useSite()
   const type = searchParams.get("type")
   const q = parseQuery(searchParams)
   const pageParam = parsePage(searchParams)
@@ -54,7 +56,9 @@ function BrowseContent() {
       setLoading(true)
       setError("")
       try {
-        const res = await fetch(`${api.browse}?${queryString}&page=${p}`)
+        const res = await fetch(
+          `${api.browse}?${queryString}&site=${site}&page=${p}`
+        )
         const json = (await res.json()) as BrowseResponse
         if (seq !== seqRef.current) return
         if (!res.ok) {
@@ -71,7 +75,7 @@ function BrowseContent() {
         if (seq === seqRef.current) setLoading(false)
       }
     },
-    [queryString]
+    [queryString, site]
   )
 
   useEffect(() => {
@@ -86,7 +90,7 @@ function BrowseContent() {
   }, [queryString, pageParam, loadPage])
 
   function goToPage(p: number) {
-    navigate(browsePath({ type, q, page: p }))
+    navigate(browsePath({ type, q, page: p, site }))
   }
 
   return (
@@ -116,7 +120,11 @@ function BrowseContent() {
             {links.map((link) => (
               <ListPostCard
                 key={link.tid}
-                href={readPath(link.tid)}
+                href={
+                  site === "2"
+                    ? bookPath(link.tid, { site })
+                    : readPath(link.tid, site)
+                }
                 rawTitle={link.title}
                 showGenre
               />

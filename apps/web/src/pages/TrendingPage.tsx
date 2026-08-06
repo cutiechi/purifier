@@ -4,8 +4,9 @@ import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
+import { useSite } from "@/hooks/use-site"
 import { formatCount } from "@/lib/format"
-import { api, readPath } from "@/lib/routes"
+import { api, bookPath, readPath } from "@/lib/routes"
 
 interface TrendingPost {
   rank: number
@@ -15,8 +16,9 @@ interface TrendingPost {
 }
 
 export default function TrendingPage() {
+  const site = useSite()
   const { items, loading, error, reload } = useAsyncList(
-    api.trending,
+    `${api.trending}?site=${site}`,
     (json) => (json.posts as TrendingPost[]) ?? []
   )
 
@@ -42,7 +44,11 @@ export default function TrendingPage() {
           {items.map((post) => (
             <ListPostCard
               key={post.tid}
-              href={readPath(post.tid)}
+              href={
+                site === "2"
+                  ? bookPath(post.tid, { site })
+                  : readPath(post.tid, site)
+              }
               rawTitle={post.title}
               rank={post.rank}
               statValue={formatCount(post.reads)}
