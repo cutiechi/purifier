@@ -1494,6 +1494,8 @@ Write the conclusion (1–3 sentences) into the plan's Task 4.2 implementation n
 
 ### Task 4.2: Chapter nav bar + prev/next from `content.links`
 
+> **STATUS: SKIPPED by §4a downgrade (Task 4.1 probe finding, 2026-08-06):** scanned 63 real posts (3 featured + 60 across 都市/玄幻/校园) — zero had non-empty `content.links`; two raw upstream thread-page checks confirm cool18 carries no chapter-nav links outside the `<pre>` body (serials are single aggregated posts like 「1-87」). `content.links` is empty in practice → per plan fallback, prev/next is skipped; the existing bottom RelatedLinks list ships unchanged. ChapterNav's empty-guard would render nothing for all current content — dead UI (YAGNI).
+
 **Files:**
 - Create: `apps/web/src/components/chapter-nav.tsx`
 - Modify: `apps/web/src/components/article-view.tsx` (render `ChapterNav` above `RelatedLinks` in the footer)
