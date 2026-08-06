@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
 import { ItemActions, useItemState } from "@/components/item-actions"
@@ -42,6 +42,9 @@ export default function BookPage() {
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
+  // 抓取序号：每次发起（含换章/换站/刷新）递增；过期响应（成功或错误）一律丢弃，
+  // 避免旧章响应后到覆盖新章、或 setLoadedKey 记成旧 key 导致 ready 卡死
+  const seqRef = useRef(0)
 
   // 三个显式分支（review I3）：第一刀按 site 切，绝不只用"有无 chapter"当第一刀，
   // 否则 cool18（site=1、无 chapter）会误进目录 UI。
@@ -64,6 +67,7 @@ export default function BookPage() {
   const fetchBook = useCallback(
     async (opts?: { refresh?: boolean }) => {
       if (!cid) return
+      const seq = ++seqRef.current
       const refresh = opts?.refresh
       if (refresh) setRefreshing(true)
       else setLoading(true)
@@ -73,6 +77,7 @@ export default function BookPage() {
           `${api.books}?cid=${encodeURIComponent(cid)}&site=${site}${chapter ? `&chapter=${chapter}` : ""}${refresh ? "&refresh=1" : ""}`
         )
         const json = await res.json()
+        if (seq !== seqRef.current) return
         if (!res.ok) {
           setError(json.error || "请求失败")
           return
@@ -81,10 +86,14 @@ export default function BookPage() {
         setLoadedKey(`${site}:${cid}:${chapter ?? ""}`)
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
-        setError(e instanceof Error ? e.message : "未知错误")
+        if (seq === seqRef.current) {
+          setError(e instanceof Error ? e.message : "未知错误")
+        }
       } finally {
-        if (refresh) setRefreshing(false)
-        else setLoading(false)
+        if (seq === seqRef.current) {
+          if (refresh) setRefreshing(false)
+          else setLoading(false)
+        }
       }
     },
     [cid, site, chapter]
