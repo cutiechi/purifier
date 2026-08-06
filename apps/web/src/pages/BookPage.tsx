@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
 import { ItemActions } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
+import { useReadingSettings } from "@/components/reading-settings"
 import { api } from "@/lib/routes"
 
 interface BookData {
@@ -14,6 +15,7 @@ interface BookData {
 
 export default function BookPage() {
   const { cid = "" } = useParams<{ cid: string }>()
+  const { settings } = useReadingSettings()
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [error, setError] = useState("")
@@ -53,7 +55,7 @@ export default function BookPage() {
   }, [fetchBook])
 
   return (
-    <PageShell showBack>
+    <PageShell showBack maxWidth={settings.maxWidth}>
       <AsyncBody
         loading={loading}
         error={error}

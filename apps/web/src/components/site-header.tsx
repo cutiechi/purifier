@@ -8,10 +8,18 @@ import {
   IconSearch,
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
+import { readingMaxWidthClass } from "@/components/reading-settings"
 import { NAV_ITEMS, routes } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
-export function SiteHeader({ showBack }: { showBack?: boolean }) {
+export function SiteHeader({
+  showBack,
+  maxWidth,
+}: {
+  showBack?: boolean
+  maxWidth?: "normal" | "wide"
+}) {
+  const widthClass = readingMaxWidthClass(maxWidth ?? "normal")
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
@@ -25,7 +33,12 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex h-14 max-w-3xl items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5 lg:max-w-4xl">
+      <div
+        className={cn(
+          "mx-auto flex h-14 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5",
+          widthClass
+        )}
+      >
         {showBack ? (
           <button
             type="button"
@@ -88,7 +101,12 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
       {/* Mobile / tablet drawer */}
       {open && (
-        <nav className="mx-auto max-w-3xl border-t border-border/60 px-3 py-3 lg:hidden">
+        <nav
+          className={cn(
+            "mx-auto border-t border-border/60 px-3 py-3 lg:hidden",
+            widthClass
+          )}
+        >
           <div className="flex gap-1.5 overflow-x-auto pb-1">
             {NAV_ITEMS.map((item) => {
               const active = item.match(pathname)

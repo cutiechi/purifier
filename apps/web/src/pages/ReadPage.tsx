@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
 import { ItemActions } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
+import { useReadingSettings } from "@/components/reading-settings"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
 import { api } from "@/lib/routes"
@@ -18,6 +19,7 @@ interface ContentData {
 
 export default function ReadPage() {
   const { tid = "" } = useParams<{ tid: string }>()
+  const { settings } = useReadingSettings()
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
   const [error, setError] = useState("")
@@ -57,7 +59,7 @@ export default function ReadPage() {
   }, [fetchContent])
 
   return (
-    <PageShell showBack>
+    <PageShell showBack maxWidth={settings.maxWidth}>
       <AsyncBody
         loading={loading}
         error={error}
