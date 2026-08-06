@@ -9,7 +9,9 @@ import {
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
 import { readingMaxWidthClass } from "@/components/reading-settings"
-import { NAV_ITEMS, routes } from "@/lib/routes"
+import { SiteSwitcher } from "@/components/site-switcher"
+import { useSite } from "@/hooks/use-site"
+import { NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
 export function SiteHeader({
@@ -22,7 +24,12 @@ export function SiteHeader({
   const widthClass = readingMaxWidthClass(maxWidth ?? "normal")
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const site = useSite()
   const [open, setOpen] = useState(false)
+  // 按当前站点过滤 NAV（site=2 时隐藏仅论坛的入口）
+  const items = NAV_ITEMS.filter((it) =>
+    (it.sites as readonly SiteId[]).includes(site)
+  )
 
   // 路由变化时收起移动端菜单（key 重置更干净，这里用 pathname 同步）
   const menuKey = pathname
@@ -59,7 +66,7 @@ export function SiteHeader({
 
         {/* Desktop nav — lg+ only so phone landscape keeps hamburger */}
         <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto lg:flex">
-          {NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const active = item.match(pathname)
             return (
               <Link
@@ -79,6 +86,7 @@ export function SiteHeader({
         </nav>
 
         <div className="ml-auto flex items-center gap-0.5">
+          <SiteSwitcher />
           <Link
             to={routes.search}
             className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
@@ -108,7 +116,7 @@ export function SiteHeader({
           )}
         >
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {NAV_ITEMS.map((item) => {
+            {items.map((item) => {
               const active = item.match(pathname)
               return (
                 <Link
