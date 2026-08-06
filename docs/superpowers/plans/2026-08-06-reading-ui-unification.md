@@ -209,18 +209,23 @@ export function Popover({
     return () => document.removeEventListener("pointerdown", onPointerDown)
   }, [open])
 
-  // Escape 关闭：若焦点在可编辑元素上，留给该元素自己处理（如标签编辑态先取消编辑），
+  // Escape 关闭：若焦点在文本类可编辑元素上，留给该元素自己处理（如标签编辑态先取消编辑），
   // 不关层（review Issue 2 方案 1 —— 不依赖 stopPropagation 冒泡路径，更硬）。
+  // 注意：range/checkbox/button 等 input 不算文本编辑，Esc 应正常关层（plan 复审 Issue 1）。
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
       const t = e.target as HTMLElement | null
+      const tag = t?.tagName
       const editable =
-        t?.tagName === "INPUT" ||
-        t?.tagName === "TEXTAREA" ||
-        t?.isContentEditable === true
-      if (editable) return // 可编辑元素的 Esc 由它自己处理
+        tag === "TEXTAREA" ||
+        t?.isContentEditable === true ||
+        (tag === "INPUT" &&
+          !["range", "checkbox", "radio", "button", "submit", "reset", "file"].includes(
+            (t as HTMLInputElement).type
+          ))
+      if (editable) return // 文本类可编辑元素的 Esc 由它自己处理
       close()
     }
     // 必须 bubble 阶段监听（默认），capture 会先于 input 触发导致拦不住
@@ -1214,6 +1219,14 @@ plan review 的 7 个 issue 已全部处理：
 | 5 (nit) aria-controls 缺 | trigger 加 `aria-controls={open ? panelId : undefined}` | Task 2 |
 | 6 (nit) RefAttributes 无用 import | 删除，只 import `ReactNode` | Task 2 |
 | 7 (nit) Task 5 中间态无外壳 | 接受不改（Task 6 覆盖前 intermediate commit 视觉略素，可接受） | — |
+
+### Plan 复审修订（2026-08-06，第二轮）
+
+复审发现 1 个由上轮 Issue 2 修复引入的边界 bug，已处理：
+
+| Issue | 处理 | 位置 |
+| --- | --- | --- |
+| 1 (suggestion) range/checkbox 等 input 被当成可编辑，Esc 关不了浮层 | `editable` 判断收窄为文本类 input（排除 range/checkbox/radio/button/submit/reset/file），textarea/contenteditable 仍拦 | Task 2 |
 
 ### Spec coverage
 
