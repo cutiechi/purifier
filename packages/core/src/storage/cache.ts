@@ -27,6 +27,7 @@ export function contentCachePath(
 ): string {
   assertSafeId(site)
   assertSafeId(id)
+  if (chapter !== undefined) assertSafeId(String(chapter))
   const ch = chapter !== undefined ? `-ch${chapter}` : ""
   return join(dataDir, "cache", site, `${kind}-${id}${ch}.html`)
 }

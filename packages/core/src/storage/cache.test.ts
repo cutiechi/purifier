@@ -80,6 +80,9 @@ describe("content cache site + chapter", () => {
   test("invalid site rejected", async () => {
     expect(() => writeContentCache(dir, "../evil", "book", "X", "h")).toThrow()
   })
+  test("invalid chapter rejected", () => {
+    expect(() => contentCachePath(dir, "2", "book", "X", "../evil")).toThrow()
+  })
 })
 
 describe("replies cache", () => {
