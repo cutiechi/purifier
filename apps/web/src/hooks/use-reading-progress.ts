@@ -22,11 +22,25 @@ export function useReadingProgress(
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastProgress = useRef<number | null>(null)
   const lastSent = useRef<number | null>(null)
+  // 恢复决策：每篇文章只决策一次。restore 值会随 reload 刷新而变（flush 落库后
+  // 从旧值变为新值），若据此重跑会把读者从当前位置拉回上次落库位置（review Important）。
+  const restoreTarget = useRef<number | null | undefined>(undefined)
+  const restoreId = useRef<string | null>(null)
 
-  // 恢复滚动位置：内容与 state 都就绪后执行一次；按 id 重新挂载
+  // 恢复滚动位置：内容与 state 都就绪后决策一次；按 id 重新挂载
   useEffect(() => {
+    if (restoreId.current !== id) {
+      restoreId.current = id
+      restoreTarget.current = undefined // 新文章：未决策
+    }
     if (!opts.ready || !opts.stateReady) return
-    if (typeof opts.restore !== "number" || opts.restore <= 0.05) return
+    if (restoreTarget.current !== undefined) return // 本篇文章已决策：不再重滚
+    if (typeof opts.restore !== "number" || opts.restore <= 0.05) {
+      // 决策为"无需恢复"：记录结果，后续 reload 刷新 restore 也不重新打开决策
+      restoreTarget.current = null
+      return
+    }
+    restoreTarget.current = opts.restore
     const target = opts.restore
     // 双 rAF：等 serif 字体与正文布局稳定后再定位
     const raf2 = requestAnimationFrame(() =>
@@ -37,8 +51,8 @@ export function useReadingProgress(
       })
     )
     return () => cancelAnimationFrame(raf2)
-    // 依赖里只放能触发"重新恢复"的信号；ready/stateReady/id 变才重跑
-  }, [opts.ready, opts.stateReady, opts.restore, id])
+    // 依赖里只放能触发"重新决策"的信号；restore 变化不代表要重滚
+  }, [opts.ready, opts.stateReady, id])
 
   // 写入：滚动时把采样值存进 ref，离开页面 flush 发送 ref（绝不实时重测 scrollY）。
   // 原因：章节导航的 scrollTo(0,0) 与路由切换会在旧页面的 effect cleanup 之前把
