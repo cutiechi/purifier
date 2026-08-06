@@ -383,6 +383,7 @@ function handleMeState(url: URL): Response {
     visit_count: 0,
     favorited: false,
     tags: [],
+    read_progress: null,
   }
   return jsonOk(state ?? empty, NO_STORE_HEADERS)
 }
