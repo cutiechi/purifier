@@ -99,7 +99,15 @@ export function useReadingProgress(
         const res = await fetch(api.meProgress, {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ kind, id, progress: p, site, chapter }),
+          body: JSON.stringify({
+            kind,
+            id,
+            progress: p,
+            site,
+            // API 校验 chapter 为有限数字（store 层也是 number）；URL 参数是字符串，
+            // 这里统一转 number，否则 400 导致 xbookcn 进度永远写不进去
+            chapter: chapter !== undefined ? Number(chapter) : undefined,
+          }),
         })
         if (res.ok) lastSent.current = p
       } catch {
