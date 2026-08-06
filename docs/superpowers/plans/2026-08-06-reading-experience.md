@@ -1735,6 +1735,8 @@ git commit --allow-empty -m "chore(extractor): book TOC probe — no stable stru
 
 ### Task 5.2: Add `BookChapterLink` type
 
+> **STATUS: SKIPPED — Phase 5 deferred (Task 5.1 probe finding, 2026-08-06):** probed 4 real books (cids 8351, 8352, 8446, 8450) — every `bookview` page contains only its own cid, zero `bookview` links, zero 目录/上一卷/下一卷 hits; chapter headers are inline `<p>` text inside the single-page content dump, not a linkable TOC. No usable chapter-list structure exists → per plan gate, Phase 5 stops here; §4b deferred to a future iteration (volume-level navigation would need the booklist page, out of scope).
+
 **Files:**
 - Modify: `packages/core/src/extractor/types.ts` (add `BookChapterLink`; extend `BookContentResponse`)
 
