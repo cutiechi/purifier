@@ -360,7 +360,7 @@ test("listHistory includes read_progress", () => {
     store.recordVisit("post", "t1", "title", "/read/t1")
     store.setProgress("post", "t1", 0.3)
     const items = store.listHistory({ page: 1 }).items
-    expect(items[0].read_progress).toBeCloseTo(0.3)
+    expect(items[0]?.read_progress).toBeCloseTo(0.3)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
