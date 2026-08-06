@@ -19,6 +19,7 @@ export interface MeListItem {
   visit_count: number
   favorited: boolean
   tags: string[]
+  read_progress?: number | null
 }
 
 export function MeItemCard({
@@ -51,6 +52,12 @@ export function MeItemCard({
             <span className="text-xs text-muted-foreground">
               {time != null && <>{formatDateTime(time)} · </>}
               {item.visit_count} 次访问
+              {typeof item.read_progress === "number" &&
+                item.read_progress > 0 && (
+                  <span className="ml-1.5 text-xs text-muted-foreground/70">
+                    · 已读 {Math.round(item.read_progress * 100)}%
+                  </span>
+                )}
             </span>
           </span>
           {/* 有 trailing 时移动端隐藏 chevron，把横向空间留给标题与操作 */}
