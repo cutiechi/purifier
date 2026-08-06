@@ -7,13 +7,14 @@ const PERSONAL = new Set(["/history", "/favorites", "/tags"])
 export function SiteSwitcher() {
   const site = useSite()
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const switchTo = (next: SiteId) => {
     if (next === site) return
     if (PERSONAL.has(pathname)) {
-      // 个人区：原地刷新（保留 path，加 ?site=）
-      const params = new URLSearchParams()
+      // 个人区：原地刷新（保留 path 与查询串，仅改 ?site=）
+      const params = new URLSearchParams(search)
       if (next !== DEFAULT_SITE) params.set("site", next)
+      else params.delete("site")
       navigate({ pathname, search: params.toString() })
     } else {
       // 内容页：回首页（路径语义不同）
