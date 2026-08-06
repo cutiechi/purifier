@@ -426,6 +426,32 @@ async function handleTagsWrite(req: Request): Promise<Response> {
   return jsonOk({ ok: true, tags }, NO_STORE_HEADERS)
 }
 
+async function handleProgressWrite(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonError("invalid json body", 400)
+  }
+  const b = (body ?? {}) as {
+    kind?: unknown
+    id?: unknown
+    progress?: unknown
+  }
+  if (b.kind !== "post" && b.kind !== "book") {
+    return jsonError("invalid kind", 400)
+  }
+  if (typeof b.id !== "string" || !/^[A-Za-z0-9]+$/.test(b.id)) {
+    return jsonError("invalid id", 400)
+  }
+  if (typeof b.progress !== "number" || !Number.isFinite(b.progress)) {
+    return jsonError("progress must be a finite number", 400)
+  }
+  const ok = store.setProgress(b.kind, b.id, b.progress)
+  if (!ok) return jsonError("item not found", 404)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
 /** 全局删除某一标签（所有对象上的该标签行） */
 function handleTagDelete(url: URL): Response {
   const tag = url.searchParams.get("tag")?.trim()
@@ -531,6 +557,9 @@ async function route(req: Request): Promise<Response> {
       case "/api/me/state":
         requireGet(req)
         return handleMeState(url)
+      case "/api/me/progress":
+        if (req.method === "PUT") return await handleProgressWrite(req)
+        throw new ExtractorError("method not allowed", 405)
       default:
         return jsonError("not found", 404)
     }

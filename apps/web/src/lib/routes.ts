@@ -46,6 +46,7 @@ export const api = {
   meTags: "/api/me/tags",
   meItems: "/api/me/items",
   meState: "/api/me/state",
+  meProgress: "/api/me/progress",
   meCache: "/api/me/cache",
   health: "/api/health",
 } as const
