@@ -56,28 +56,29 @@ packages/typescript-config/               # base / react-library 配置
 
 ## API 约定
 
-| 路径                       | 参数                                                                    | 行为                                                                                                 |
-| ------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `GET /api/health`        | 无                                                                    | `{ status: "ok", runtime: "bun" }`                                                                 |
-| `GET /api/posts`         | `tid`、`site`（默认 `1`）                                             | 帖子正文 + 章节链接 + 元信息 + 跟帖树                                                              |
-| `GET /api/posts`         | `mtid`、`site`（默认 `1`）                                            | 首页分页列表 `{ links, nextMtid }`                                                                 |
-| `GET /api/books`         | `cid`、`chapter`、`site`（默认 `1`）                                  | 书库内容 `{ title, content, meta, url }`；`chapter` 为章节号时返回章节正文页，否则返回目录页       |
-| `GET /api/browse`        | `type` 或 `q`、`page`、`site`（默认 `1`）                             | 分类 / 关键词列表 `{ category, links, nextPage }`                                                  |
-| `GET /api/categories`    | `site`（默认 `1`）                                                    | `{ links: CategoryLink[] }`                                                                        |
-| `GET /api/featured`      | `site`（默认 `1`）                                                    | `{ links }` 精华热贴                                                                               |
-| `GET /api/picks`         | `site`（默认 `1`）                                                    | `{ sections }` 扫文推荐分组                                                                        |
-| `GET /api/comments`      | `site`（默认 `1`）                                                    | `{ posts }` 评论榜                                                                                 |
-| `GET /api/trending`      | `site`（默认 `1`）                                                    | `{ posts }` 人气榜                                                                                 |
-| `GET /api/me/history`    | `q`、`kind`、`page`、`site`（默认 `1`）                               | 阅读历史 `{ items, nextPage? }`（可按 `site` 过滤）                                                |
-| `DELETE /api/me/history` | `all=1` 或 `kind`+`id` 或 body `{ items }`；均可带 `site`（默认 `1`） | 清空全部 / 删单条 / 批量（清空本页）；连带清收藏与标签                                             |
-| `GET /api/me/favorites`  | `q`、`kind`、`page`、`site`（默认 `1`）                               | 收藏列表（可按 `site` 过滤）；`PUT`/`DELETE` 加/取消收藏（body 带 `kind`、`id`、`site`，默认 `1`） |
-| `GET /api/me/tags`       | `site`（默认 `1`）                                                    | `{ tags: TagCount[] }` 全部标签及计数（可按 `site` 过滤）                                          |
-| `PUT /api/me/tags`       | body `{ kind, id, tags, site? }`（默认 `1`）                          | 整体替换标签 `{ ok, tags }`；对象不存在 404                                                        |
-| `DELETE /api/me/tags`    | `tag`、`site`（默认 `1`）                                             | 全局删除该标签 `{ ok, removed }`（从所有对象上移除；带 `site` 只删该站）                           |
-| `GET /api/me/items`      | `tag`、`q`、`kind`、`page`、`site`（默认 `1`）                        | 按标签精确筛选 `{ items, nextPage? }`（可按 `site` 过滤）                                          |
-| `GET /api/me/state`      | `kind`、`id`、`site`（默认 `1`）                                      | 条目收藏/标签/访问状态；无记录返回 200 空状态                                                      |
-| `PUT /api/me/progress`   | body `{ kind, id, progress, site?, chapter? }`                        | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                         |
-| `DELETE /api/me/cache`   | 无                                                                    | 清空内容缓存 `{ cleared: n }`                                                                      |
+| 路径                           | 参数                                                      | 行为                                                                                                    |
+| ------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`              | 无                                                        | `{ status: "ok", runtime: "bun" }`                                                                      |
+| `GET /api/posts`               | `tid`、`site`（默认 `1`）                                 | 帖子正文 + 章节链接 + 元信息 + 跟帖树                                                                   |
+| `GET /api/posts`               | `mtid`、`site`（默认 `1`）                                | 首页分页列表 `{ links, nextMtid }`                                                                      |
+| `GET /api/books`               | `cid`、`chapter`、`site`（默认 `1`）                      | 书库内容 `{ title, content, meta, url }`；`chapter` 为章节号时返回章节正文页，否则返回目录页            |
+| `GET /api/browse`              | `type` 或 `q`、`page`、`site`（默认 `1`）                 | 分类 / 关键词列表 `{ category, links, nextPage }`                                                       |
+| `GET /api/categories`          | `site`（默认 `1`）                                        | `{ links: CategoryLink[] }`                                                                             |
+| `GET /api/featured`            | `site`（默认 `1`）                                        | `{ links }` 精华热贴                                                                                    |
+| `GET /api/picks`               | `site`（默认 `1`）                                        | `{ sections }` 扫文推荐分组                                                                             |
+| `GET /api/comments`            | `site`（默认 `1`）                                        | `{ posts }` 评论榜                                                                                      |
+| `GET /api/trending`            | `site`（默认 `1`）                                        | `{ posts }` 人气榜                                                                                      |
+| `GET /api/me/history`          | `q`、`kind`、`page`、`site?`                              | 阅读历史 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                   |
+| `DELETE /api/me/history`       | `all=1` 或 `kind`+`id` 或 body `{ items }`；均可带 `site` | 清空全部 / 删单条 / 批量（清空本页）；连带清收藏与标签；`all=1` 省略 `site` 跨站清空，单条/批量默认 `1` |
+| `GET /api/me/favorites`        | `q`、`kind`、`page`、`site?`                              | 收藏列表 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                   |
+| `PUT/DELETE /api/me/favorites` | `kind`、`id` 走 query；body `{ site? }`（默认 `1`）       | 加 / 取消收藏 `{ ok }`；`PUT` 对象不存在 404                                                            |
+| `GET /api/me/tags`             | `site?`                                                   | `{ tags: TagCount[] }` 全部标签及计数；省略 `site` 跨站统计，带 `site` 只统计该站                       |
+| `PUT /api/me/tags`             | body `{ kind, id, tags, site? }`（默认 `1`）              | 整体替换标签 `{ ok, tags }`；对象不存在 404                                                             |
+| `DELETE /api/me/tags`          | `tag`、`site?`                                            | 全局删除该标签 `{ ok, removed }`（从所有对象上移除）；省略 `site` 跨站删除，带 `site` 只删该站          |
+| `GET /api/me/items`            | `tag`、`q`、`kind`、`page`、`site?`                       | 按标签精确筛选 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                             |
+| `GET /api/me/state`            | `kind`、`id`、`site`（默认 `1`）                          | 条目收藏/标签/访问状态；无记录返回 200 空状态                                                           |
+| `PUT /api/me/progress`         | body `{ kind, id, progress, site?, chapter? }`            | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                              |
+| `DELETE /api/me/cache`         | 无                                                        | 清空内容缓存 `{ cleared: n }`                                                                           |
 
 错误处理：
 
