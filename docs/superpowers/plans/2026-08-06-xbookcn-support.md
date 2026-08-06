@@ -19,6 +19,7 @@
 - 正文清洗只保留站内链接，外链剥离只留文字。
 - 每个任务结束验证：`bun run test`（改动相关测试）、`bun run typecheck`。
 - 缓存 key 的各段（site/cid/chapter）必须分别过 `assertSafeId`（仅 `[A-Za-z0-9]+`，cid base64 无 padding 实测符合）。
+- **迁移期间 API 兼容（review C1/S1）**：Task 3-6 期间 API 仍用旧的 `getExtractor("cool18")`（按 name），`resolveSite` 只是新增。Task 7 才把 API 全部切到 `resolveSite(site)`，届时删除 name 版 `getExtractor`。中间状态 dev 可正常工作。
 
 ---
 
@@ -349,13 +350,15 @@ export function isValidSite(id?: string): boolean {
 }
 ```
 
-- [ ] **Step 4: 改 index.ts，getExtractor 转发 resolveSite**
+- [ ] **Step 4: 改 index.ts —— 新增 resolveSite 导出，保留 getExtractor name 兼容**
+
+**关键（review C1）**：Task 3 **不改** `getExtractor` 签名——API 层此刻全是 `getExtractor("cool18")`（按 name），若立刻改成按 id，Task 3-7 之间所有 API 请求会 400。本任务只**新增** `resolveSite`，`getExtractor` 维持原样（按 name），API 到 Task 7 再统一切换到 `resolveSite(site)`，那时 name 版 `getExtractor` 可删。
 
 把 `packages/core/src/extractor/index.ts` 改为：
 
 ```ts
 import { Cool18Extractor } from "./extractor"
-import { Extractor } from "./types"
+import { Extractor, ExtractorError } from "./types"
 
 export * from "./types"
 export { Cool18Extractor } from "./extractor"
@@ -367,9 +370,17 @@ export {
   type SiteId,
 } from "./sites"
 
-/** @deprecated 用 resolveSite(id)。保留以兼容；内部转发。 */
-export function getExtractor(id?: string): Extractor {
-  return resolveSite(id)
+/**
+ * 旧入口（按 name）。Task 3-6 期间 API 仍用它，保持 name 语义不动。
+ * Task 7 把 API 全部切到 resolveSite(site) 后，此函数可删。
+ */
+export function getExtractor(name: string): Extractor {
+  switch (name) {
+    case "cool18":
+      return new Cool18Extractor()
+    default:
+      throw new ExtractorError(`unsupported site: ${name}`, 400)
+  }
 }
 ```
 
@@ -405,16 +416,38 @@ git commit -m "feat(core): add site registry, getExtractor takes site id"
 
 - [ ] **Step 1: 先改 db.ts DDL + 迁移**
 
-在 `db.ts` 把 DDL 三表都加 `site TEXT NOT NULL DEFAULT '1'` 列，PK 改为 `(site, kind, id)`。在 `openDatabase` 末尾加重建迁移（检测 site 列是否存在；不存在则建新表+迁数据+换名）。`items_new` 含 `last_chapter INTEGER`：
+在 `db.ts` 把 DDL 三表都加 `site TEXT NOT NULL DEFAULT '1'` 列，PK 改为 `(site, kind, id)`。`items` DDL 含 `last_chapter INTEGER`。
+
+迁移逻辑（review C2 修订）：**不能只检测 `site` 列是否存在**——半迁移库可能有 `site` 列但 PK 仍是 `(kind, id)`，会跳过重建导致 `ON CONFLICT(site,kind,id)` 炸。必须**同时检测 site 列存在且 PK 含 site**。且迁移 `INSERT` **显式写 `site='1'`**，不依赖 DEFAULT（防 DEFAULT 被关或列序变化）。
 
 ```ts
-// 迁移：旧库无 site 列 → 重建三表（ADD COLUMN 改不了 PK）
-const cols = db.query("PRAGMA table_info(items)").all() as { name: string }[]
-if (!cols.some((c) => c.name === "site")) {
-  for (const { table, sql } of [
+// 1. 旧库补 read_progress（保留原幂等块，必须在 site 重建之前）
+const colsRp = db.query("PRAGMA table_info(items)").all() as { name: string }[]
+if (!colsRp.some((c) => c.name === "read_progress")) {
+  db.exec("ALTER TABLE items ADD COLUMN read_progress REAL")
+}
+
+// 2. 检测是否需要重建：site 列缺失，或 PK 不含 site
+const needRebuild = (() => {
+  for (const table of ["items", "favorites", "tags"]) {
+    const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.some((c) => c.name === "site")) return true
+    // PK 含 site？查 sqlite_master 的 CREATE 文本
+    const sql = (
+      db
+        .query("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1")
+        .get(table) as { sql: string }
+    ).sql
+    if (!/PRIMARY\s+KEY\s*\(\s*site/i.test(sql)) return true
+  }
+  return false
+})()
+
+if (needRebuild) {
+  for (const { table, newSql, migrate } of [
     {
       table: "items",
-      sql: `CREATE TABLE items_new (
+      newSql: `CREATE TABLE items_new (
         kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
         site TEXT NOT NULL DEFAULT '1',
         id TEXT NOT NULL,
@@ -427,20 +460,26 @@ if (!cols.some((c) => c.name === "site")) {
         last_chapter INTEGER,
         PRIMARY KEY (site, kind, id)
       )`,
+      migrate: `INSERT INTO items_new
+        (kind, site, id, title, url, first_seen_at, last_visited_at, visit_count, read_progress, last_chapter)
+        SELECT kind, '1', id, title, url, first_seen_at, last_visited_at, visit_count, read_progress, NULL
+        FROM items`,
     },
     {
       table: "favorites",
-      sql: `CREATE TABLE favorites_new (
+      newSql: `CREATE TABLE favorites_new (
         kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
         site TEXT NOT NULL DEFAULT '1',
         id TEXT NOT NULL,
         favorited_at INTEGER NOT NULL,
         PRIMARY KEY (site, kind, id)
       )`,
+      migrate: `INSERT INTO favorites_new (kind, site, id, favorited_at)
+        SELECT kind, '1', id, favorited_at FROM favorites`,
     },
     {
       table: "tags",
-      sql: `CREATE TABLE tags_new (
+      newSql: `CREATE TABLE tags_new (
         kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
         site TEXT NOT NULL DEFAULT '1',
         id TEXT NOT NULL,
@@ -448,20 +487,12 @@ if (!cols.some((c) => c.name === "site")) {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (site, kind, id, tag)
       )`,
+      migrate: `INSERT INTO tags_new (kind, site, id, tag, created_at)
+        SELECT kind, '1', id, tag, created_at FROM tags`,
     },
   ]) {
-    db.exec(sql)
-    const cols2 = db
-      .query(`PRAGMA table_info(${table})`)
-      .all() as { name: string }[]
-    const colList = cols2.map((c) => c.name).join(", ")
-    if (table === "items") {
-      db.exec(
-        `INSERT INTO items_new (${colList}, last_chapter) SELECT ${colList}, NULL FROM items`
-      )
-    } else {
-      db.exec(`INSERT INTO ${table}_new (${colList}) SELECT ${colList} FROM ${table}`)
-    }
+    db.exec(newSql)
+    db.exec(migrate)
     db.exec(`DROP TABLE ${table}`)
     db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`)
   }
@@ -471,7 +502,7 @@ if (!cols.some((c) => c.name === "site")) {
 }
 ```
 
-保留现有 `read_progress` 幂等迁移块（它检测列再 ADD，对新库无副作用；但新库 site 迁移块会先触发，新库 DDL 已含 read_progress，所以 read_progress 块对全新库是 no-op）。**注意顺序**：`read_progress` 检测要先于 site 重建，或合并——最稳妥是把两个检测都放在 `openDatabase` 里，site 重建块在前（它建的 `items_new` 已含 `read_progress` + `last_chapter`），旧库若缺 `read_progress` 时 INSERT 会因列不匹配报错。为避免：site 重建块的 `colList` 直接从旧表 PRAGMA 取，旧库若缺 `read_progress`，需先跑原 `read_progress` ADD 块补上再重建。**因此保持原顺序：先 `read_progress` ADD（若缺），再 site 重建。**
+**测试覆盖（Step 7）必须含一个"半迁移库"用例**：手动建一个有 `site` 列但 PK=`(kind,id)` 的 items 表，跑 `openDatabase`，验证 PK 被重建为 `(site,kind,id)`。
 
 - [ ] **Step 2: 改 types.ts**
 
@@ -484,7 +515,25 @@ if (!cols.some((c) => c.name === "site")) {
 
 为下列方法首参加 `site: string`（参数顺序：site 在前）。SQL 的 `WHERE kind=? AND id=?` 改 `WHERE site=? AND kind=? AND id=?`，`ON CONFLICT(kind,id)` 改 `ON CONFLICT(site,kind,id)`：
 
-- `recordVisit(site, kind, id, title, url)`
+- `recordVisit(site, kind, id, title, url)` —— `title` 改为 `string | undefined`（review I2）：章节页无 bookTitle 时传 `undefined`，SQL 用 `COALESCE` 不覆盖已有 title：
+  ```ts
+  recordVisit(site: string, kind: ItemKind, id: string, title: string | undefined, url: string): void {
+    const now = this.now()
+    this.db
+      .query(
+        `INSERT INTO items (site, kind, id, title, url, first_seen_at, last_visited_at, visit_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1)
+         ON CONFLICT(site, kind, id) DO UPDATE SET
+           title = COALESCE(?4, items.title),
+           url = excluded.url,
+           last_visited_at = excluded.last_visited_at,
+           visit_count = visit_count + 1`
+      )
+      // 新行 title 必填：首次插入时 title 不能 undefined
+      .run(site, kind, id, title ?? url, url, now)
+  }
+  ```
+  （首次插入 title 用 `title ?? url` 兜底，避免 NOT NULL 约束失败；冲突更新时 `COALESCE(?4, items.title)`——传入 undefined 实为 NULL 则保留旧 title。）
 - `setProgress(site, kind, id, progress, chapter?)` —— 签名加 `chapter?: number`；SQL 改为同时写 `last_chapter`：
   ```ts
   setProgress(site: string, kind: ItemKind, id: string, progress: number, chapter?: number): boolean {
@@ -499,7 +548,7 @@ if (!cols.some((c) => c.name === "site")) {
   ```
   见 Step 4 完整实现。
 - `addFavorite(site, kind, id)`、`removeFavorite(site, kind, id)`、`deleteItem(site, kind, id)`、`setTags(site, kind, id, tags)`。
-- `deleteItems(site, pairs: Array<{kind; id}>)` —— pairs 不含 site，site 作为首参。
+- `deleteItems(pairs: Array<{ site: string; kind: ItemKind; id: string }>)` —— **逐条带 site**（review I1）：跨站历史"清空本页"会混 site=1/2，单 site 参数会删错站。每条独立 `WHERE site=? AND kind=? AND id=?`。调用方（API body items）每项含 `site`，缺省 `"1"`。
 - `clearHistory(site?)` —— 可选，不传跨站。
 - `deleteTag(site?, tag)` —— 可选（全局删标签，可跨站；保持可选 site 用于按站删）。
 
@@ -551,8 +600,10 @@ setProgress(
 ```ts
 // 原: store.recordVisit("post", "t1", "标题", "/url")
 // 现: store.recordVisit("1", "post", "t1", "标题", "/url")
+// 原: store.deleteItems([{ kind: "post", id: "t1" }])
+// 现: store.deleteItems([{ site: "1", kind: "post", id: "t1" }])
 ```
-全局替换：`recordVisit("` → `recordVisit("1", "`，以及其余方法同理（用 sed 或手工，注意 `clearHistory()`/`listTags()` 不变）。
+全局替换：`recordVisit("` → `recordVisit("1", "`，以及其余方法同理（用 sed 或手工，注意 `clearHistory()`/`listTags()`/`deleteItems` 形态不同：`deleteItems` 是数组项加 `site`）。
 
 新增测试覆盖：
 - 跨站隔离：`recordVisit("1","book","X",...)` 与 `recordVisit("2","book","X",...)` 是两行；`getState("1","book","X")` ≠ `getState("2","book","X")`。
@@ -751,17 +802,26 @@ git commit -m "feat(core): site + chapter layered content cache keys"
 </main>
 ```
 
-`chapter.html`（章节正文，含书名面包屑 + read-article + 上下章）：
+`chapter.html`（章节正文；**review C4**：面包屑只放书名链，避免"📄书页"被当成书名）：
 ```html
 <main>
-  <nav><a href="/novel/MjI4NzE">📄书页</a><a href="/novel/MjI4NzE/2">欲望夜</a></nav>
+  <nav class="breadcrumbs">
+    <a href="/novel/MjI4NzE">欲望夜</a>
+    <a href="/novel/MjI4NzE/2">→下一章</a>
+  </nav>
   <h1>序：不是开始的开始</h1>
   <article id="read-article"><p>正文段落。<a href="/novel/MjI4NzE/2">下一章</a> <a href="https://xchina.click/x">广告</a></p></article>
-  <nav><a href="/novel/MjI4NzE">返回书页</a><a href="/novel/MjI4NzE/2">下一章 →</a></nav>
+  <nav class="chapter-nav">
+    <a href="/novel/MjI4NzE">返回书页</a>
+    <a href="/novel/MjI4NzE/2">下一章 →</a>
+  </nav>
 </main>
 ```
+`bookTitle` 解析：取面包屑里 `href` 形如 `/novel/{cid}`（**无**章号后缀）的链接文本——上面就是"欲望夜"。**禁止**用"📄书页"那种功能性链接，fixture 必须把书名链与功能链分开（或用选择器限定 `.breadcrumbs a` 且 href 正则 `/novel/[^/]+$`）。
 
-`home.html`（首页时间线 + 热读榜侧栏 + 标签）、`tag.html`、`search.html` 类似裁剪。**真实抓取见 spec 验证记录；fixture 需覆盖测试断言的选择器。**
+`home.html`（首页时间线 + 热读榜侧栏 + 标签）、`tag.html`、`search.html` 类似裁剪。
+
+**选择器契约（review C4，必须遵守）**：fixture 用的 id/class 必须与实现选择器一字不差。当前 `#chapter-list`/`#intro`/`#related-section`/`p.meta`/`.breadcrumbs`/`.chapter-nav` 是**基于 spec 验证的推断**，Task 6 实现前**必须用真实抓取的 HTML 校对一次**（spec 验证时已存 `/tmp/xbookcn_*.html`，或重新 curl）。若真实 DOM 选择器不同（如真实目录页章节列表不在 `#chapter-list` 而在别的容器），**先改 fixture 与实现选择器，再跑测试**。校对动作作为 Task 6 Step 1 的前置子步骤写明。
 
 - [ ] **Step 2: 写 xbookcn 测试（先写关键断言）**
 
@@ -796,6 +856,7 @@ describe("extractBookContent toc", () => {
     expect(r.meta.author).toBe("幻想")
     expect(r.intro).toContain("小艾")
     expect(r.chapters!.length).toBe(2)
+    // 章标题 strip 前缀（review C4）："第 1 章 序：不是开始的开始" → "序：不是开始的开始"
     expect(r.chapters![0]).toEqual({ index: 1, title: "序：不是开始的开始", tid: "MjI4NzE" })
     expect(r.singleShot).toBeFalsy()
     expect(r.related!.length).toBe(1)
@@ -936,12 +997,20 @@ export class XbookcnExtractor implements Extractor {
 `sanitizeChapterHtml(rawHtml, cid)`：用 cheerio 遍历节点；`<a href="/novel/{cid}/{n}">` → 改写为 `<a href="/book/{cid}?site=2&chapter={n}">`（decode href → 抽 n → 拼站内 → escape）；其余 `<a>` 剥离标签留文字（`<a>广告</a>` → `广告`）；最后整体 `stripTags`+`decodeEntities`+`escapeHtml`（策略对齐 cool18 `extractPreHtml`，但这里 article 已是 HTML 片段，需保留我们改写后的 `<a>`）。**实现关键**：先占位法——遍历 a 标签，站内链先替换成 `\u0000L{i}\u0000` 占位 + 记录改写后 href，其余 a 剥离成纯文本，然后 `stripTags(剩余文本)` → `decodeEntities` → `escapeHtml` → 还原占位为 `<a href="...">文字</a>`。与 `extractor.ts:770-814` 的占位策略一致。
 
 辅助：
-- `cidFromUrl(href)`：`/novel/MjI4NzE/2` → `MjI4NzI`（取第三段）。
-- `parseChapterN(href)`：取 `/novel/{cid}/{n}` 的 n。
+- `cidFromUrl(href)`：`/novel/MjI4NzE/2` → `MjI4NzE`（**取第二 path 段 = cid**，review C4 修正：原 plan 注释错写成取第三段且 cid 写错）。
+- `parseChapterN(href)`：取 `/novel/{cid}/{n}` 的 n（第三段），如 `/novel/MjI4NzE/2` → 2。
 - `parseAuthor(meta)`：`/作者[：:]\s*([^·\n]+)/`，无匹配 null。
+- `parseChapterTitle(text)`：strip 章前缀——`第 N 章 ` / `第N章 ` → 剩余标题（review C4：`$(a).text()` 含"第 1 章 "前缀，必须正则剥除才得 `序：不是开始的开始`）。无前缀（如"开始阅读正文"）原样返回。
 - `parseNovelCards(html)`：解析首页/标签/搜索的 `<article>` 卡片 → `ChapterLink[]`（tid=cid）。
 
-`fetchHomeLinks`/`fetchCategoryPage`/`fetchHotHtml`/`extractHotPosts`/`extractCategoryLinks` 实现按 spec §2 注释。`fetchHotHtml`：`fetchUpstream(this.homeUrl).text()`。
+`fetchHomeLinks`/`fetchCategoryPage`/`fetchHotHtml`/`extractHotPosts`/`extractCategoryLinks` 实现按 spec §2 注释。`fetchHotHtml`（review S2 错误对齐 cool18）：不是裸 `.text()`，要先判 `resp.ok`：
+```ts
+async fetchHotHtml(): Promise<string> {
+  const resp = await fetchUpstream(this.homeUrl)
+  if (!resp.ok) throw new ExtractorError(`upstream error: ${resp.status}`, 502)
+  return resp.text()
+}
+```
 
 - [ ] **Step 5: 注册到 sites.ts**
 
@@ -1022,9 +1091,10 @@ async function handleBooks(url: URL): Promise<Response> {
   if (chapter !== undefined) assertSafeId(chapter)
   const refresh = url.searchParams.get("refresh") === "1"
 
-  const pageUrl = chapter
-    ? extractor.buildChapterUrl(cid, chapter)
-    : extractor.buildBookUrl(cid)
+  const pageUrl =
+    chapter && extractor.buildChapterUrl
+      ? extractor.buildChapterUrl(cid, chapter)
+      : extractor.buildBookUrl(cid)
 
   const content = await loadCachedContent(siteId, "book", cid, refresh, async () => {
     const resp = await fetchUpstream(pageUrl, { headers: { Referer: extractor.homeUrl } })
@@ -1034,8 +1104,9 @@ async function handleBooks(url: URL): Promise<Response> {
 
   const result = extractor.extractBookContent(content.html, chapter ? { chapter } : undefined)
 
-  // 书名策略：章节页用 bookTitle，否则用 title
-  const visitTitle = chapter ? (result.bookTitle ?? result.title) : result.title
+  // 书名策略（review I2）：有 bookTitle 用书名；无 bookTitle 时不覆盖已有 title。
+  // recordVisit 改造为：title 传 undefined 时 SQL 不动 title 列（见 Task 4 recordVisit）。
+  const visitTitle = result.bookTitle ?? (chapter ? undefined : result.title)
   store.recordVisit(siteId, "book", cid, visitTitle, extractor.buildBookUrl(cid))
 
   const payload: Record<string, unknown> = {
@@ -1088,7 +1159,8 @@ const siteId = site ?? DEFAULT_SITE
 const extractor = resolveSite(site)
 const tid = url.searchParams.get("tid")
 if (tid && siteId !== "1") {
-  // xbookcn 无帖子模型
+  // xbookcn 无帖子模型（review S3：两站阶段用 siteId!=="1" 可接受；
+  // 加第三站若有书站需改成按 extractor 能力判定，如 `extractor.name === "cool18"`）
   return jsonError("xbookcn does not support posts", 404)
 }
 ```
@@ -1102,7 +1174,7 @@ if (tid && siteId !== "1") {
 
 - [ ] **Step 6: /api/me/* 透传 site**
 
-`handleMeHistory`/`handleMeFavorites`/`handleMeItems`/`handleMeTags` 的 query 加 `site`（透传给 store list 查询的可选 site）。`handleHistoryDelete` 的 `kind+id` 模式加 `site` query；body items 模式每项可含 `site`。`handleFavoriteWrite`/`handleTagsWrite`/`handleProgressWrite` body 加 `site`（默认 `"1"`）。`handleMeState` 加 `site` query。
+`handleMeHistory`/`handleMeFavorites`/`handleMeItems`/`handleMeTags` 的 query 加 `site`（透传给 store list 查询的可选 site）。`handleHistoryDelete` 的 `kind+id` 模式加 `site` query；**body items 模式每项透传 site 给 `deleteItems`**（review I1）：解析 body 时每项 `{site ?? "1", kind, id}`，直接传给 `store.deleteItems(pairs)`。`handleFavoriteWrite`/`handleTagsWrite`/`handleProgressWrite` body 加 `site`（默认 `"1"`）。`handleMeState` 加 `site` query。
 
 `handleProgressWrite` 关键改动：
 ```ts
@@ -1317,26 +1389,41 @@ BookPage 支持 xbookcn 目录页与章节正文页；进度恢复仅当章号�
 - Consumes: `useSite`、`bookPath(cid,{site,chapter})`、API 新字段。
 - Produces: BookPage 二态渲染；`useReadingProgress(kind, id, opts & {chapter?; restoreChapter?})`。
 
-- [ ] **Step 1: useReadingProgress 接收 chapter + 章号匹配**
+- [ ] **Step 1: useReadingProgress 接收 chapter + 章号匹配 + restoreId 含 chapter**
 
-改签名加 `chapter?: string` 与 `restoreChapter?: number | null`；restore 仅当 `chapter` 与 `restoreChapter` 匹配（都为数字且相等）才执行。PUT body 带 chapter：
+改签名加 `chapter?: string` 与 `restoreChapter?: number | null` 与 `site?: SiteId`；restore 仅当 `chapter` 与 `restoreChapter` 匹配（都为数字且相等）才执行。PUT body 带 chapter：
 ```ts
 body: JSON.stringify({ kind, id, progress: p, site, chapter })
 ```
-（需接收 site 参数或内部用 useSite；让调用方传 site 更纯。签名加 `site?: SiteId`。）
 
-restore 决策段加章号判断：
+**review I4 关键修复**：`restoreId.current` 必须**含 chapter**，否则同 cid 从 ch1→ch2 时 `id` 不变、`restoreTarget` 已被 ch1 决策填满、早退在章号判断之前、换章不重算。
+
 ```ts
-const chapterMatches = opts.chapter !== undefined && opts.restoreChapter !== null && opts.restoreChapter !== undefined && Number(opts.chapter) === opts.restoreChapter
-if (!chapterMatches) { restoreTarget.current = null; return }
+const restoreKey = `${id}:${chapter ?? ""}`
+useEffect(() => {
+  if (restoreId.current !== restoreKey) {
+    restoreId.current = restoreKey
+    restoreTarget.current = undefined // 新章/新书：未决策
+  }
+  ...原 restore 决策逻辑...
+}, [opts.ready, opts.stateReady, restoreKey]) // 依赖用 restoreKey 替代 id
 ```
-cool18（无 chapter）保持原行为：`chapter === undefined` 时不做章号门控，直接按原逻辑（兼容）。
+
+restore 决策段加章号门控（在 `restoreTarget.current !== undefined` 早退**之前**）：
+```ts
+// 章号门控：仅当当前章号 === 上次记录章号才恢复（review I4）
+if (chapter !== undefined) {
+  const matches = opts.restoreChapter !== null && opts.restoreChapter !== undefined && Number(chapter) === opts.restoreChapter
+  if (!matches) { restoreTarget.current = null; return }
+}
+```
+cool18（`chapter === undefined`）跳过门控，按原逻辑。`site` 透传到 PUT body。
 
 - [ ] **Step 2: item-actions ItemState 加 lastChapter + site**
 
 `ItemState` interface 加 `site: string`、`lastChapter: number | null`。`useItemState` 的 fetch URL 加 `&site=${site}`（接收 site 参数或内部 useSite）。PUT favorite/tags body 加 `site`。
 
-- [ ] **Step 3: BookPage 二态**
+- [ ] **Step 3: BookPage 按 site 分支（review I3：不能只看 chapter）**
 
 ```tsx
 const { cid = "" } = useParams<{ cid: string }>()
@@ -1346,11 +1433,17 @@ const site = useSite()
 ```
 API 调用：`${api.books}?cid=${cid}&site=${site}${chapter ? `&chapter=${chapter}` : ""}`。
 
-渲染分支：
-- 无 chapter（目录页）：渲染标题/作者/简介/章节列表（点 `bookPath(cid,{site,chapter:String(i+1)})`）/相关推荐。singleShot 时主 CTA"开始阅读"跳 chapter=1。cool18（site=1）忽略 chapter，正文直接渲染（现有 `<ArticleView>` 路径）。
-- 有 chapter（章节页）：渲染章名 + 正文 + "←上一章 / 返回书页 / 下一章→"导航 + `<ArticleView>`。导航链接用 `result.prevChapter`/`nextChapter`。
+**三个分支（写死，不能用"有无 chapter"当第一刀，否则 cool18 site=1 无 chapter 时会误进目录 UI）**：
 
-`useReadingProgress` 仅在章节页（site=2 且有 chapter）或 cool18（site=1）启用；目录页不调用。
+```ts
+const isToc = site === "2" && !chapter        // xbookcn 目录页
+const isChapterBody = site === "2" && !!chapter // xbookcn 章节正文
+const isCool18Book = site === "1"              // cool18 整本一页（现有 ArticleView 路径）
+```
+
+- `isCool18Book`：渲染现有 `<ArticleView>`（标题/正文/ItemActions），`useReadingProgress("book", cid, {site:"1", restore})` —— 行为与现状一致。
+- `isToc`：渲染标题/作者/简介/章节列表（点章节点 `bookPath(cid,{site,chapter:String(i+1)})`）/相关推荐。singleShot 时主 CTA"开始阅读"跳 chapter=1。**目录页不调用 useReadingProgress**。
+- `isChapterBody`：渲染章名 + 正文 + "←上一章 / 返回书页 / 下一章→"导航 + `<ArticleView>`。导航链接用 `result.prevChapter`/`nextChapter`（有则渲染 `<Link to={bookPath(cid,{site,chapter:String(n)})}>`）。`useReadingProgress("book", cid, {site, chapter, restoreChapter: state.lastChapter, restore: state.read_progress})`。
 
 - [ ] **Step 4: 类型检查**
 
@@ -1429,7 +1522,7 @@ Run: `bun run dev`（需 HTTPS_PROXY 若上游不可达）
 按 spec 验证清单逐项核对：
 - [ ] 首页时间线 + 无限滚动，点卡进书目录（非 /read）
 - [ ] 分类标签网格；browse 分页
-- [ ] 搜索双字关键词有结果，单字空
+- [ ] 搜索双字关键词有结果（上游对短关键词有约束，按线上 `/search` 行为验证，不预设具体下限——review I6）
 - [ ] 人气=今日热读榜，点进书
 - [ ] 多章目录 + 章节正文 + 上下章 + 相关推荐
 - [ ] 单篇目录 CTA → chapter=1
@@ -1445,6 +1538,10 @@ Run: `bun run dev`（需 HTTPS_PROXY 若上游不可达）
 
 若手动测试发现问题，修复后单独提交。无问题则无需提交。
 
+- [ ] **Step 4: 更新 AGENTS.md（review I5）**
+
+`AGENTS.md` 的 API 表补充：所有内容端点注明 `site` 参数（默认 `1`）；`/api/books` 加 `chapter` 参数；新增 `/api/me/progress` 行（之前文档漏了，现已实现）；`/api/me/*` 列表加 `site` 维度。改动清单同步补此项提交。
+
 ---
 
 ## 自检备注
@@ -1453,4 +1550,6 @@ Run: `bun run dev`（需 HTTPS_PROXY 若上游不可达）
 
 **关键类型一致性：** `setProgress(site, kind, id, progress, chapter?)` 在 Task 4（store）与 Task 7（API 透传）与 Task 10（前端 PUT body）三处签名一致；`lastChapter` 在 store 返回 → API state → `ItemState.lastChapter` → `useReadingProgress.restoreChapter` 全链路同名；`bookTitle` 在 Task 2（类型）→ Task 6（extractChapter 填充）→ Task 7（recordVisit 使用）一致；`fetchHotHtml` 在 Task 2（接口）→ Task 6（xbookcn 实现）/ Task 2（cool18 实现）→ Task 7（调用）一致。
 
-**已知风险点：** Task 6 的 `sanitizeChapterHtml` 占位策略需仔细对齐 cool18 `extractPreHtml`（`extractor.ts:770-814`）；Task 4 旧库迁移顺序（read_progress ADD 先于 site 重建）；Task 7 `buildChapterUrl` 需为接口可选成员（Task 2 补）。
+**已知风险点：** Task 6 的 `sanitizeChapterHtml` 占位策略需仔细对齐 cool18 `extractPreHtml`（`extractor.ts:770-814`）；Task 4 旧库迁移顺序（read_progress ADD 先于 site 重建，且 PK 检测不能只看列）；Task 7 `buildChapterUrl` 需为接口可选成员（Task 2 补）；Task 6 选择器必须用真实 HTML 校对（review C4）；Task 3-6 期间 API 保留 name 版 getExtractor（review C1，Task 7 才切换）。
+
+**review 评审已修订项：** C1(Task 3 getExtractor 兼容) / C2(Task 4 迁移显式 site + PK 检测) / C3(Task 7 buildChapterUrl 可选链) / C4(Task 6 fixture/cidFromUrl/章标题/选择器契约) / I1(deleteItems 逐条 site) / I2(recordVisit COALESCE 不覆盖) / I3(BookPage 按 site 三分支) / I4(restoreId 含 chapter) / I5(AGENTS.md) / I6(搜索措辞) / S1(半残说明) / S2(fetchHotHtml 错误对齐) / S3(handlePosts 判定注释) 均已 inline 修订。
