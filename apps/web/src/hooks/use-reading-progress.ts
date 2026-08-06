@@ -55,13 +55,13 @@ export function useReadingProgress(
       if (lastSent.current !== null && Math.abs(p - lastSent.current) < 0.01) {
         return
       }
-      lastSent.current = p
       try {
-        await fetch(api.meProgress, {
+        const res = await fetch(api.meProgress, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ kind, id, progress: p }),
         })
+        if (res.ok) lastSent.current = p
       } catch {
         // 写入失败静默：不影响阅读
       }

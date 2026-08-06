@@ -20,13 +20,14 @@ export default function BookPage() {
   const { state, reload } = useItemState("book", cid)
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
+  const [loadedCid, setLoadedCid] = useState("")
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
   useReadingProgress("book", cid, {
-    ready: !!book, // 内容已挂载
-    stateReady: state !== null, // state GET 已完成（区分 null-progress 与 未加载）
-    restore: state?.read_progress,
+    ready: loadedCid === cid, // 当前 cid 内容已挂载（按 id 区分，避免串用上一篇）
+    stateReady: state !== null && state.id === cid, // 当前文章的 state GET 已完成
+    restore: state?.id === cid ? state.read_progress : undefined,
   })
 
   const fetchBook = useCallback(
@@ -46,6 +47,7 @@ export default function BookPage() {
           return
         }
         setBook(json)
+        setLoadedCid(cid)
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")

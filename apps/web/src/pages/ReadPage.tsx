@@ -24,13 +24,14 @@ export default function ReadPage() {
   const { state, reload } = useItemState("post", tid)
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
+  const [loadedTid, setLoadedTid] = useState("")
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
   useReadingProgress("post", tid, {
-    ready: !!content, // 内容已挂载
-    stateReady: state !== null, // state GET 已完成（区分 null-progress 与 未加载）
-    restore: state?.read_progress,
+    ready: loadedTid === tid, // 当前 tid 内容已挂载（按 id 区分，避免串用上一篇）
+    stateReady: state !== null && state.id === tid, // 当前文章的 state GET 已完成
+    restore: state?.id === tid ? state.read_progress : undefined,
   })
 
   const fetchContent = useCallback(
@@ -50,6 +51,7 @@ export default function ReadPage() {
           return
         }
         setContent(json)
+        setLoadedTid(tid)
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
