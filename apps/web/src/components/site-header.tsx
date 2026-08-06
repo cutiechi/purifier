@@ -11,8 +11,16 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { readingMaxWidthClass } from "@/components/reading-settings"
 import { SiteSwitcher } from "@/components/site-switcher"
 import { useSite } from "@/hooks/use-site"
-import { NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
+import { DEFAULT_SITE, NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
+
+// 导航链接带上当前站点：site=1（cool18）保持原样不追加 ?site=，其余站点追加 ?site=
+function navHref(href: string, site: SiteId): string {
+  if (site === DEFAULT_SITE) return href
+  const params = new URLSearchParams()
+  params.set("site", site)
+  return `${href}?${params.toString()}`
+}
 
 export function SiteHeader({
   showBack,
@@ -71,7 +79,7 @@ export function SiteHeader({
             return (
               <Link
                 key={item.href}
-                to={item.href}
+                to={navHref(item.href, site)}
                 className={cn(
                   "inline-flex h-11 shrink-0 items-center rounded-lg px-2.5 text-[13px] font-medium transition-colors",
                   active
@@ -88,7 +96,7 @@ export function SiteHeader({
         <div className="ml-auto flex items-center gap-0.5">
           <SiteSwitcher />
           <Link
-            to={routes.search}
+            to={navHref(routes.search, site)}
             className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
             aria-label="搜索"
           >
@@ -121,7 +129,7 @@ export function SiteHeader({
               return (
                 <Link
                   key={item.href}
-                  to={item.href}
+                  to={navHref(item.href, site)}
                   className={cn(
                     "inline-flex h-11 shrink-0 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",
                     active
