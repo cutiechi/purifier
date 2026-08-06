@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio"
 import { fetchUpstream } from "../upstream"
+import { decodeHtmlEntities, escapeHtml, stripTags } from "./utils"
 import {
   Extractor,
   ChapterLink,
@@ -776,9 +777,9 @@ export class Cool18Extractor implements Extractor {
           /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
         )
         const href = hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? ""
-        const decodedHref = this.decodeHtmlEntities(href)
-        const labelText = this.decodeHtmlEntities(
-          this.stripTags(labelHtml)
+        const decodedHref = decodeHtmlEntities(href)
+        const labelText = decodeHtmlEntities(
+          stripTags(labelHtml)
         ).trim()
 
         const tid = this.extractTid(decodedHref)
@@ -796,17 +797,17 @@ export class Cool18Extractor implements Extractor {
           return labelText
         }
 
-        const label = this.escapeHtml(labelText || tid || cid || "链接")
+        const label = escapeHtml(labelText || tid || cid || "链接")
         const idx = placeholders.length
-        placeholders.push(`<a href="${this.escapeHtml(internal)}">${label}</a>`)
+        placeholders.push(`<a href="${escapeHtml(internal)}">${label}</a>`)
         return `\u0000L${idx}\u0000`
       }
     )
 
     // 去掉剩余 HTML 标签，解码实体，再转义
-    let text = this.stripTags(inner)
-    text = this.decodeHtmlEntities(text)
-    text = this.escapeHtml(text)
+    let text = stripTags(inner)
+    text = decodeHtmlEntities(text)
+    text = escapeHtml(text)
 
     // 还原内部阅读链接
     text = text.replace(/\u0000L(\d+)\u0000/g, (_m, n) => {
@@ -814,65 +815,6 @@ export class Cool18Extractor implements Extractor {
     })
 
     return text.trim()
-  }
-
-  private stripTags(s: string): string {
-    let result = ""
-    let inTag = false
-    for (const ch of s) {
-      if (ch === "<") {
-        inTag = true
-      } else if (ch === ">") {
-        inTag = false
-      } else if (!inTag) {
-        result += ch
-      }
-    }
-    return result
-  }
-
-  private escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-  }
-
-  private decodeHtmlEntities(s: string): string {
-    const namedEntities: Record<string, string> = {
-      "&nbsp;": " ",
-      "&lt;": "<",
-      "&gt;": ">",
-      "&amp;": "&",
-      "&quot;": '"',
-      "&#x3000;": "\u3000",
-      "&#12288;": "\u3000",
-    }
-
-    for (const [entity, ch] of Object.entries(namedEntities)) {
-      s = s.split(entity).join(ch)
-    }
-
-    // 数字实体 &#123;
-    s = s.replace(/&#(\d+);/g, (_match, num) => {
-      const code = parseInt(num, 10)
-      if (!isNaN(code) && code >= 0 && code <= 0x10ffff) {
-        return String.fromCodePoint(code)
-      }
-      return _match
-    })
-
-    // 十六进制实体 &#xHH;
-    s = s.replace(/&#x([0-9a-f]+);/gi, (_match, hex) => {
-      const code = parseInt(hex, 16)
-      if (!isNaN(code) && code >= 0 && code <= 0x10ffff) {
-        return String.fromCodePoint(code)
-      }
-      return _match
-    })
-
-    return s
   }
 
   async fetchHomeLinks(mtid: string): Promise<HomePage> {
