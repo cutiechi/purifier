@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
-import { ItemActions } from "@/components/item-actions"
+import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { useReadingSettings } from "@/components/reading-settings"
+import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { api } from "@/lib/routes"
 
 interface BookData {
@@ -16,11 +17,17 @@ interface BookData {
 export default function BookPage() {
   const { cid = "" } = useParams<{ cid: string }>()
   const { settings } = useReadingSettings()
+  const { state, reload } = useItemState("book", cid)
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
+  useReadingProgress("book", cid, {
+    ready: !!book, // 内容已挂载
+    stateReady: state !== null, // state GET 已完成（区分 null-progress 与 未加载）
+    restore: state?.read_progress,
+  })
 
   const fetchBook = useCallback(
     async (opts?: { refresh?: boolean }) => {
@@ -79,6 +86,8 @@ export default function BookPage() {
                 <ItemActions
                   kind="book"
                   id={cid}
+                  state={state}
+                  reload={reload}
                   onRefresh={() => void fetchBook({ refresh: true })}
                   refreshing={refreshing}
                 />

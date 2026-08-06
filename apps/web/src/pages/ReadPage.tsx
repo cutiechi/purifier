@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
-import { ItemActions } from "@/components/item-actions"
+import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { useReadingSettings } from "@/components/reading-settings"
+import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
 import { api } from "@/lib/routes"
@@ -20,11 +21,17 @@ interface ContentData {
 export default function ReadPage() {
   const { tid = "" } = useParams<{ tid: string }>()
   const { settings } = useReadingSettings()
+  const { state, reload } = useItemState("post", tid)
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
+  useReadingProgress("post", tid, {
+    ready: !!content, // 内容已挂载
+    stateReady: state !== null, // state GET 已完成（区分 null-progress 与 未加载）
+    restore: state?.read_progress,
+  })
 
   const fetchContent = useCallback(
     async (opts?: { refresh?: boolean }) => {
@@ -84,6 +91,8 @@ export default function ReadPage() {
                 <ItemActions
                   kind="post"
                   id={tid}
+                  state={state}
+                  reload={reload}
                   onRefresh={() => void fetchContent({ refresh: true })}
                   refreshing={refreshing}
                 />

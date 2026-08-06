@@ -15,6 +15,7 @@ export interface ItemState {
   visit_count: number
   favorited: boolean
   tags: string[]
+  read_progress: number | null
 }
 
 /** 打开页面时回填 /api/me/state */
@@ -42,15 +43,18 @@ export function useItemState(kind: "post" | "book", id: string) {
 export function ItemActions({
   kind,
   id,
+  state,
+  reload,
   onRefresh,
   refreshing,
 }: {
   kind: "post" | "book"
   id: string
+  state: ItemState | null
+  reload: () => Promise<void>
   onRefresh: () => void
   refreshing: boolean
 }) {
-  const { state, reload } = useItemState(kind, id)
   const [busy, setBusy] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
