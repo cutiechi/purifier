@@ -1,7 +1,10 @@
+import type { SiteId } from "../extractor"
+
 export type ItemKind = "post" | "book"
 
 /** 列表项：历史/收藏/按标签筛选共用结构 */
 export interface ListItem {
+  site: SiteId
   kind: ItemKind
   id: string
   title: string
@@ -12,6 +15,7 @@ export interface ListItem {
   favorited: boolean
   tags: string[]
   read_progress?: number | null
+  lastChapter?: number | null
 }
 
 export interface ListResult {
@@ -21,6 +25,7 @@ export interface ListResult {
 
 /** 单对象状态（/api/me/state 返回） */
 export interface ItemState {
+  site: SiteId
   kind: ItemKind
   id: string
   title: string
@@ -31,9 +36,11 @@ export interface ItemState {
   favorited: boolean
   tags: string[]
   read_progress: number | null
+  lastChapter: number | null
 }
 
 export interface ListQuery {
+  site?: SiteId
   q?: string
   kind?: ItemKind | ""
   page?: number

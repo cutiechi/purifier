@@ -20,6 +20,13 @@ describe("openDatabase", () => {
       )
       .all() as { name: string }[]
     expect(rows.map((r) => r.name)).toEqual(["favorites", "items", "tags"])
+    // 新库直接是 site 主键
+    const meta = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+      )
+      .get() as { sql: string }
+    expect(meta.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*site,\s*kind,\s*id/i)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -43,10 +50,10 @@ function makeStore() {
 describe("recordVisit / getState", () => {
   test("new visit counts 1 and upsert increments + overwrites title", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "10", "标题A", "urlA")
-    expect(store.getState("post", "10")?.visit_count).toBe(1)
-    store.recordVisit("post", "10", "标题A2", "urlA")
-    const state = store.getState("post", "10")
+    store.recordVisit("1", "post", "10", "标题A", "urlA")
+    expect(store.getState("1", "post", "10")?.visit_count).toBe(1)
+    store.recordVisit("1", "post", "10", "标题A2", "urlA")
+    const state = store.getState("1", "post", "10")
     expect(state?.visit_count).toBe(2)
     expect(state?.title).toBe("标题A2")
     expect(state?.first_seen_at).toBe(1000)
@@ -55,34 +62,57 @@ describe("recordVisit / getState", () => {
 
   test("missing item returns null", () => {
     const { store } = makeStore()
-    expect(store.getState("post", "nope")).toBeNull()
+    expect(store.getState("1", "post", "nope")).toBeNull()
+  })
+
+  test("recordVisit with undefined title keeps existing title", () => {
+    const { store, dir } = makeStore()
+    try {
+      store.recordVisit("1", "book", "X", "书名", "/url")
+      store.recordVisit("1", "book", "X", undefined, "/url")
+      const state = store.getState("1", "book", "X")
+      expect(state?.title).toBe("书名") // 不被覆盖成 url
+      expect(state?.visit_count).toBe(2)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("recordVisit with undefined title falls back to url for new row", () => {
+    const { store, dir } = makeStore()
+    try {
+      store.recordVisit("1", "book", "Y", undefined, "/url")
+      expect(store.getState("1", "book", "Y")?.title).toBe("/url")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
 describe("deleteItem / clearHistory", () => {
   test("deleteItem removes item favorites and tags", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "T", "u")
-    store.addFavorite("post", "1")
-    store.setTags("post", "1", ["科幻"])
-    expect(store.deleteItem("post", "1")).toBe(true)
-    expect(store.getState("post", "1")).toBeNull()
+    store.recordVisit("1", "post", "1", "T", "u")
+    store.addFavorite("1", "post", "1")
+    store.setTags("1", "post", "1", ["科幻"])
+    expect(store.deleteItem("1", "post", "1")).toBe(true)
+    expect(store.getState("1", "post", "1")).toBeNull()
     expect(store.listFavorites({}).items).toEqual([])
     expect(store.listTags()).toEqual([])
-    expect(store.deleteItem("post", "1")).toBe(false)
+    expect(store.deleteItem("1", "post", "1")).toBe(false)
   })
 
   test("deleteItems batch and clearHistory", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "A", "u")
-    store.recordVisit("book", "2", "B", "u")
-    store.recordVisit("post", "3", "C", "u")
-    store.setTags("post", "1", ["x"])
+    store.recordVisit("1", "post", "1", "A", "u")
+    store.recordVisit("1", "book", "2", "B", "u")
+    store.recordVisit("1", "post", "3", "C", "u")
+    store.setTags("1", "post", "1", ["x"])
     expect(
       store.deleteItems([
-        { kind: "post", id: "1" },
-        { kind: "book", id: "2" },
-        { kind: "post", id: "missing" },
+        { site: "1", kind: "post", id: "1" },
+        { site: "1", kind: "book", id: "2" },
+        { site: "1", kind: "post", id: "missing" },
       ])
     ).toBe(2)
     expect(store.listHistory({}).items.map((i) => i.id)).toEqual(["3"])
@@ -95,36 +125,36 @@ describe("deleteItem / clearHistory", () => {
 describe("favorites", () => {
   test("addFavorite fails for missing item", () => {
     const { store } = makeStore()
-    expect(store.addFavorite("post", "1")).toBe(false)
+    expect(store.addFavorite("1", "post", "1")).toBe(false)
   })
 
   test("add/remove favorite toggles state", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "T", "u")
-    expect(store.addFavorite("post", "1")).toBe(true)
-    expect(store.getState("post", "1")?.favorited).toBe(true)
-    store.removeFavorite("post", "1")
-    expect(store.getState("post", "1")?.favorited).toBe(false)
+    store.recordVisit("1", "post", "1", "T", "u")
+    expect(store.addFavorite("1", "post", "1")).toBe(true)
+    expect(store.getState("1", "post", "1")?.favorited).toBe(true)
+    store.removeFavorite("1", "post", "1")
+    expect(store.getState("1", "post", "1")?.favorited).toBe(false)
   })
 })
 
 describe("setTags / normalize", () => {
   test("setTags replaces the whole set", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "T", "u")
-    expect(store.setTags("post", "1", ["科幻", "长篇"])).toEqual([
+    store.recordVisit("1", "post", "1", "T", "u")
+    expect(store.setTags("1", "post", "1", ["科幻", "长篇"])).toEqual([
       "科幻",
       "长篇",
     ])
-    store.setTags("post", "1", ["连载中"])
-    expect(store.getState("post", "1")?.tags).toEqual(["连载中"])
+    store.setTags("1", "post", "1", ["连载中"])
+    expect(store.getState("1", "post", "1")?.tags).toEqual(["连载中"])
   })
 
   test("setTags normalizes and dedupes", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "T", "u")
-    store.setTags("post", "1", ["  科幻  ", "科 幻", "科幻", "", "  "])
-    expect(store.getState("post", "1")?.tags).toEqual(["科幻", "科 幻"])
+    store.recordVisit("1", "post", "1", "T", "u")
+    store.setTags("1", "post", "1", ["  科幻  ", "科 幻", "科幻", "", "  "])
+    expect(store.getState("1", "post", "1")?.tags).toEqual(["科幻", "科 幻"])
   })
 
   test("truncates tags to 24 code points", () => {
@@ -134,31 +164,31 @@ describe("setTags / normalize", () => {
 
   test("setTags returns null for missing item", () => {
     const { store } = makeStore()
-    expect(store.setTags("book", "9", ["x"])).toBeNull()
+    expect(store.setTags("1", "book", "9", ["x"])).toBeNull()
   })
 
   test("deleteTag removes the tag from all items", () => {
     const { store } = makeStore()
-    store.recordVisit("post", "1", "T1", "u1")
-    store.recordVisit("post", "2", "T2", "u2")
-    store.setTags("post", "1", ["科幻", "长篇"])
-    store.setTags("post", "2", ["科幻"])
-    expect(store.deleteTag("科幻")).toBe(2)
-    expect(store.getState("post", "1")?.tags).toEqual(["长篇"])
-    expect(store.getState("post", "2")?.tags).toEqual([])
+    store.recordVisit("1", "post", "1", "T1", "u1")
+    store.recordVisit("1", "post", "2", "T2", "u2")
+    store.setTags("1", "post", "1", ["科幻", "长篇"])
+    store.setTags("1", "post", "2", ["科幻"])
+    expect(store.deleteTag(undefined, "科幻")).toBe(2)
+    expect(store.getState("1", "post", "1")?.tags).toEqual(["长篇"])
+    expect(store.getState("1", "post", "2")?.tags).toEqual([])
     expect(store.listTags()).toEqual([{ tag: "长篇", count: 1 }])
-    expect(store.deleteTag("不存在")).toBe(0)
-    expect(store.deleteTag("  ")).toBe(0)
+    expect(store.deleteTag(undefined, "不存在")).toBe(0)
+    expect(store.deleteTag(undefined, "  ")).toBe(0)
   })
 })
 
 function seed(store: Store) {
-  store.recordVisit("post", "1", "Alpha 星", "u1")
-  store.recordVisit("book", "2", "Beta 书", "u2")
-  store.recordVisit("post", "3", "gamma 贴", "u3")
-  store.setTags("post", "1", ["科幻"])
-  store.setTags("post", "3", ["随笔"])
-  store.addFavorite("book", "2")
+  store.recordVisit("1", "post", "1", "Alpha 星", "u1")
+  store.recordVisit("1", "book", "2", "Beta 书", "u2")
+  store.recordVisit("1", "post", "3", "gamma 贴", "u3")
+  store.setTags("1", "post", "1", ["科幻"])
+  store.setTags("1", "post", "3", ["随笔"])
+  store.addFavorite("1", "book", "2")
 }
 
 describe("listHistory", () => {
@@ -196,7 +226,7 @@ describe("listHistory", () => {
   test("paginates 20 per page", () => {
     const { store } = makeStore()
     for (let i = 0; i < 25; i++) {
-      store.recordVisit("post", String(i), `T${i}`, "u")
+      store.recordVisit("1", "post", String(i), `T${i}`, "u")
     }
     const p1 = store.listHistory({ page: 1 })
     expect(p1.items).toHaveLength(20)
@@ -211,8 +241,8 @@ describe("listFavorites", () => {
   test("orders by favorited_at desc and returns favorited_at", () => {
     const { store } = makeStore()
     seed(store)
-    store.recordVisit("post", "10", "Ten", "u")
-    store.addFavorite("post", "10")
+    store.recordVisit("1", "post", "10", "Ten", "u")
+    store.addFavorite("1", "post", "10")
     const res = store.listFavorites({})
     expect(res.items.map((i) => i.id)).toEqual(["10", "2"])
     expect(res.items[0]?.favorited_at).toBeDefined()
@@ -232,7 +262,7 @@ describe("listTags", () => {
   test("counts desc, tie by tag asc", () => {
     const { store } = makeStore()
     seed(store)
-    store.setTags("book", "2", ["科幻", "历史"])
+    store.setTags("1", "book", "2", ["科幻", "历史"])
     const res = store.listTags()
     expect(res).toEqual([
       { tag: "科幻", count: 2 },
@@ -252,7 +282,103 @@ describe("listByTag", () => {
   })
 })
 
-// 模拟旧库：用不含 read_progress 的 DDL 建库并写入一行
+describe("multi-site", () => {
+  test("sites are isolated: same kind/id on different sites are distinct rows", () => {
+    const { store, dir } = makeStore()
+    try {
+      store.recordVisit("1", "book", "X", "站一", "/cool18/x")
+      store.recordVisit("2", "book", "X", "站二", "/xbookcn/x")
+      expect(store.getState("1", "book", "X")?.title).toBe("站一")
+      expect(store.getState("2", "book", "X")?.title).toBe("站二")
+      expect(store.getState("1", "book", "X")?.visit_count).toBe(1)
+      expect(store.getState("2", "book", "X")?.visit_count).toBe(1)
+      // 再访问站一不影响站二
+      store.recordVisit("1", "book", "X", "站一2", "/cool18/x")
+      expect(store.getState("1", "book", "X")?.visit_count).toBe(2)
+      expect(store.getState("2", "book", "X")?.visit_count).toBe(1)
+      // 删除只删本站
+      store.addFavorite("1", "book", "X")
+      store.addFavorite("2", "book", "X")
+      store.deleteItem("1", "book", "X")
+      expect(store.getState("1", "book", "X")).toBeNull()
+      expect(store.getState("2", "book", "X")?.favorited).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("setProgress writes last_chapter and leaves it unchanged without chapter", () => {
+    const { store, dir } = makeStore()
+    try {
+      store.recordVisit("2", "book", "X", "书名", "/xbookcn/x")
+      expect(store.getState("2", "book", "X")?.lastChapter).toBeNull()
+      store.setProgress("2", "book", "X", 0.5, 3)
+      expect(store.getState("2", "book", "X")?.lastChapter).toBe(3)
+      expect(store.getState("2", "book", "X")?.read_progress).toBeCloseTo(0.5)
+      // 不传 chapter：last_chapter 保持
+      store.setProgress("2", "book", "X", 0.8)
+      expect(store.getState("2", "book", "X")?.lastChapter).toBe(3)
+      expect(store.getState("2", "book", "X")?.read_progress).toBeCloseTo(0.8)
+      // 列表返回也带 lastChapter
+      store.recordVisit("1", "book", "Y", "另一本", "/cool18/y")
+      store.setProgress("1", "book", "Y", 0.1, 7)
+      const item = store
+        .listHistory({ site: "1" })
+        .items.find((i) => i.id === "Y")
+      expect(item?.lastChapter).toBe(7)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("list queries filter by site; clearHistory(site) and deleteTag(site) are scoped", () => {
+    const { store, dir } = makeStore()
+    try {
+      store.recordVisit("1", "post", "a", "A站", "u")
+      store.recordVisit("2", "post", "b", "B站", "u")
+      store.setTags("1", "post", "a", ["科幻"])
+      store.setTags("2", "post", "b", ["科幻"])
+      store.addFavorite("1", "post", "a")
+      store.addFavorite("2", "post", "b")
+      expect(store.listHistory({ site: "1" }).items.map((i) => i.id)).toEqual([
+        "a",
+      ])
+      expect(store.listHistory({ site: "2" }).items.map((i) => i.id)).toEqual([
+        "b",
+      ])
+      expect(store.listFavorites({ site: "1" }).items.map((i) => i.id)).toEqual(
+        ["a"]
+      )
+      expect(
+        store.listByTag("科幻", { site: "2" }).items.map((i) => i.id)
+      ).toEqual(["b"])
+      expect(store.listTags("1")).toEqual([{ tag: "科幻", count: 1 }])
+      // deleteTag 按站删
+      store.deleteTag("1", "科幻")
+      expect(store.getState("1", "post", "a")?.tags).toEqual([])
+      expect(store.getState("2", "post", "b")?.tags).toEqual(["科幻"])
+      // deleteItems 混站逐条删
+      expect(
+        store.deleteItems([
+          { site: "1", kind: "post", id: "a" },
+          { site: "2", kind: "post", id: "b" },
+        ])
+      ).toBe(2)
+      expect(store.listHistory({}).items).toEqual([])
+      // clearHistory(site) 只清该站
+      store.recordVisit("1", "post", "a", "A站", "u")
+      store.recordVisit("2", "post", "b", "B站", "u")
+      expect(store.clearHistory("1")).toBe(1)
+      expect(store.listHistory({}).items.map((i) => i.id)).toEqual(["b"])
+      expect(store.clearHistory()).toBe(1)
+      expect(store.listHistory({}).items).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// 模拟旧库：用不含 read_progress / site / last_chapter 的 DDL 建库并写入一行
 function makeOldDatabase(dir: string): void {
   const db = new Database(join(dir, "purifier.db"))
   db.exec("PRAGMA journal_mode = WAL;")
@@ -294,13 +420,85 @@ test("openDatabase migrates old DB: adds read_progress, preserves data", () => {
       name: string
     }[]
     expect(cols.map((c) => c.name)).toContain("read_progress")
-    // 旧行数据保留
+    expect(cols.map((c) => c.name)).toContain("last_chapter")
+    expect(cols.map((c) => c.name)).toContain("site")
+    // 旧行数据保留，site='1'，last_chapter 默认 NULL
     const row = db
-      .query("SELECT title, visit_count, read_progress FROM items WHERE id = 't1'")
-      .get() as { title: string; visit_count: number; read_progress: number | null }
+      .query(
+        "SELECT title, visit_count, read_progress, site, last_chapter FROM items WHERE id = 't1'"
+      )
+      .get() as {
+      title: string
+      visit_count: number
+      read_progress: number | null
+      site: string
+      last_chapter: number | null
+    }
     expect(row.title).toBe("old")
     expect(row.visit_count).toBe(3)
     expect(row.read_progress).toBeNull() // 新列默认 NULL
+    expect(row.site).toBe("1")
+    expect(row.last_chapter).toBeNull()
+    // 新 PK 生效：ON CONFLICT(site,kind,id) 不炸，同键 upsert
+    const store = new Store(db)
+    store.recordVisit("1", "post", "t1", "新标题", "/read/t1")
+    const state = store.getState("1", "post", "t1")
+    expect(state?.visit_count).toBe(4)
+    expect(state?.title).toBe("新标题")
+    db.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// 半迁移库：items 已有 site 列但 PK 仍是 (kind,id)
+function makeHalfMigratedDatabase(dir: string): void {
+  const db = new Database(join(dir, "purifier.db"))
+  db.exec("PRAGMA journal_mode = WAL;")
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS items (
+      kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
+      site TEXT NOT NULL DEFAULT '1',
+      id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_visited_at INTEGER NOT NULL,
+      visit_count INTEGER NOT NULL DEFAULT 1,
+      read_progress REAL,
+      PRIMARY KEY (kind, id)
+    );
+    CREATE TABLE IF NOT EXISTS favorites (kind TEXT NOT NULL, id TEXT NOT NULL, favorited_at INTEGER NOT NULL, PRIMARY KEY (kind, id));
+    CREATE TABLE IF NOT EXISTS tags (kind TEXT NOT NULL, id TEXT NOT NULL, tag TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (kind, id, tag));
+  `)
+  db.query(
+    "INSERT INTO items (kind, site, id, title, url, first_seen_at, last_visited_at, visit_count) VALUES ('post', '1', 'h1', 'half', '/read/h1', 1, 1, 1)"
+  ).run()
+  db.close()
+}
+
+test("openDatabase rebuilds half-migrated DB (site column but PK (kind,id))", () => {
+  const dir = mkdtempSync(join(tmpdir(), "purifier-migrate-half-"))
+  try {
+    makeHalfMigratedDatabase(dir)
+    const db = openDatabase(dir)
+    // PK 被重建为 (site, kind, id)
+    const meta = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+      )
+      .get() as { sql: string }
+    expect(meta.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*site,\s*kind,\s*id/i)
+    // 数据保留
+    const row = db
+      .query("SELECT title, site FROM items WHERE id = 'h1'")
+      .get() as { title: string; site: string }
+    expect(row.title).toBe("half")
+    expect(row.site).toBe("1")
+    // 新 PK 生效：ON CONFLICT(site,kind,id) 不炸
+    const store = new Store(db)
+    store.recordVisit("1", "post", "h1", "新标题", "/read/h1")
+    expect(store.getState("1", "post", "h1")?.visit_count).toBe(2)
     db.close()
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -327,19 +525,19 @@ test("openDatabase is idempotent when read_progress already exists", () => {
 test("setProgress / getState round-trip read_progress", () => {
   const { store, dir } = makeStore()
   try {
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    expect(store.getState("1", "post", "t1")?.read_progress).toBeNull()
 
-    store.setProgress("post", "t1", 0.42)
-    expect(store.getState("post", "t1")?.read_progress).toBeCloseTo(0.42)
+    store.setProgress("1", "post", "t1", 0.42)
+    expect(store.getState("1", "post", "t1")?.read_progress).toBeCloseTo(0.42)
 
     // clamp 上界
-    store.setProgress("post", "t1", 5)
-    expect(store.getState("post", "t1")?.read_progress).toBe(1)
+    store.setProgress("1", "post", "t1", 5)
+    expect(store.getState("1", "post", "t1")?.read_progress).toBe(1)
 
     // clamp 下界
-    store.setProgress("post", "t1", -3)
-    expect(store.getState("post", "t1")?.read_progress).toBe(0)
+    store.setProgress("1", "post", "t1", -3)
+    expect(store.getState("1", "post", "t1")?.read_progress).toBe(0)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -348,7 +546,7 @@ test("setProgress / getState round-trip read_progress", () => {
 test("setProgress returns false for missing item", () => {
   const { store, dir } = makeStore()
   try {
-    expect(store.setProgress("post", "nope", 0.5)).toBe(false)
+    expect(store.setProgress("1", "post", "nope", 0.5)).toBe(false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -357,8 +555,8 @@ test("setProgress returns false for missing item", () => {
 test("listHistory includes read_progress", () => {
   const { store, dir } = makeStore()
   try {
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    store.setProgress("post", "t1", 0.3)
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    store.setProgress("1", "post", "t1", 0.3)
     const items = store.listHistory({ page: 1 }).items
     expect(items[0]?.read_progress).toBeCloseTo(0.3)
   } finally {
@@ -369,10 +567,10 @@ test("listHistory includes read_progress", () => {
 test("recordVisit does not reset read_progress", () => {
   const { store, dir } = makeStore()
   try {
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    store.setProgress("post", "t1", 0.5)
-    store.recordVisit("post", "t1", "title2", "/read/t1") // 再访问
-    expect(store.getState("post", "t1")?.read_progress).toBeCloseTo(0.5)
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    store.setProgress("1", "post", "t1", 0.5)
+    store.recordVisit("1", "post", "t1", "title2", "/read/t1") // 再访问
+    expect(store.getState("1", "post", "t1")?.read_progress).toBeCloseTo(0.5)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -381,12 +579,12 @@ test("recordVisit does not reset read_progress", () => {
 test("deleteItem clears read_progress with the row", () => {
   const { store, dir } = makeStore()
   try {
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    store.setProgress("post", "t1", 0.5)
-    store.deleteItem("post", "t1")
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    store.setProgress("1", "post", "t1", 0.5)
+    store.deleteItem("1", "post", "t1")
     // 重新创建同 id：read_progress 必须是新行的 NULL，不是旧值
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    expect(store.getState("1", "post", "t1")?.read_progress).toBeNull()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -395,11 +593,11 @@ test("deleteItem clears read_progress with the row", () => {
 test("clearHistory clears read_progress for all rows", () => {
   const { store, dir } = makeStore()
   try {
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    store.setProgress("post", "t1", 0.9)
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    store.setProgress("1", "post", "t1", 0.9)
     store.clearHistory()
-    store.recordVisit("post", "t1", "title", "/read/t1")
-    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+    store.recordVisit("1", "post", "t1", "title", "/read/t1")
+    expect(store.getState("1", "post", "t1")?.read_progress).toBeNull()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
