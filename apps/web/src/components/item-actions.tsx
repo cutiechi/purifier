@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
+import { Settings2 } from "lucide-react"
 import { IconRefreshCw, IconStar } from "@/components/icons"
 import { TagChips } from "@/components/tag-chips"
+import { ReadingSettingsPanel } from "@/components/reading-settings-panel"
 import { api } from "@/lib/routes"
 
 export interface ItemState {
@@ -50,6 +52,7 @@ export function ItemActions({
 }) {
   const { state, reload } = useItemState(kind, id)
   const [busy, setBusy] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   const toggleFavorite = async () => {
     if (state?.favorited) {
@@ -126,6 +129,24 @@ export function ItemActions({
         onRemove={(tag) => void removeTag(tag)}
         removing={removing}
       />
+
+      <button
+        type="button"
+        onClick={() => setShowSettings((v) => !v)}
+        aria-label="阅读设置"
+        className={`inline-flex size-8 items-center justify-center rounded-full border transition ${
+          showSettings
+            ? "border-foreground/40 bg-foreground/10"
+            : "border-border hover:bg-muted"
+        }`}
+      >
+        <Settings2 className="size-4" />
+      </button>
+      {showSettings && (
+        <div className="w-full">
+          <ReadingSettingsPanel />
+        </div>
+      )}
     </div>
   )
 }
