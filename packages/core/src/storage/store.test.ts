@@ -323,3 +323,57 @@ test("openDatabase is idempotent when read_progress already exists", () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test("setProgress / getState round-trip read_progress", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    expect(store.getState("post", "t1")?.read_progress).toBeNull()
+
+    store.setProgress("post", "t1", 0.42)
+    expect(store.getState("post", "t1")?.read_progress).toBeCloseTo(0.42)
+
+    // clamp 上界
+    store.setProgress("post", "t1", 5)
+    expect(store.getState("post", "t1")?.read_progress).toBe(1)
+
+    // clamp 下界
+    store.setProgress("post", "t1", -3)
+    expect(store.getState("post", "t1")?.read_progress).toBe(0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("setProgress returns false for missing item", () => {
+  const { store, dir } = makeStore()
+  try {
+    expect(store.setProgress("post", "nope", 0.5)).toBe(false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("listHistory includes read_progress", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    store.setProgress("post", "t1", 0.3)
+    const items = store.listHistory({ page: 1 }).items
+    expect(items[0].read_progress).toBeCloseTo(0.3)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("recordVisit does not reset read_progress", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("post", "t1", "title", "/read/t1")
+    store.setProgress("post", "t1", 0.5)
+    store.recordVisit("post", "t1", "title2", "/read/t1") // 再访问
+    expect(store.getState("post", "t1")?.read_progress).toBeCloseTo(0.5)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -11,6 +11,7 @@ export interface ListItem {
   visit_count: number
   favorited: boolean
   tags: string[]
+  read_progress?: number | null
 }
 
 export interface ListResult {
@@ -29,6 +30,7 @@ export interface ItemState {
   visit_count: number
   favorited: boolean
   tags: string[]
+  read_progress: number | null
 }
 
 export interface ListQuery {

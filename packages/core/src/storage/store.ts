@@ -64,11 +64,20 @@ export class Store {
       .run(kind, id, title, url, now)
   }
 
+  /** 写入阅读进度（clamp 到 0..1）；items 中不存在返回 false（API 层映射 404） */
+  setProgress(kind: ItemKind, id: string, progress: number): boolean {
+    const clamped = Math.max(0, Math.min(1, progress))
+    const res = this.db
+      .query("UPDATE items SET read_progress = ?3 WHERE kind = ?1 AND id = ?2")
+      .run(kind, id, clamped)
+    return res.changes > 0
+  }
+
   /** 单对象状态；items 中不存在返回 null */
   getState(kind: ItemKind, id: string): ItemState | null {
     const row = this.db
       .query(
-        `SELECT title, url, first_seen_at, last_visited_at, visit_count
+        `SELECT title, url, first_seen_at, last_visited_at, visit_count, read_progress
          FROM items WHERE kind = ?1 AND id = ?2`
       )
       .get(kind, id) as {
@@ -77,6 +86,7 @@ export class Store {
       first_seen_at: number
       last_visited_at: number
       visit_count: number
+      read_progress: number | null
     } | null
     if (!row) return null
     const fav = this.db
@@ -97,6 +107,7 @@ export class Store {
       visit_count: row.visit_count,
       favorited: !!fav,
       tags: tagRows.map((r) => r.tag),
+      read_progress: row.read_progress,
     }
   }
 
@@ -215,7 +226,7 @@ export class Store {
     const kind = query.kind || null
     const page = Math.max(1, query.page ?? 1)
     return this.runList(
-      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
+      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count, i.read_progress,
               (EXISTS(SELECT 1 FROM favorites f
                       WHERE f.kind = i.kind AND f.id = i.id)) AS favorited
        FROM items i
@@ -237,7 +248,7 @@ export class Store {
     const kind = query.kind || null
     const page = Math.max(1, query.page ?? 1)
     return this.runList(
-      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
+      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count, i.read_progress,
               f.favorited_at, 1 AS favorited
        FROM favorites f
        JOIN items i ON i.kind = f.kind AND i.id = f.id
@@ -270,7 +281,7 @@ export class Store {
     const kind = query.kind || null
     const page = Math.max(1, query.page ?? 1)
     return this.runList(
-      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
+      `SELECT i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count, i.read_progress,
               (EXISTS(SELECT 1 FROM favorites f
                       WHERE f.kind = i.kind AND f.id = i.id)) AS favorited
        FROM tags t
@@ -300,6 +311,7 @@ export class Store {
         url: r.url,
         visit_count: r.visit_count,
         favorited: r.favorited === 1,
+        read_progress: (r as { read_progress?: number | null }).read_progress ?? null,
         tags: [],
       }
       if (r.last_visited_at != null) item.last_visited_at = r.last_visited_at
