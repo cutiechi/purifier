@@ -6,6 +6,8 @@ interface PopoverProps {
   trigger: ReactNode
   children: ReactNode
   align?: "start" | "end"
+  /** 面板展开方向：默认 "bottom"（向下），"top" 用于视口底部浮层 trigger */
+  side?: "bottom" | "top"
   className?: string
   triggerAriaLabel: string
 }
@@ -14,6 +16,7 @@ export function Popover({
   trigger,
   children,
   align = "end",
+  side = "bottom",
   className,
   triggerAriaLabel,
 }: PopoverProps) {
@@ -86,7 +89,8 @@ export function Popover({
           id={panelId}
           role="dialog"
           className={cn(
-            "absolute top-full z-50 mt-1 min-w-[240px] max-h-[min(24rem,calc(100dvh-2rem))] overflow-y-auto rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg",
+            "absolute z-50 min-w-[240px] max-h-[min(24rem,calc(100dvh-2rem))] overflow-y-auto rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg",
+            side === "top" ? "bottom-full mb-1" : "top-full mt-1",
             align === "end" ? "right-0" : "left-0",
             className
           )}

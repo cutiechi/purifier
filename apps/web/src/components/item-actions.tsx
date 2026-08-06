@@ -103,8 +103,12 @@ export function ItemActions({
   const hasTags = (state?.tags?.length ?? 0) > 0
 
   return (
-    <div className="flex justify-end">
+    <div
+      className="fixed right-4 z-50"
+      style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 1.25rem)" }}
+    >
       <Popover
+      side="top"
       align="end"
       triggerAriaLabel="阅读操作与偏好"
       trigger={
