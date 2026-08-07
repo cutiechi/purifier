@@ -52,7 +52,7 @@ export function CollapsibleBookGroup({
           size={16}
           className={cn(
             "shrink-0 text-muted-foreground/50 transition-transform duration-200",
-            isExpanded && "rotate-180",
+            isExpanded && "rotate-180"
           )}
         />
       </button>

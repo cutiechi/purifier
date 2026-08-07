@@ -19,7 +19,14 @@ import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { IconSearch } from "@/components/icons"
 import { useSite } from "@/hooks/use-site"
-import { api, bookPath, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
+import {
+  api,
+  bookPath,
+  parsePage,
+  parseQuery,
+  readPath,
+  searchPath,
+} from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -58,31 +65,34 @@ function SearchContent() {
     setInput(q)
   }, [q])
 
-  const loadPage = useCallback(async (keyword: string, p: number) => {
-    const seq = ++seqRef.current
-    setLinks([])
-    setLoading(true)
-    setError("")
-    try {
-      const res = await fetch(
-        `${api.browse}?q=${encodeURIComponent(keyword)}&site=${site}&page=${p}`
-      )
-      const json = (await res.json()) as BrowseResponse
-      if (seq !== seqRef.current) return
-      if (!res.ok) {
-        setError((json as { error?: string }).error || "请求失败")
-        return
+  const loadPage = useCallback(
+    async (keyword: string, p: number) => {
+      const seq = ++seqRef.current
+      setLinks([])
+      setLoading(true)
+      setError("")
+      try {
+        const res = await fetch(
+          `${api.browse}?q=${encodeURIComponent(keyword)}&site=${site}&page=${p}`
+        )
+        const json = (await res.json()) as BrowseResponse
+        if (seq !== seqRef.current) return
+        if (!res.ok) {
+          setError((json as { error?: string }).error || "请求失败")
+          return
+        }
+        setLinks(json.links)
+        setNextPage(json.nextPage)
+      } catch (e) {
+        if (seq === seqRef.current) {
+          setError(e instanceof Error ? e.message : "未知错误")
+        }
+      } finally {
+        if (seq === seqRef.current) setLoading(false)
       }
-      setLinks(json.links)
-      setNextPage(json.nextPage)
-    } catch (e) {
-      if (seq === seqRef.current) {
-        setError(e instanceof Error ? e.message : "未知错误")
-      }
-    } finally {
-      if (seq === seqRef.current) setLoading(false)
-    }
-  }, [site])
+    },
+    [site]
+  )
 
   useEffect(() => {
     if (!q) {
@@ -192,7 +202,7 @@ function SearchContent() {
                     />
                   ))}
                 </CollapsibleBookGroup>
-              ),
+              )
             )}
           </PostList>
           <Pager

@@ -13,22 +13,24 @@ export type GroupedItem<T> =
     }
 
 export function normalizeTitleKey(title: string): string {
-  return title
-    .replace(/^[《【［[]+|[》】］\]]+$/g, "")
-    // parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
-    // 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
-    // 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
-    // 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉，
-    // 保证同名不同章落入同一桶。与 title-parse 自身识别范围一致（≤24 字）。
-    .replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
-    .trim()
-    .toLowerCase()
+  return (
+    title
+      .replace(/^[《【［[]+|[》】］\]]+$/g, "")
+      // parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
+      // 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
+      // 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
+      // 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉，
+      // 保证同名不同章落入同一桶。与 title-parse 自身识别范围一致（≤24 字）。
+      .replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
+      .trim()
+      .toLowerCase()
+  )
 }
 
 /** 从一组项里取首个非空 author / genre（用于组头展示） */
 function pickHeaderMeta<T>(
   items: T[],
-  getTitle: (item: T) => string,
+  getTitle: (item: T) => string
 ): { author: string | null; genre: string | null } {
   let author: string | null = null
   let genre: string | null = null
@@ -48,7 +50,7 @@ function pickHeaderMeta<T>(
  */
 export function groupBooks<T>(
   items: T[],
-  getTitle: (item: T) => string,
+  getTitle: (item: T) => string
 ): GroupedItem<T>[] {
   const displayTitle = new Map<string, string>()
   const buckets = new Map<string, T[]>()
@@ -105,7 +107,7 @@ export function groupBooks<T>(
  * 再按原始数组顺序 walk 去重发射，保持原序 interleave。
  */
 export function groupMeListItems(
-  items: MeListItem[],
+  items: MeListItem[]
 ): GroupedItem<MeListItem>[] {
   const eligible = (it: MeListItem) => it.kind === "post" && it.site === "1"
 

@@ -81,7 +81,7 @@ export default function FeaturedPage() {
                   />
                 ))}
               </CollapsibleBookGroup>
-            ),
+            )
           )}
         </PostList>
       </AsyncBody>

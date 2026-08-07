@@ -92,7 +92,9 @@ export function MeItemCard({
           />
         </Link>
         {trailing ? (
-          <div className="flex shrink-0 items-center self-center">{trailing}</div>
+          <div className="flex shrink-0 items-center self-center">
+            {trailing}
+          </div>
         ) : null}
       </div>
       <div className="mt-1.5 pl-11 sm:pl-[3.25rem]">

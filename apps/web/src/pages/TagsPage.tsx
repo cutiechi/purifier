@@ -49,18 +49,15 @@ function TagListView() {
 
   const deleteTag = async (tag: string) => {
     if (
-      !window.confirm(
-        `删除标签「${tag}」？将从所有贴子/书库上移除该标签。`
-      )
+      !window.confirm(`删除标签「${tag}」？将从所有贴子/书库上移除该标签。`)
     ) {
       return
     }
     setRemoving(tag)
     try {
-      const res = await fetch(
-        `${api.meTags}?tag=${encodeURIComponent(tag)}`,
-        { method: "DELETE" }
-      )
+      const res = await fetch(`${api.meTags}?tag=${encodeURIComponent(tag)}`, {
+        method: "DELETE",
+      })
       if (res.ok) await reload()
       else {
         const json = (await res.json()) as { error?: string }
@@ -102,11 +99,11 @@ function TagListView() {
         {filtered.map((t) => (
           <span
             key={t.tag}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/80 bg-card/80 pl-3 pr-1 py-1 text-sm shadow-sm transition-colors hover:border-border hover:bg-accent/40"
+            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/80 bg-card/80 py-1 pr-1 pl-3 text-sm shadow-sm transition-colors hover:border-border hover:bg-accent/40"
           >
             <Link
               to={tagsPath({ tag: t.tag })}
-              className="inline-flex min-w-0 max-w-[10rem] items-center gap-1.5 truncate font-medium text-foreground"
+              className="inline-flex max-w-[10rem] min-w-0 items-center gap-1.5 truncate font-medium text-foreground"
               title={t.tag}
             >
               <span className="truncate">#{t.tag}</span>

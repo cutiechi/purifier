@@ -18,7 +18,14 @@ import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
-import { api, bookPath, browsePath, parsePage, parseQuery, readPath } from "@/lib/routes"
+import {
+  api,
+  bookPath,
+  browsePath,
+  parsePage,
+  parseQuery,
+  readPath,
+} from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -161,7 +168,7 @@ function BrowseContent() {
                     />
                   ))}
                 </CollapsibleBookGroup>
-              ),
+              )
             )}
           </PostList>
           <Pager

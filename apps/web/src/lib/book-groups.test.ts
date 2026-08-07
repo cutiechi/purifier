@@ -156,10 +156,7 @@ test("groupMeListItems: site !== '1' 的 post 直通 single，不参与分组", 
     tags: [],
   })
   // 两章同名，但 site=2，应各自 single
-  const items = [
-    post("p1", "故事（1）", "2"),
-    post("p2", "故事（2）", "2"),
-  ]
+  const items = [post("p1", "故事（1）", "2"), post("p2", "故事（2）", "2")]
   const result = groupMeListItems(items)
   expect(result).toHaveLength(2)
   expect(result.every((g) => g.type === "single")).toBe(true)

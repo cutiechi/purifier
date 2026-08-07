@@ -59,9 +59,7 @@ export default function HomePage() {
     const seq = seqRef.current
     try {
       const mtid = nextMtidRef.current
-      const res = await fetch(
-        `${api.posts}?mtid=${mtid ?? "0"}&site=${site}`
-      )
+      const res = await fetch(`${api.posts}?mtid=${mtid ?? "0"}&site=${site}`)
       const json = (await res.json()) as HomeResponse
       // 换站/重拉（fetchFirstPage）会递增 seq；过期响应直接丢弃，避免混入旧站数据
       if (seq !== seqRef.current) return
@@ -179,7 +177,7 @@ export default function HomePage() {
                   />
                 ))}
               </CollapsibleBookGroup>
-            ),
+            )
           )}
         </PostList>
 

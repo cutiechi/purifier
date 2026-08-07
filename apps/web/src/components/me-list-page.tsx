@@ -176,48 +176,49 @@ export function MeListPage({
         emptyText={emptyText ?? "暂无内容"}
       >
         <PostList>
-          {(grouped ?? items.map((item) => ({ type: "single" as const, item }))).map(
-            (g) =>
-              g.type === "single" ? (
-                <MeItemCard
-                  key={`${g.item.kind}:${g.item.id}`}
-                  item={g.item}
-                  trailing={renderTrailing?.(g.item, reload)}
-                />
-              ) : (
-                <CollapsibleBookGroup
-                  key={`group:${g.key}`}
-                  title={g.title}
-                  summary={g.author ?? undefined}
-                  count={g.items.length}
-                  bookKey={g.key}
-                  isExpanded={isExpanded(g.key)}
-                  onToggle={() => toggle(g.key)}
-                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
-                >
-                  {g.items.map((item) => {
-                    const parsed = parseListTitle(item.title)
-                    // 组内主标题用章节号；副标题用 formatTitleMeta（作者/题材）+
-                    // 进度（保留，避免信息丢失）。时间/访问次数由组级上下文决定。
-                    const sub = formatTitleMeta(parsed)
-                    const subWithProgress =
-                      (sub ? `${sub}` : "") +
-                      (typeof item.read_progress === "number" &&
-                      item.read_progress > 0
-                        ? `${sub ? " · " : ""}已读 ${Math.round(item.read_progress * 100)}%`
-                        : "")
-                    return (
-                      <MeItemCard
-                        key={`${item.kind}:${item.id}`}
-                        item={item}
-                        trailing={renderTrailing?.(item, reload)}
-                        titleOverride={parsed.chapters || undefined}
-                        subtitleOverride={subWithProgress || undefined}
-                      />
-                    )
-                  })}
-                </CollapsibleBookGroup>
-              ),
+          {(
+            grouped ?? items.map((item) => ({ type: "single" as const, item }))
+          ).map((g) =>
+            g.type === "single" ? (
+              <MeItemCard
+                key={`${g.item.kind}:${g.item.id}`}
+                item={g.item}
+                trailing={renderTrailing?.(g.item, reload)}
+              />
+            ) : (
+              <CollapsibleBookGroup
+                key={`group:${g.key}`}
+                title={g.title}
+                summary={g.author ?? undefined}
+                count={g.items.length}
+                bookKey={g.key}
+                isExpanded={isExpanded(g.key)}
+                onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+              >
+                {g.items.map((item) => {
+                  const parsed = parseListTitle(item.title)
+                  // 组内主标题用章节号；副标题用 formatTitleMeta（作者/题材）+
+                  // 进度（保留，避免信息丢失）。时间/访问次数由组级上下文决定。
+                  const sub = formatTitleMeta(parsed)
+                  const subWithProgress =
+                    (sub ? `${sub}` : "") +
+                    (typeof item.read_progress === "number" &&
+                    item.read_progress > 0
+                      ? `${sub ? " · " : ""}已读 ${Math.round(item.read_progress * 100)}%`
+                      : "")
+                  return (
+                    <MeItemCard
+                      key={`${item.kind}:${item.id}`}
+                      item={item}
+                      trailing={renderTrailing?.(item, reload)}
+                      titleOverride={parsed.chapters || undefined}
+                      subtitleOverride={subWithProgress || undefined}
+                    />
+                  )
+                })}
+              </CollapsibleBookGroup>
+            )
           )}
         </PostList>
         <Pager

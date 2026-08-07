@@ -11,7 +11,9 @@ function readExpanded(scope: string): Set<string> {
     const raw = localStorage.getItem(storageKey(scope))
     if (!raw) return new Set()
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === "string")) : new Set()
+    return Array.isArray(arr)
+      ? new Set(arr.filter((x) => typeof x === "string"))
+      : new Set()
   } catch {
     return new Set()
   }
@@ -38,7 +40,7 @@ export function useExpandedBooks(scope: string): {
 
   const isExpanded = useCallback(
     (bookKey: string) => expanded.has(bookKey),
-    [expanded],
+    [expanded]
   )
 
   const toggle = useCallback(
@@ -51,7 +53,7 @@ export function useExpandedBooks(scope: string): {
         return next
       })
     },
-    [scope],
+    [scope]
   )
 
   return { isExpanded, toggle }

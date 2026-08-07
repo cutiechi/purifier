@@ -144,7 +144,7 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                           />
                         ))}
                       </CollapsibleBookGroup>
-                    ),
+                    )
                   )
                 })()}
               </PostList>

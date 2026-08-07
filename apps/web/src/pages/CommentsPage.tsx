@@ -88,7 +88,7 @@ export default function CommentsPage() {
                   />
                 ))}
               </CollapsibleBookGroup>
-            ),
+            )
           )}
         </PostList>
       </AsyncBody>
