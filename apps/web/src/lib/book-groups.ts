@@ -50,12 +50,14 @@ function pickHeaderMeta<T>(
 
 /**
  * 按 parseListTitle 拆出的书名归一化分组。同名 ≥2 条合成一组，
- * 单条为 single；空标题一律 single。保留首次出现顺序，组内保持原序。
+ * 单条为 single；空标题一律 single。保留首次出现顺序，
+ * 组内按 getSortId 提取的 id（如 tid）数字升序。
  * group 项附带 author/genre（组内首个非空值）。
  */
 export function groupBooks<T>(
   items: T[],
-  getTitle: (item: T) => string
+  getTitle: (item: T) => string,
+  getSortId: (item: T) => string
 ): GroupedItem<T>[] {
   const displayTitle = new Map<string, string>()
   const buckets = new Map<string, T[]>()
@@ -92,6 +94,7 @@ export function groupBooks<T>(
     emitted.add(key)
     const group = buckets.get(key)!
     if (group.length >= 2) {
+      group.sort((a, b) => Number(getSortId(a)) - Number(getSortId(b)))
       const meta = pickHeaderMeta(group, getTitle)
       result.push({
         type: "group",
@@ -113,6 +116,7 @@ export function groupBooks<T>(
  * 仅 kind === "post" && site === "1" 的项参与分组，其余直通 single。
  * 所有符合条件的 post 共享同一套书名桶（全局，非连续段），
  * 再按原始数组顺序 walk 去重发射，保持原序 interleave。
+ * 组内按 id 数字升序。
  */
 export function groupMeListItems(
   items: MeListItem[]
@@ -154,6 +158,7 @@ export function groupMeListItems(
     emitted.add(key)
     const group = buckets.get(key)!
     if (group.length >= 2) {
+      group.sort((a, b) => Number(a.id) - Number(b.id))
       const meta = pickHeaderMeta(group, (it) => it.title)
       result.push({
         type: "group",

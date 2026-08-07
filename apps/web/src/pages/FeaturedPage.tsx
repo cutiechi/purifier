@@ -24,7 +24,15 @@ export default function FeaturedPage() {
   )
 
   const { isExpanded, toggle } = useExpandedBooks("featured")
-  const grouped = useMemo(() => groupBooks(items, (l) => l.title), [items])
+  const grouped = useMemo(
+    () =>
+      groupBooks(
+        items,
+        (l) => l.title,
+        (l) => l.tid
+      ),
+    [items]
+  )
   // 原始 items 下标查找（用于 single 项的 index 兜底，避免 grouped 下标跳变）
   const indexOfItem = useMemo(() => {
     const m = new Map<string, number>()

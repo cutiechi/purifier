@@ -115,7 +115,11 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
             ) : (
               <PostList>
                 {(() => {
-                  const grouped = groupBooks(section.links, (l) => l.title)
+                  const grouped = groupBooks(
+                    section.links,
+                    (l) => l.title,
+                    (l) => l.tid
+                  )
                   return grouped.map((g) =>
                     g.type === "single" ? (
                       <PostCard

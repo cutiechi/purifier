@@ -32,7 +32,11 @@ export default function TrendingPage() {
     if (site !== "1") {
       return items.map((item) => ({ type: "single" as const, item }))
     }
-    return groupBooks(items, (p) => p.title)
+    return groupBooks(
+      items,
+      (p) => p.title,
+      (p) => p.tid
+    )
   }, [items, site])
 
   return (

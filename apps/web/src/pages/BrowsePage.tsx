@@ -64,7 +64,11 @@ function BrowseContent() {
     if (site !== "1") {
       return links.map((item) => ({ type: "single" as const, item }))
     }
-    return groupBooks(links, (l) => l.title)
+    return groupBooks(
+      links,
+      (l) => l.title,
+      (l) => l.tid
+    )
   }, [links, site])
 
   const loadPage = useCallback(

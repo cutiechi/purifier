@@ -36,7 +36,11 @@ export default function HomePage() {
     if (site !== "1") {
       return links.map((item) => ({ type: "single" as const, item }))
     }
-    return groupBooks(links, (l) => l.title)
+    return groupBooks(
+      links,
+      (l) => l.title,
+      (l) => l.tid
+    )
   }, [links, site])
 
   const sentinelRef = useRef<HTMLDivElement | null>(null)

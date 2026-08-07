@@ -30,7 +30,11 @@ test("normalizeTitleKey 尾随章节号（含 完/区间/中文）不进 key", (
     { tid: "1", title: "马屌少年（1）作者：小明" },
     { tid: "2", title: "马屌少年（完）作者：小明" },
   ]
-  const result = groupBooks(items, (it) => it.title)
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
   expect(result).toHaveLength(1)
   expect(result[0].type).toBe("group")
   if (result[0].type === "group") {
@@ -44,7 +48,11 @@ test("同名多章合并为一组，单条为 single", () => {
     { tid: "2", title: "马屌少年（2）作者：小明" },
     { tid: "3", title: "【独立短篇】" },
   ]
-  const result = groupBooks(items, (it) => it.title)
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
   expect(result).toHaveLength(2)
   expect(result[0].type).toBe("group")
   if (result[0].type === "group") {
@@ -64,30 +72,39 @@ test("空标题项一律 single，不并组", () => {
     { tid: "3", title: "正常书（1）" },
     { tid: "4", title: "正常书（2）" },
   ]
-  const result = groupBooks(items, (it) => it.title)
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
   // 两个空标题各 single + 正常书一组 = 3 项
   expect(result).toHaveLength(3)
   expect(result.filter((g) => g.type === "single")).toHaveLength(2)
 })
 
-test("group 按首次出现位置排序，组内保持原始相对序", () => {
+test("group 按首次出现位置排序，组内按 tid 数字升序", () => {
   const items = [
-    { tid: "a", title: "B书（1）" },
-    { tid: "b", title: "A书（1）" },
-    { tid: "c", title: "B书（2）" },
-    { tid: "d", title: "A书（2）" },
+    { tid: "30", title: "B书（1）" },
+    { tid: "50", title: "A书（1）" },
+    { tid: "9", title: "B书（2）" },
+    { tid: "20", title: "A书（2）" },
   ]
-  const result = groupBooks(items, (it) => it.title)
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
   expect(result).toHaveLength(2)
-  // B书先出现（tid=a 在 index 0），A书后出现（tid=b 在 index 1）
+  // B书先出现（tid=30 在 index 0），A书后出现（tid=50 在 index 1）
   expect(result[0].type).toBe("group")
   if (result[0].type === "group") {
     expect(result[0].title).toBe("B书")
-    expect(result[0].items.map((i) => i.tid)).toEqual(["a", "c"])
+    // 数字升序：9 < 30（字符串序会是 30 在前，9 在后）
+    expect(result[0].items.map((i) => i.tid)).toEqual(["9", "30"])
   }
   if (result[1].type === "group") {
     expect(result[1].title).toBe("A书")
-    expect(result[1].items.map((i) => i.tid)).toEqual(["b", "d"])
+    expect(result[1].items.map((i) => i.tid)).toEqual(["20", "50"])
   }
 })
 
@@ -99,7 +116,11 @@ test("多个不同 group 混排互不串扰", () => {
     { tid: "4", title: "孤狼" },
     { tid: "5", title: "Y（2）" },
   ]
-  const result = groupBooks(items, (it) => it.title)
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
   expect(result).toHaveLength(3)
   expect(result.filter((g) => g.type === "group")).toHaveLength(2)
   expect(result.filter((g) => g.type === "single")).toHaveLength(1)
@@ -126,18 +147,19 @@ test("groupMeListItems: book 项直通 single，post 项按 title 分组并保�
     favorited: false,
     tags: [],
   })
-  // 同名 post 被 book 隔开，仍应合成一组（全局 post 桶，非连续段）
+  // 同名 post 被 book 隔开，仍应合成一组（全局 post 桶，非连续段）；
+  // 组内按 id 数字升序（post("2") 先出现，排序后 "1" 在前）
   const items = [
-    post("p1", "故事（1）"),
+    post("2", "故事（2）"),
     book("b1", "某本 xbookcn 书"),
-    post("p2", "故事（2）"),
+    post("1", "故事（1）"),
   ]
   const result = groupMeListItems(items)
   expect(result).toHaveLength(2)
   // post 两章合成一组，位置在 index 0（首次出现处）
   expect(result[0].type).toBe("group")
   if (result[0].type === "group") {
-    expect(result[0].items.map((i) => i.id)).toEqual(["p1", "p2"])
+    expect(result[0].items.map((i) => i.id)).toEqual(["1", "2"])
   }
   // book 项保持原位（index 1）作为 single
   expect(result[1].type).toBe("single")
