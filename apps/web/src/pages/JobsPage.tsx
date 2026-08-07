@@ -47,12 +47,25 @@ export default function JobsPage() {
     void reload()
   }, [reload])
 
-  // 有 running job 时按 pollMs silent 刷新列表
+  // 有 running job 时按 pollMs silent 刷新列表；每次轮询完成后无条件续期，
+  // 静默失败（jobs 未变化）也不会中断轮询链
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === "running")
     if (!hasRunning) return
-    const t = setTimeout(() => void reload({ silent: true }), pollMs)
-    return () => clearTimeout(t)
+    let cancelled = false
+    let t: ReturnType<typeof setTimeout> | null = null
+    const tick = async () => {
+      try {
+        await reload({ silent: true })
+      } finally {
+        if (!cancelled) t = setTimeout(tick, pollMs)
+      }
+    }
+    t = setTimeout(tick, pollMs)
+    return () => {
+      cancelled = true
+      if (t) clearTimeout(t)
+    }
   }, [jobs, pollMs, reload])
 
   const onStart = async () => {

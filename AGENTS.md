@@ -37,7 +37,8 @@ apps/web/src/pages/                   # 页面级组件
 apps/web/src/components/              # 共享 UI 组件
 packages/core/src/extractor/extractor.ts  # Cool18Extractor
 packages/core/src/extractor/types.ts      # Extractor 接口与数据模型
-packages/core/src/storage/                # SQLite（历史/收藏/标签）与磁盘内容缓存
+packages/core/src/storage/                # SQLite（历史/收藏/标签/jobs/job_logs/archive_posts）与磁盘内容缓存
+packages/core/src/jobs/                   # JobRunner / JobHandler 任务执行
 packages/core/src/upstream.ts             # 代理请求、超时、缓存头
 packages/typescript-config/               # base / react-library 配置
 ```
@@ -84,6 +85,14 @@ packages/typescript-config/               # base / react-library 配置
 | `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
 | `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |
 | `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                          | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                            |
+| `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items }` 任务列表                                                                                        |
+| `POST /api/me/jobs`                      | body `{ type, payload? }`                                   | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                               |
+| `DELETE /api/me/jobs`                    | 无                                                           | 清空已结束任务 `{ ok, removed }`                                                                               |
+| `GET /api/me/jobs/:id`                   | 无                                                           | `{ job }`；不存在 404                                                                                       |
+| `DELETE /api/me/jobs/:id`                | 无                                                           | `{ ok }`；不存在 404、运行中 409                                                                                |
+| `GET /api/me/jobs/:id/logs`              | `limit`（默认 200 上限 1000）、`offset`、`level`、`order`            | `{ items }` 日志                                                                                          |
+| `POST /api/me/jobs/:id/stop`             | 无                                                           | `{ ok }`；不存在 404、非运行中 409                                                                               |
+| `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 title）、`order` | `{ items, nextPage? }` 归档目录                                                                             |
 
 错误处理：
 
@@ -113,6 +122,7 @@ packages/typescript-config/               # base / react-library 配置
 - 新增前端页面：在 `apps/web/src/App.tsx` 注册路由，必要时在 `routes.ts` 添加导航项和 API 常量，页面放到 `apps/web/src/pages/`。
 - 新增 API：在 `apps/api/src/index.ts` 的 `route` 中加分支，内容抓取逻辑放入 `packages/core`。
 - 改动历史/收藏/标签或内容缓存：数据层在 `packages/core/src/storage/`（`db.ts` / `store.ts` / `cache.ts`），API 层在 `apps/api/src/index.ts` 的 `/api/me/*` 分支；测试在同目录 `*.test.ts`。
+- 改动任务（jobs）系统：任务执行在 `packages/core/src/jobs/`（`runner.ts` / `handler.ts` / `handlers/`），数据表在 `packages/core/src/storage/db.ts`（`jobs` / `job_logs` / `archive_posts`），API 在 `apps/api/src/index.ts` 的 `/api/me/jobs*` 分支；测试在对应目录 `*.test.ts`。
 - 新增上游站点：在 `packages/core/src/extractor/sites.ts` 的 `SITES` 注册表中加一行，实现 `Extractor` 接口；API 经 `resolveSite(site)` 按 `site` 参数解析对应站点，解析方法仍返回定义好的模型。
 - 调整正文清洗：只改 `Cool18Extractor.extractPreHtml`，并保持输出为清洗后 HTML。
 
