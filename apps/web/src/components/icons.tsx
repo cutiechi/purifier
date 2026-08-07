@@ -34,6 +34,14 @@ export function IconChevronRight({ className, size }: IconProps) {
   )
 }
 
+export function IconChevronDown({ className, size }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
 export function IconMenu({ className, size }: IconProps) {
   return (
     <svg {...base(size)} className={className}>
