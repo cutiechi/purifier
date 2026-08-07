@@ -20,7 +20,7 @@ export type GroupedItem<T> =
  * 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉：
  * key 侧保证同名不同章落入同一桶，组头侧保证显示干净书名。
  */
-function stripTrailingChapterMarker(title: string): string {
+export function stripTrailingChapterMarker(title: string): string {
   return title.replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
 }
 
@@ -33,7 +33,7 @@ export function normalizeTitleKey(title: string): string {
 }
 
 /** 从一组项里取首个非空 author / genre（用于组头展示） */
-function pickHeaderMeta<T>(
+export function pickHeaderMeta<T>(
   items: T[],
   getTitle: (item: T) => string
 ): { author: string | null; genre: string | null } {
