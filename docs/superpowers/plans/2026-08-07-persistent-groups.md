@@ -240,6 +240,55 @@ describe("groups", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  test("removeGroupItems 组不存在返回 removed 0 / deleted false；deleteGroup 幂等", () => {
+    const { store, dir } = makeStore()
+    expect(store.removeGroupItems(9999, ["1"])).toEqual({
+      removed: 0,
+      deleted: false,
+    })
+    expect(() => store.deleteGroup(9999)).not.toThrow()
+    expect(store.listGroups()).toHaveLength(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("upsert 同 key：author/genre 已有值不覆盖，title 刷新", () => {
+    const { store, dir } = makeStore()
+    store.upsertGroup({
+      key: "a",
+      title: "A",
+      author: "老作者",
+      items: [{ tid: "1", title: "A（1）" }],
+    })
+    store.upsertGroup({
+      key: "a",
+      title: "A2", // title 随 upsert 刷新
+      author: "新作者", // 已有 → COALESCE 保留旧值
+      genre: "都市", // 空 → 补写
+      items: [{ tid: "2", title: "A（2）" }],
+    })
+    const g = store.listGroups()[0]!
+    expect(g.title).toBe("A2")
+    expect(g.author).toBe("老作者")
+    expect(g.genre).toBe("都市")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("setGroupFavorite 不修改 updated_at", () => {
+    const { store, dir } = makeStore()
+    store.upsertGroup({
+      key: "a",
+      title: "A",
+      items: [{ tid: "1", title: "A（1）" }],
+    })
+    const id = store.listGroups()[0]!.id
+    const before = store.listGroups()[0]!.updated_at
+    store.setGroupFavorite(id, true)
+    const after = store.listGroups()[0]!
+    expect(after.favorited).toBe(true)
+    expect(after.updated_at).toBe(before)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   test("deleteGroup 级联清理 group_items", () => {
     const { store, db, dir } = makeStore()
     const g = store.upsertGroup({
@@ -322,6 +371,22 @@ export interface Group {
 ```
 
 在 `packages/core/src/storage/store.ts` 的 `Store` 类内、`close()` 之前追加以下方法：
+
+> **先补 import**：把 `store.ts` 顶部 `import { ... } from "./types"` 加上 `Group, GroupMember`（与现有 `ListItem` 等同一来源）：
+
+```ts
+import {
+  Group,
+  GroupMember,
+  ItemKind,
+  ItemState,
+  ListItem,
+  ListQuery,
+  ListResult,
+  TagCount,
+  PAGE_SIZE,
+} from "./types"
+```
 
 ```ts
 listGroups(q?: string): Group[] {
@@ -417,6 +482,11 @@ removeGroupItems(
 ): { removed: number; deleted: boolean } {
   let removed = 0
   const run = this.db.transaction(() => {
+    // 组不存在 → 不删任何东西，避免「COUNT=0 误判为空组自动删组」的假阳性
+    const exists = this.db
+      .query("SELECT 1 FROM groups WHERE id = ?1")
+      .get(id)
+    if (!exists) return false
     const del = this.db.query(
       "DELETE FROM group_items WHERE group_id = ?1 AND tid = ?2"
     )
@@ -457,10 +527,12 @@ setGroupFavorite(id: number, favorited: boolean): boolean {
 }
 ```
 
+> 实现备注：`upsertGroup` 末尾用 `this.listGroups().find(...)` 返回组，会多扫一次全表——个人规模（组 ≪ 100）可接受；组数增多时可改为按 id 单查拼装。
+
 - [ ] **Step 4: 运行确认通过**
 
 Run: `cd packages/core && bun test src/storage/groups.test.ts`
-Expected: PASS（7 个用例）。再跑 `cd packages/core && bun test` 确认既有 store/cache 测试不回归。
+Expected: PASS（10 个用例）。再跑 `cd packages/core && bun test` 确认既有 store/cache 测试不回归。
 
 - [ ] **Step 5: 提交**
 
@@ -543,13 +615,19 @@ async function handleGroupUpsert(req: Request): Promise<Response> {
   if (!Array.isArray(items) || items.length === 0 || !items.every(isGroupMember)) {
     throw new ExtractorError("items must be a non-empty {tid,title}[]", 400)
   }
-  const author = "author" in body && typeof body.author === "string" ? body.author : null
-  const genre = "genre" in body && typeof body.genre === "string" ? body.genre : null
+  const author = "author" in body ? body.author : null
+  const genre = "genre" in body ? body.genre : null
+  if (
+    (author !== null && (typeof author !== "string" || author.length > 512)) ||
+    (genre !== null && (typeof genre !== "string" || genre.length > 512))
+  ) {
+    throw new ExtractorError("invalid author or genre", 400)
+  }
   const group = store.upsertGroup({
     key,
     title,
-    author,
-    genre,
+    author: author as string | null,
+    genre: genre as string | null,
     items: items.map((it) => ({ tid: it.tid, title: it.title })),
   })
   return jsonOk({ ok: true, group }, NO_STORE_HEADERS)
@@ -940,6 +1018,8 @@ export function SimilarSearchPanel({
         ...seedRef.current,
         { tid: hit.tid, title: hit.title },
       ])
+      // 依赖服务端 PUT 的 merge 语义（INSERT OR IGNORE 合并，非全量替换）：
+      // 只带 seed + 本次点击项即可，未传的已存在 tid 不会被删。
       const res = await fetch(api.meGroups, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -1012,6 +1092,7 @@ export function SimilarSearchPanel({
                 const added = known.has(hit.tid)
                 return (
                   <div key={hit.tid} className="flex items-center gap-2">
+                    {/* 结果行直接用 PostCard（不用 ListPostCard，避免引入 rank/index/题材胶囊副作用） */}
                     <PostCard
                       href={readPath(hit.tid)}
                       title={parsed.title || hit.title}
@@ -1076,111 +1157,6 @@ similar?: {
   groupKey: string
   seedItems: GroupMember[]
   onChanged?: () => void
-}
-```
-
-- [ ] **Step 1: 修改组件**
-
-在 `collapsible-book-group.tsx` 中加 `useState` import 与 `IconSearch` import，并新增 `similar` prop 与 `showSimilar` state。完整替换后的组件体：
-
-```tsx
-import { type ReactNode, useId, useState } from "react"
-import { IconBookOpen, IconChevronDown, IconSearch } from "@/components/icons"
-import { SimilarSearchPanel } from "@/components/similar-search-panel"
-import { type GroupMember } from "@/lib/groups"
-import { cn } from "@workspace/ui/lib/utils"
-
-export function CollapsibleBookGroup({
-  title,
-  summary,
-  count,
-  bookKey,
-  isExpanded,
-  onToggle,
-  trailing,
-  similar,
-  children,
-}: {
-  title: string
-  summary?: string
-  count: number
-  bookKey: string
-  isExpanded: boolean
-  onToggle: () => void
-  trailing?: ReactNode
-  similar?: {
-    title: string
-    groupKey: string
-    seedItems: GroupMember[]
-    onChanged?: () => void
-  }
-  children: ReactNode
-}) {
-  const contentId = `book-content-${useId()}`
-  void bookKey
-  const [showSimilar, setShowSimilar] = useState(false)
-  return (
-    <div className="flex flex-col rounded-2xl border border-border/80 bg-card/80 shadow-sm transition-all duration-200 hover:border-border">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={isExpanded}
-        aria-controls={contentId}
-        className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3.5 text-left sm:gap-3.5 sm:px-4 sm:py-4"
-      >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <IconBookOpen size={15} />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="line-clamp-2 text-[15px] leading-snug font-medium text-foreground">
-            {title}
-          </span>
-          {summary && (
-            <span className="text-xs text-muted-foreground">{summary}</span>
-          )}
-        </span>
-        {trailing}
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          共 {count} 章
-        </span>
-        <IconChevronDown
-          size={16}
-          className={cn(
-            "shrink-0 text-muted-foreground/50 transition-transform duration-200",
-            isExpanded && "rotate-180"
-          )}
-        />
-      </button>
-      {similar && (
-        <div className="border-t border-border/60 px-3.5 py-1.5 sm:px-4">
-          <SimilarSearchPanel
-            title={similar.title}
-            groupKey={similar.groupKey}
-            seedItems={similar.seedItems}
-            onChanged={similar.onChanged}
-          />
-        </div>
-      )}
-      {isExpanded && (
-        <div
-          id={contentId}
-          role="region"
-          aria-label={title}
-          className="flex flex-col gap-2 px-3.5 pb-3.5 transition-opacity duration-150 sm:gap-2.5 sm:px-4 sm:pb-4"
-        >
-          {children}
-          {similar && showSimilar && (
-            <SimilarSearchPanel
-              title={similar.title}
-              groupKey={similar.groupKey}
-              seedItems={similar.seedItems}
-              onChanged={similar.onChanged}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 ```
 
@@ -1306,7 +1282,7 @@ Expected: PASS。
 - [ ] **Step 4: 提交**
 
 ```bash
-git add apps/web/src/components/collapsible-book-group.tsx apps/web/src/components/similar-search-panel.tsx
+git add apps/web/src/components/collapsible-book-group.tsx
 git commit -m "feat(web): CollapsibleBookGroup similar trigger with expand linkage"
 ```
 
@@ -1486,6 +1462,8 @@ git commit -m "feat(web): single-post similar wrappers"
 
 在 `routes` 对象加 `groups: "/groups",`；在 `NAV_ITEMS` 中「搜索」之后插入：
 
+> 同步更新 `routes.ts` 文件头的路由表注释（`Timeline / Article / ...` 列表）加一行 `| Group | /groups |`，避免文档漂移。
+
 ```ts
   {
     href: routes.groups,
@@ -1601,14 +1579,6 @@ function GroupCard({
           <Star size={15} className={group.favorited ? "fill-current" : undefined} />
         </button>
       </div>
-      <div className="px-3.5 pb-3.5 sm:px-4 sm:pb-4">
-        <SimilarSearchPanel
-          title={group.title}
-          groupKey={group.key}
-          seedItems={group.items}
-          onChanged={onChanged}
-        />
-      </div>
       {isExpanded && (
         <div className="flex flex-col gap-1.5 border-t border-border/60 px-3.5 py-3 sm:px-4">
           {group.items.map((m) => {
@@ -1639,6 +1609,13 @@ function GroupCard({
               </div>
             )
           })}
+          {/* 面板在展开区内：成员 → 搜索相似 → 删除（对齐设计 §5.3） */}
+          <SimilarSearchPanel
+            title={group.title}
+            groupKey={group.key}
+            seedItems={group.items}
+            onChanged={onChanged}
+          />
           <button
             type="button"
             onClick={() => void deleteGroup()}
@@ -1659,8 +1636,9 @@ export default function GroupPage() {
   const [error, setError] = useState("")
   const { isExpanded, toggle } = useExpandedBooks("groups")
 
-  const reload = useCallback(async () => {
-    setLoading(true)
+  // silent：增删/收藏后局部刷新，不闪整页 Spinner；onRetry 用全量 loading
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     setError("")
     try {
       const res = await fetch(api.meGroups)
@@ -1673,7 +1651,7 @@ export default function GroupPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "未知错误")
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [])
 
@@ -1701,7 +1679,7 @@ export default function GroupPage() {
               group={g}
               isExpanded={isExpanded(`group:${g.id}`)}
               onToggle={() => toggle(`group:${g.id}`)}
-              onChanged={reload}
+              onChanged={() => void reload({ silent: true })}
             />
           ))}
         </PostList>
@@ -1938,6 +1916,8 @@ export default function FavoritesPage() {
 
   const toolbar = useCallback(() => {
     if (!showGroups) return null
+    // 无内容且无错误时连标题都不渲染，避免空区块
+    if (!groupsError && groups.length === 0) return null
     return (
       <section className="mb-4">
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">
@@ -2151,16 +2131,22 @@ SearchPage 单条分支相同代码（该页 `href` 分支与 BrowsePage 一致�
 
 `PostList` 分支的 `grouped.map`：
 
-- 单条 `<PostCard ...>` 包一层：
+- 单条**保持 `PostCard` 视觉**（扫文卡片整行 raw title，不拆作者/题材），在下挂 `SimilarSearchPanel`（不引入 `ListPostCard`，避免同页两种卡片风格）：
 
 ```tsx
-                      <SimilarPostCard
-                        key={g.item.tid}
-                        href={readPath(g.item.tid)}
-                        rawTitle={g.item.title}
-                        tid={g.item.tid}
-                        site="1"
-                      />
+                    g.type === "single" ? (
+                      <div key={g.item.tid} className="flex flex-col gap-1.5">
+                        <PostCard
+                          href={readPath(g.item.tid)}
+                          title={g.item.title}
+                        />
+                        <SimilarSearchPanel
+                          title={groupSearchTitle(g.item.title)}
+                          groupKey={groupKeyFromTitle(g.item.title)}
+                          seedItems={[{ tid: g.item.tid, title: g.item.title }]}
+                        />
+                      </div>
+                    ) : (
 ```
 
 - 折叠组加 `similar`：
@@ -2188,7 +2174,7 @@ SearchPage 单条分支相同代码（该页 `href` 分支与 BrowsePage 一致�
                       >
 ```
 
-chip 路径不动。import 补 `SimilarPostCard`（`PostCard` 组内子卡仍保留）。
+chip 路径不动。import 补：`import { SimilarSearchPanel } from "@/components/similar-search-panel"`、`import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"`（`PostCard` 组内子卡仍保留）。
 
 - [ ] **Step 6: me-list-page.tsx**
 
@@ -2277,7 +2263,7 @@ Expected: 成功。
 在 `AGENTS.md` 的 API 约定表追加：
 
 ```markdown
-| `GET /api/me/groups`        | `q`、`site?`（忽略，v1 仅论坛帖）                      | `{ groups }` 全部分组（含成员）                                                                    |
+| `GET /api/me/groups`        | `q`                                                  | `{ groups }` 全部分组（含成员）；v1 仅论坛帖（无 site 参数）                            |
 | `PUT /api/me/groups`        | body `{ key, title, items:[{tid,title}], author?, genre? }` | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空                                          |
 | `DELETE /api/me/groups/:id` | 无                                                        | 删分组（级联成员）`{ ok }`                                                                          |
 | `DELETE /api/me/groups/:id/items` | body `{ items:[{tid}] }`                            | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                               |
