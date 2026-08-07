@@ -26,6 +26,13 @@ describe("openDatabase", () => {
       "items",
       "tags",
     ])
+    // 新库直接是 site 主键
+    const meta = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+      )
+      .get() as { sql: string }
+    expect(meta.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*site,\s*kind,\s*id/i)
     const fk = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }
     expect(fk.foreign_keys).toBe(1)
     db.close()
