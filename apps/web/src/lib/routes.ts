@@ -209,6 +209,18 @@ export const NAV_ITEMS = [
     match: (p: string) => p === routes.groups,
   },
   {
+    href: routes.archive,
+    label: "归档",
+    sites: ["1"],
+    match: (p: string) => p === routes.archive,
+  },
+  {
+    href: routes.jobs,
+    label: "任务",
+    sites: ["1", "2"],
+    match: (p: string) => p === routes.jobs,
+  },
+  {
     href: routes.history,
     label: "历史",
     sites: ["1", "2"],

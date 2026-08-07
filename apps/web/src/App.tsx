@@ -14,6 +14,7 @@ import FavoritesPage from "@/pages/FavoritesPage"
 import TagsPage from "@/pages/TagsPage"
 import GroupPage from "@/pages/GroupPage"
 import JobsPage from "@/pages/JobsPage"
+import ArchivePage from "@/pages/ArchivePage"
 
 export function App() {
   return (
@@ -33,6 +34,7 @@ export function App() {
       <Route path="/tags" element={<TagsPage />} />
       <Route path="/groups" element={<GroupPage />} />
       <Route path="/jobs" element={<JobsPage />} />
+      <Route path="/archive" element={<ArchivePage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   )
