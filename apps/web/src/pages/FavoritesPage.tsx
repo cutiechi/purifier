@@ -1,7 +1,11 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import { FavoritedGroupCard } from "@/components/favorited-group-card"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
-import { api, meListQuery } from "@/lib/routes"
+import { PostList } from "@/components/post-card"
+import { type Group } from "@/lib/groups"
+import { api, meListQuery, parsePage, parseQuery } from "@/lib/routes"
 
 function UnfavoriteButton({
   item,
@@ -36,22 +40,80 @@ function UnfavoriteButton({
 }
 
 export default function FavoritesPage() {
+  const [searchParams] = useSearchParams()
+  const q = parseQuery(searchParams)
+  const kind = searchParams.get("kind") ?? ""
+  const page = parsePage(searchParams)
+  const showGroups = !q && !kind && page === 1
+
+  const [groups, setGroups] = useState<Group[]>([])
+  const [groupsError, setGroupsError] = useState("")
+
+  const reloadGroups = useCallback(async () => {
+    try {
+      const res = await fetch(api.meGroups)
+      if (!res.ok) {
+        setGroupsError("分组加载失败")
+        return
+      }
+      const json = (await res.json()) as { groups: Group[] }
+      setGroups((json.groups ?? []).filter((g) => g.favorited))
+      setGroupsError("")
+    } catch {
+      setGroupsError("分组加载失败")
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showGroups) void reloadGroups()
+    else setGroups([])
+  }, [showGroups, reloadGroups])
+
   const renderTrailing = useCallback(
     (item: MeListItem, reload: () => void) => (
       <UnfavoriteButton item={item} reload={reload} />
     ),
     []
   )
+
+  const toolbar = useCallback(() => {
+    if (!showGroups) return null
+    // 无内容且无错误时连标题都不渲染，避免空区块
+    if (!groupsError && groups.length === 0) return null
+    return (
+      <section className="mb-4">
+        <h2 className="mb-2 text-sm font-medium text-muted-foreground">
+          已收藏的分组
+        </h2>
+        {groupsError && (
+          <p className="mb-2 text-xs text-destructive">{groupsError}</p>
+        )}
+        {groups.length > 0 && (
+          <PostList>
+            {groups.map((g) => (
+              <FavoritedGroupCard
+                key={g.id}
+                group={g}
+                onChanged={reloadGroups}
+              />
+            ))}
+          </PostList>
+        )}
+      </section>
+    )
+  }, [showGroups, groups, groupsError, reloadGroups])
+
   return (
     <MeListPage
       title="收藏"
-      description="收藏的贴子与书库"
+      description="收藏的贴子、书库与分组"
       bookGroupScope="favorites"
-      buildUrl={(q, kind, page) =>
-        `${api.meFavorites}?${meListQuery({ q, kind, page })}`
+      buildUrl={(q2, kind2, page2) =>
+        `${api.meFavorites}?${meListQuery({ q: q2, kind: kind2, page: page2 })}`
       }
       pick={(json) => json as { items: MeListItem[]; nextPage?: number }}
       renderTrailing={renderTrailing}
+      toolbar={toolbar}
     />
   )
 }
