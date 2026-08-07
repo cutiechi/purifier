@@ -67,9 +67,16 @@ export function SiteHeader({
 
         <Link
           to={routes.home}
-          className="inline-flex h-11 shrink-0 items-center px-1.5 text-[15px] font-semibold tracking-tight text-foreground"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-accent"
+          aria-label="Purifier 首页"
         >
-          Purifier
+          <img
+            src="/logo.png"
+            alt=""
+            width={28}
+            height={28}
+            className="size-7 object-contain"
+          />
         </Link>
 
         {/* Desktop nav — lg+ only so phone landscape keeps hamburger */}
