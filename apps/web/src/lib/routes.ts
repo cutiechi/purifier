@@ -16,6 +16,7 @@
  * | History     | `/history`                   |
  * | Favorites   | `/favorites`                 |
  * | Tags        | `/tags?tag=&q=&kind=&page=`  |
+ * | Group       | `/groups`                    |
  */
 
 export type SiteId = string
@@ -37,6 +38,7 @@ export const routes = {
   history: "/history",
   favorites: "/favorites",
   tags: "/tags",
+  groups: "/groups",
 } as const
 
 export const api = {
@@ -193,6 +195,12 @@ export const NAV_ITEMS = [
     label: "搜索",
     sites: ["1", "2"],
     match: (p: string) => p === routes.search,
+  },
+  {
+    href: routes.groups,
+    label: "分组",
+    sites: ["1"],
+    match: (p: string) => p === routes.groups,
   },
   {
     href: routes.history,
