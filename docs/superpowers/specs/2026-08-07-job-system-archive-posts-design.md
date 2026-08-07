@@ -16,7 +16,7 @@
 
 ### 目标
 
-- **任务系统**：进程内长跑作业框架，支持启动 / 查状态 / 看日志 / 取消 / 删除；进程重启后残留 running 标 interrupted，不自动续跑。
+- **任务系统**：进程内长跑作业框架，支持启动 / 查状态 / 看日志 / 取消 / 删除；进程重启后残留 running / pending 标 interrupted，不自动续跑。
 - **全站主帖归档**：循环 `fetchHomeLinks(mtid)` 翻页直到游标推进不动，把 tid + 标题写入 `archive_posts` 表。
 - **归档目录访问**：`GET /api/me/archive` 分页查询，支持按 title / tid / archived_at 排序、标题子串搜索。
 - **前端**：`/jobs` 任务管理页 + `/archive` 归档目录页。
@@ -102,9 +102,9 @@ CREATE INDEX IF NOT EXISTS jobs_type_created_idx ON jobs(type, created_at DESC);
 
 ```
 pending → running → succeeded     （正常完成）
-                  → failed        （handler 抛错）
+                  → failed        （handler 抛错 / markRunning 失败）
                   → aborted       （用户 POST stop）
-         ↘ interrupted            （进程重启扫到的残留 running）
+         ↘ interrupted            （进程重启扫到的残留 running / pending）
 ```
 
 `aborted` 与 `interrupted` 分开：前者是用户主动停（明确意图），后者是进程异常退出（意外）。两者都属"未完成"但语义不同，前端可分别展示。
@@ -154,7 +154,8 @@ CREATE INDEX IF NOT EXISTS archive_posts_site_archived_idx
 - **`title NOT NULL`**：进表必有标题；空标题（`!title.trim()`）在 handler 写入前丢弃（见 §6.3）。
 - **无 url 列**：tid 经 `buildUrl(tid)` 可重建。
 - **`first_seen_at`**：该 tid 首次进入归档的时间，永不被覆盖。
-- **`archived_at`**：该 tid 标题最近一次发生变化的时间（新行 = 首次出现时间）。语义见 §4.4 写入策略。不用于排序时仍保留，便于调试与未来视图。三列（title / tid / archived_at）均建索引，支持前端多列排序。
+- **`archived_at`**：该 tid 标题最近一次发生变化的时间（新行 = 首次出现时间）。语义见 §4.4 写入策略。不用于排序时仍保留，便于调试与未来视图。
+- **索引**：title / archived_at 建二级索引（见上方 DDL）；tid 排序依赖主键 `(site, tid)`（ASC 正扫 / DESC 反扫），不另建 tid 索引。前端三列排序（title / tid / archived_at）均有索引覆盖。
 - **无 `updated_at`**：归档是 append-only 目录，标题更新通过"标题变了才 UPSERT"实现（见 §4.4）。
 
 **为什么单独一张表而非复用 `items`**：`items` 是"我的"（历史 / 收藏 / 标签载体），visit_count=0 的几万条归档数据会污染所有 list 查询（`listHistory` / `listFavorites` 无过滤条件区分）。归档是"全站的"目录，语义不同，物理隔离最干净。
@@ -192,8 +193,10 @@ listJobs(opts: { type?: string; status?: string; limit: number; offset: number }
 // limit/offset 由 API 层填入默认与上限（limit 默认 20、上限 100，offset 默认 0）；
 // Store 不校验范围，只做透传
 
-markRunning(id: number): void
+markRunning(id: number): boolean
 // UPDATE status='running', started_at=now WHERE id=? AND status='pending'
+// 返回 changes>0（true = pending→running 成功）；false 表示行已不在 pending
+// （正常路径不会发生；手动改库等异常下由 start() 兜底标 failed，见 §6.2）
 
 markFinished(
   id: number,
@@ -414,10 +417,12 @@ export class JobRunner {
 1. 校验 `type` 在 handlers 注册表 → 否则抛 `ExtractorError("unknown job type", 400)`。
 2. 校验当前没有同 type 的 job 在 running（单例约束）→ 否则抛 `ExtractorError("job already running", 409)`。
 3. `store.createJob(type, payload)` → 拿 `jobId`，status=pending。
-4. `store.markRunning(jobId)` → status=running, started_at=now。**`markRunning` 返回是否真的更新了行**（`changes > 0`）；若返回 false（行已被外部改成非 pending，例如手动改库），**中止 `runJob`**（不注册 controller、不执行 handler），避免幽灵执行。
+4. `const ok = store.markRunning(jobId)` → status=running, started_at=now。**`markRunning` 返回 `changes > 0`**；**若返回 false**（行已不在 pending，正常路径不会发生，仅手动改库等异常）：立即 `store.markFinished(jobId, "failed", null, "failed to mark running")` 兜底转终态，并抛 `ExtractorError("failed to start job", 500)`（**不注册 controller、不执行 handler**），避免幽灵执行与悬挂 pending。
 5. 创建 `AbortController`，存入 `running` Map。
 6. **不 await**：`void this.runJob(jobId, type, payload, controller.signal)` —— 立即返回 job。
 7. `runJob` 异步跑完，try/catch 兜底，最终 `markFinished`。
+
+**端点表「立即返回 status=running」的精确语义**：仅成功路径（步骤 4 `ok===true`）保证返回的 job 为 running；`markRunning===false` 路径在返回前已抛 500，不会返回 pending/failed 的 job 给调用方。
 
 **单例约束的 TOCTOU**：API 进程内单实例 + JS 单线程，`start()` 同步走到 `createJob`，实际无并发窗口。可接受。
 
@@ -662,6 +667,7 @@ parse 失败降级为 null。`runner` 实例需在 `route` 闭包可访问（模
 | `POST /jobs/:id/stop` 非 running | 409 | `{error:"cannot stop job in status: X"}` |
 | `DELETE /jobs/:id` 删 running | 409 | `{error:"cannot delete running job; stop it first"}` |
 | `POST /jobs/:id/stop` 不存在 | 404 | `{error:"job not found"}` |
+| `POST /jobs` markRunning 失败（行已不在 pending，异常路径） | 500 | `{error:"failed to start job"}`（job 已被兜底标 failed） |
 **`delayMs` 不进错误表**：非法值（NaN / 负 / 超 [200,5000]）在 handler 内 clamp 到默认 800（见 §6.3），不返回错误，用户无感。
 
 ## 8. 前端（`apps/web`）
@@ -816,7 +822,7 @@ class FakeHandler implements JobHandler {
 - `recoverOnStartup` → 残留 running **与** pending 都标 interrupted。
 - handler 抛错 → failed，error 写入。
 - markFinished 只调一次（spy 验证）。
-- `markRunning` 返回 false（行被外部改成非 pending）→ 不执行 handler（无幽灵执行）。
+- `markRunning` 返回 false（行被外部改成非 pending）→ 立即 `markFinished(id,"failed",...)` + `start` 抛错；不执行 handler（无幽灵执行）、不注册 controller。
 
 ### 10.3 ArchivePostsJob（`packages/core/src/jobs/handlers/archive_posts.test.ts`，新建）
 
