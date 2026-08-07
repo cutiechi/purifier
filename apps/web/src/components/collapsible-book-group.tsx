@@ -1,5 +1,7 @@
-import { type ReactNode, useId } from "react"
-import { IconBookOpen, IconChevronDown } from "@/components/icons"
+import { type ReactNode, useId, useState } from "react"
+import { IconBookOpen, IconChevronDown, IconSearch } from "@/components/icons"
+import { SimilarSearchPanel } from "@/components/similar-search-panel"
+import { type GroupMember } from "@/lib/groups"
 import { cn } from "@workspace/ui/lib/utils"
 
 export function CollapsibleBookGroup({
@@ -10,6 +12,7 @@ export function CollapsibleBookGroup({
   isExpanded,
   onToggle,
   trailing,
+  similar,
   children,
 }: {
   title: string
@@ -19,12 +22,17 @@ export function CollapsibleBookGroup({
   isExpanded: boolean
   onToggle: () => void
   trailing?: ReactNode
+  similar?: {
+    title: string
+    groupKey: string
+    seedItems: GroupMember[]
+    onChanged?: () => void
+  }
   children: ReactNode
 }) {
-  // contentId 由 useId 生成、天然唯一；bookKey 由父级用作 React key，
-  // 此处保留以便未来扩展（如改作稳定 id 前缀）
   const contentId = `book-content-${useId()}`
   void bookKey
+  const [showSimilar, setShowSimilar] = useState(false)
   return (
     <div className="flex flex-col rounded-2xl border border-border/80 bg-card/80 shadow-sm transition-all duration-200 hover:border-border">
       <button
@@ -57,14 +65,37 @@ export function CollapsibleBookGroup({
           )}
         />
       </button>
+      {similar && (
+        <button
+          type="button"
+          onClick={() => {
+            if (!isExpanded) onToggle()
+            setShowSimilar((v) => !v)
+          }}
+          aria-expanded={showSimilar}
+          className="flex items-center gap-1.5 border-t border-border/60 px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:px-4"
+        >
+          <IconSearch size={13} />
+          搜索相似
+        </button>
+      )}
       {isExpanded && (
         <div
           id={contentId}
           role="region"
           aria-label={title}
-          className="flex flex-col gap-2 px-3.5 pb-3.5 opacity-100 transition-opacity duration-150 sm:gap-2.5 sm:px-4 sm:pb-4"
+          className="flex flex-col gap-2 px-3.5 pb-3.5 transition-opacity duration-150 sm:gap-2.5 sm:px-4 sm:pb-4"
         >
           {children}
+          {similar && showSimilar && (
+            <SimilarSearchPanel
+              title={similar.title}
+              groupKey={similar.groupKey}
+              seedItems={similar.seedItems}
+              onChanged={similar.onChanged}
+              showTrigger={false}
+            />
+          )}
         </div>
       )}
     </div>
