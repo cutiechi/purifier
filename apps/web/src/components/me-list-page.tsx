@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
+import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { MeItemCard, type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { groupMeListItems } from "@/lib/book-groups"
 import { parsePage, parseQuery } from "@/lib/routes"
+import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@workspace/ui/lib/utils"
 
 export type MeListPick = (json: Record<string, unknown>) => {
@@ -21,6 +26,7 @@ export function MeListPage({
   renderTrailing,
   toolbar,
   emptyText,
+  bookGroupScope,
 }: {
   title: string
   description?: string
@@ -35,6 +41,8 @@ export function MeListPage({
     loading: boolean
   }) => ReactNode
   emptyText?: string
+  /** 传入则启用同书折叠分组（值为 scope，如 'history'/'favorites'/'me-items'） */
+  bookGroupScope?: string
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const q = parseQuery(searchParams)
@@ -78,6 +86,12 @@ export function MeListPage({
   useEffect(() => {
     void reload()
   }, [reload])
+
+  const { isExpanded, toggle } = useExpandedBooks(bookGroupScope ?? "__noop__")
+  const grouped = useMemo(() => {
+    if (!bookGroupScope) return null
+    return groupMeListItems(items)
+  }, [items, bookGroupScope])
 
   function update(next: { q?: string; kind?: string; page?: number }) {
     const params = new URLSearchParams(searchParams)
@@ -162,13 +176,49 @@ export function MeListPage({
         emptyText={emptyText ?? "暂无内容"}
       >
         <PostList>
-          {items.map((item) => (
-            <MeItemCard
-              key={`${item.kind}:${item.id}`}
-              item={item}
-              trailing={renderTrailing?.(item, reload)}
-            />
-          ))}
+          {(grouped ?? items.map((item) => ({ type: "single" as const, item }))).map(
+            (g) =>
+              g.type === "single" ? (
+                <MeItemCard
+                  key={`${g.item.kind}:${g.item.id}`}
+                  item={g.item}
+                  trailing={renderTrailing?.(g.item, reload)}
+                />
+              ) : (
+                <CollapsibleBookGroup
+                  key={`group:${g.key}`}
+                  title={g.title}
+                  summary={g.author ?? undefined}
+                  count={g.items.length}
+                  bookKey={g.key}
+                  isExpanded={isExpanded(g.key)}
+                  onToggle={() => toggle(g.key)}
+                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                >
+                  {g.items.map((item) => {
+                    const parsed = parseListTitle(item.title)
+                    // 组内主标题用章节号；副标题用 formatTitleMeta（作者/题材）+
+                    // 进度（保留，避免信息丢失）。时间/访问次数由组级上下文决定。
+                    const sub = formatTitleMeta(parsed)
+                    const subWithProgress =
+                      (sub ? `${sub}` : "") +
+                      (typeof item.read_progress === "number" &&
+                      item.read_progress > 0
+                        ? `${sub ? " · " : ""}已读 ${Math.round(item.read_progress * 100)}%`
+                        : "")
+                    return (
+                      <MeItemCard
+                        key={`${item.kind}:${item.id}`}
+                        item={item}
+                        trailing={renderTrailing?.(item, reload)}
+                        titleOverride={parsed.chapters || undefined}
+                        subtitleOverride={subWithProgress || undefined}
+                      />
+                    )
+                  })}
+                </CollapsibleBookGroup>
+              ),
+          )}
         </PostList>
         <Pager
           page={page}

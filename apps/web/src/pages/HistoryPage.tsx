@@ -126,6 +126,7 @@ export default function HistoryPage() {
     <MeListPage
       title="浏览历史"
       description="最近访问的贴子与书库"
+      bookGroupScope="history"
       buildUrl={(q, kind, page) =>
         `${api.meHistory}?${meListQuery({ q, kind, page })}`
       }

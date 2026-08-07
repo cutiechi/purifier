@@ -140,6 +140,7 @@ function TagItemsView() {
     <MeListPage
       title={`#${tag}`}
       description="该标签下的贴子与书库"
+      bookGroupScope="me-items"
       buildUrl={(q, kind, page) => {
         const params = meListQuery({ q, kind, page })
         const query = params ? `&${params}` : ""

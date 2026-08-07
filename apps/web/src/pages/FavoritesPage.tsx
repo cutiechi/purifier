@@ -46,6 +46,7 @@ export default function FavoritesPage() {
     <MeListPage
       title="收藏"
       description="收藏的贴子与书库"
+      bookGroupScope="favorites"
       buildUrl={(q, kind, page) =>
         `${api.meFavorites}?${meListQuery({ q, kind, page })}`
       }
