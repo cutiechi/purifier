@@ -10,7 +10,7 @@
 
 全站主帖上万条，逐条抓取耗时几十分钟，不适合塞进普通请求。需要一个**任务系统**承载这类长跑作业，「全站主帖归档」是它的第一个实例。
 
-当前项目没有任何任务 / 作业 / 队列基础设施（已确认：`grep task|job|queue|cron` 无命中，无 scripts 目录）。这次一并建立。
+截至 2026-08-07，项目没有任务 / 作业 / 队列基础设施。这次一并建立。
 
 ## 2. 目标与非目标
 
@@ -110,7 +110,7 @@ pending → running → succeeded     （正常完成）
 `aborted` 与 `interrupted` 分开：前者是用户主动停（明确意图），后者是进程异常退出（意外）。两者都属"未完成"但语义不同，前端可分别展示。
 
 - `payload`：启动参数 JSON（如 `{site, delayMs}`）。
-- `result`：结束摘要 JSON（如 `{pages, inserted, updated, site, stoppedOnError?}`）。
+- `result`：结束摘要 JSON（如 `{pages, inserted, updated, site}`）；失败时为 null（错误信息走 `error` 字段）。
 - `error`：failed 时的错误信息。
 - `started_at` / `finished_at`：进入 / 离开 running 的时间戳。
 
@@ -144,16 +144,14 @@ CREATE TABLE IF NOT EXISTS archive_posts (
 );
 CREATE INDEX IF NOT EXISTS archive_posts_site_title_idx
   ON archive_posts(site, title COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS archive_posts_site_tid_idx
-  ON archive_posts(site, tid DESC);
 CREATE INDEX IF NOT EXISTS archive_posts_site_archived_idx
   ON archive_posts(site, archived_at DESC);
 ```
 
 **关键决策**：
 
-- **主键 `(site, tid)`**：天然去重，UPSERT 兜底。
-- **`title NOT NULL`**：进表必有标题，空标题在抓取阶段丢弃。
+- **主键 `(site, tid)`**：天然去重，UPSERT 兜底。`ORDER BY tid` 走主键索引（ASC 正扫 / DESC 反扫），不另建 tid 索引。
+- **`title NOT NULL`**：进表必有标题；空标题（`!title.trim()`）在 handler 写入前丢弃（见 §6.3）。
 - **无 url 列**：tid 经 `buildUrl(tid)` 可重建。
 - **`first_seen_at`**：该 tid 首次进入归档的时间，永不被覆盖。
 - **`archived_at`**：该 tid 标题最近一次发生变化的时间（新行 = 首次出现时间）。语义见 §4.4 写入策略。不用于排序时仍保留，便于调试与未来视图。三列（title / tid / archived_at）均建索引，支持前端多列排序。
@@ -213,10 +211,13 @@ hasRunningOfType(type: string): boolean
 clearFinishedJobs(): number
 // DELETE FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')
 // 返回删除行数；CASCADE 自动清 job_logs
+// 注意：只清终态，pending/running 不动（pending 由 recoverOnStartup 收，running 只能 stop 后删）
 
-markStaleRunningAsInterrupted(): number
-// UPDATE jobs SET status='interrupted', finished_at=now WHERE status='running'
-// 进程启动时 recoverOnStartup 调用，返回影响行数
+markStaleJobsInterrupted(): number
+// UPDATE jobs SET status='interrupted', finished_at=now
+//   WHERE status IN ('running','pending')
+// 进程启动时 recoverOnStartup 调用：崩溃可能在 createJob(pending) 与 markRunning 之间，
+// 或 markRunning 之后；两类残留都标 interrupted。返回影响行数
 ```
 
 ### 5.2 Job 日志方法
@@ -225,8 +226,9 @@ markStaleRunningAsInterrupted(): number
 appendJobLog(jobId: number, level: "info"|"warn"|"error", message: string): void
 // INSERT created_at=now
 
-listJobLogs(jobId: number, opts: { limit: number; offset: number; level?: string }): JobLog[]
-// WHERE job_id=? [+ level 过滤] ORDER BY created_at ASC LIMIT/OFFSET
+listJobLogs(jobId: number, opts: { limit: number; offset: number; level?: string; order?: "asc"|"desc" }): JobLog[]
+// WHERE job_id=? [+ level 过滤] ORDER BY created_at <order> LIMIT/OFFSET
+// order 默认 asc（阅读顺序）；轮询长 job 时传 desc 拉尾部
 // limit/offset 由 API 层填入默认与上限（limit 默认 200、上限 1000，offset 默认 0）；
 // Store 不校验范围，只做透传
 ```
@@ -238,11 +240,22 @@ listJobLogs(jobId: number, opts: { limit: number; offset: number; level?: string
 ```ts
 listArchivePosts(
   site: string,
-  opts: { q?: string; page: number; limit: number; sort: "title"|"tid"|"archived_at"; order?: "asc"|"desc" }
-): { items: ArchivePost[]; nextPage: number | null }
-// WHERE site=? [+ q 标题子串 NOCASE]
-// ORDER BY <sort> <order>，LIMIT/OFFSET
+  opts: {
+    q?: string
+    page: number
+    limit: number
+    sort: "title" | "tid" | "archived_at"
+    order?: "asc" | "desc"
+  }
+): { items: ArchivePost[]; nextPage?: number }
+// WHERE site=? [+ q 标题子串 NOCASE：与 listHistory 同款 LIKE '%'||?||'%' COLLATE NOCASE，
+//    不转义 %/_，与现有 history 查询行为一致]
+// ORDER BY <sort> <order>，LIMIT (limit+1) OFFSET，探测 hasMore
 ```
+
+返回形态与现有 `ListResult` 对齐：有下一页 `nextPage: number`，无则**省略键**（不是 `null`）。前端分页组件与 history/favorites 共用判定（`res.nextPage` 真值即有更多）。
+
+`LIMIT (limit+1)` 探测：取回 `limit+1` 行则有更多，截断到 `limit` 并置 `nextPage = page+1`；否则不置。
 
 **排序白名单（防 SQL 注入）**：
 
@@ -261,16 +274,18 @@ const SORT_COL: Record<opts["sort"], string> = {
 ```ts
 upsertArchivePosts(
   site: string,
-  items: Array<{ tid: string; title: string; ts: number }>
+  items: Array<{ tid: string; title: string }>,
+  ts: number
 ): { inserted: number; updated: number }
 ```
+
+`ts` 为方法参数（全批统一时间戳），由调用方传入（handler 用注入的 `now()`）。与 Store 现有时钟注入风格一致，便于测试断言 `archived_at` / `first_seen_at`。
 
 实现：
 
 ```ts
-upsertArchivePosts(site, items) {
+upsertArchivePosts(site, items, ts) {
   if (items.length === 0) return { inserted: 0, updated: 0 }
-  const ts = items[0].ts
   const run = this.db.transaction(() => {
     const tids = items.map(i => i.tid)
     const ph = tids.map(() => "?").join(",")
@@ -301,7 +316,7 @@ upsertArchivePosts(site, items) {
 
 要点：
 
-- **批内 `ts` 统一**：调用方传一个 `ts`（`Date.now()`），全批同时间戳。
+- **`ts` 方法参数**：调用方传一个时间戳，全批同值。不在每项里带 `ts`（避免误导调用方以为每项独立）。
 - **`tid IN (...)` 动态占位符**：与现有 `tagsFor` 风格一致，不用 `VALUES (?)` 表语法。
 - **空批早返回**：避免空 IN 子句与空事务。
 
@@ -399,7 +414,7 @@ export class JobRunner {
 1. 校验 `type` 在 handlers 注册表 → 否则抛 `ExtractorError("unknown job type", 400)`。
 2. 校验当前没有同 type 的 job 在 running（单例约束）→ 否则抛 `ExtractorError("job already running", 409)`。
 3. `store.createJob(type, payload)` → 拿 `jobId`，status=pending。
-4. `store.markRunning(jobId)` → status=running, started_at=now。
+4. `store.markRunning(jobId)` → status=running, started_at=now。**`markRunning` 返回是否真的更新了行**（`changes > 0`）；若返回 false（行已被外部改成非 pending，例如手动改库），**中止 `runJob`**（不注册 controller、不执行 handler），避免幽灵执行。
 5. 创建 `AbortController`，存入 `running` Map。
 6. **不 await**：`void this.runJob(jobId, type, payload, controller.signal)` —— 立即返回 job。
 7. `runJob` 异步跑完，try/catch 兜底，最终 `markFinished`。
@@ -408,7 +423,7 @@ export class JobRunner {
 
 **`stop()` 行为**：只调 `controller.abort()`，立即返回。真正改 status 由 `runJob` 的 finally 处理（保证 `finished_at` 只写一次、result/error 正确）。job 已结束 → Map 里没有它 → 返回 false。
 
-**`recoverOnStartup()`**：API 启动时调一次。`store.markStaleRunningAsInterrupted()`。不删 job_logs（保留崩溃前日志便于排查）。
+**`recoverOnStartup()`**：API 启动时调一次。`store.markStaleJobsInterrupted()`（同时清 running 与 pending 两类崩溃残留）。不删 job_logs（保留崩溃前日志便于排查）。
 
 **`runJob` 核心逻辑**：
 
@@ -438,7 +453,9 @@ private async runJob(jobId, type, payload, signal) {
 }
 ```
 
-`markFinished` 只在 finally 调一次。handler 正常返回但 signal.aborted → aborted（用户意图优先）。
+`markFinished` 只在 finally 调一次。handler 正常返回但 signal.aborted → aborted。
+
+**stop 与自然完成的竞态**（明确语义）：abort 置位后，handler 仍可能跑完最后一页 upsert 再返回。此时 `if (signal.aborted) status = "aborted"` 会把**已完整写入最后一页的 job**标成 aborted。这是有意为之（用户意图优先）：用户点了 stop，即使最后一页已落库，也按"用户认为它停了"展示。result 里仍带 `pages/inserted/updated` 反映实际写入量，前端可在 aborted 状态下展示这些数。
 
 ### 6.3 ArchivePostsJob（第一个 handler）
 
@@ -447,31 +464,36 @@ private async runJob(jobId, type, payload, signal) {
 ```ts
 export class ArchivePostsJob implements JobHandler {
   type = "archive_posts"
-  constructor(private store: Store) {}
+  constructor(
+    private store: Store,
+    private now: () => number = Date.now
+  ) {}
 
   async run(ctx: JobContext): Promise<JobResult> {
     const site = String(ctx.payload.site ?? "1")
+    // v1 仅 cool18（site=1）：论坛主帖目录。xbookcn 虽有 fetchHomeLinks，
+    // 但其游标是页码递增、内容是小说卡片，语义与本 job 不同，不接入。
     if (site !== "1") {
-      throw new ExtractorError("site does not support archive", 400)
+      throw new Error(`archive not supported for site: ${site}`)
     }
     const extractor = resolveSite(site)
-    if (typeof extractor.fetchHomeLinks !== "function") {
-      throw new ExtractorError("site does not support archive", 400)
-    }
 
     let mtid = "0"
     let pages = 0, inserted = 0, updated = 0
-    const delayMs = Number(ctx.payload.delayMs ?? 800)
-    let stoppedOnError = false
+    let lastError: string | null = null
+    // delayMs clamp：非法（NaN/负/过大）回落默认；范围 [200, 5000]
+    const rawDelay = Number(ctx.payload.delayMs)
+    const delayMs = Number.isFinite(rawDelay) && rawDelay >= 200 && rawDelay <= 5000
+      ? rawDelay
+      : 800
 
     while (!ctx.signal.aborted) {
       let page: HomePage
       try {
         page = await extractor.fetchHomeLinks(mtid)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        ctx.log("warn", `page ${pages + 1} failed: ${msg}; stopping`)
-        stoppedOnError = true
+        lastError = err instanceof Error ? err.message : String(err)
+        ctx.log("warn", `page ${pages + 1} failed: ${lastError}; stopping`)
         break
       }
       pages++
@@ -479,15 +501,24 @@ export class ArchivePostsJob implements JobHandler {
         ctx.log("info", `page ${pages}: empty, done`)
         break
       }
-      const res = this.store.upsertArchivePosts(site, page.links.map(l => ({
-        tid: l.tid, title: l.title, ts: Date.now(),
-      })))
+      // 丢弃空标题（stripHtml 后可能为 ""），符合 archive_posts.title NOT NULL 语义
+      const clean = page.links
+        .map(l => ({ tid: l.tid, title: l.title.trim() }))
+        .filter(l => l.tid && l.title)
+      const res = this.store.upsertArchivePosts(site, clean, this.now())
       inserted += res.inserted
       updated += res.updated
-      ctx.log("info", `page ${pages}: +${page.links.length} fetched (${res.inserted} new, ${res.updated} updated), nextMtid=${page.nextMtid}`)
+      const dropped = page.links.length - clean.length
+      ctx.log("info", `page ${pages}: +${page.links.length} fetched (${res.inserted} new, ${res.updated} updated${dropped ? `, ${dropped} empty dropped` : ""}), nextMtid=${page.nextMtid}`)
 
-      if (!page.nextMtid || page.nextMtid >= mtid) {
-        ctx.log("info", `reached end (nextMtid=${page.nextMtid})`)
+      // 终止条件：cool18 游标向更小 tid 推进，数值比较（非字符串）
+      if (!page.nextMtid) {
+        ctx.log("info", `reached end (no nextMtid)`)
+        break
+      }
+      // 仅当游标未推进时停（防卡死）；首页 mtid="0" 不当作上界
+      if (mtid !== "0" && Number(page.nextMtid) >= Number(mtid)) {
+        ctx.log("info", `reached end (cursor not advancing: ${page.nextMtid} >= ${mtid})`)
         break
       }
       mtid = page.nextMtid
@@ -496,18 +527,42 @@ export class ArchivePostsJob implements JobHandler {
 
     if (ctx.signal.aborted) ctx.log("warn", "aborted by user")
     const result: JobResult = { pages, inserted, updated, site }
-    if (stoppedOnError) result.stoppedOnError = true
+    // 单页失败 → 抛错让 Runner 标 failed（不再用 succeeded + stoppedOnError）
+    if (lastError) {
+      throw new Error(`archive stopped on page error: ${lastError}`)
+    }
     return result
   }
 }
 ```
 
+**`sleep(delayMs, signal)` 工具函数**（`packages/core/src/jobs/sleep.ts`，abort 时必须 clearTimeout 防泄漏）：
+
+```ts
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const t = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(t)
+      resolve()
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+```
+
 要点：
 
-- **site 校验**：构造时不固定 extractor，run 里校验 site==="1" + `fetchHomeLinks` 存在。xbookcn 不支持，立即 failed。
-- **单页失败策略**：warn + break（结束 job，标 succeeded，result 带 `stoppedOnError: true`）。不重试该页、不跳过该页继续（跳过会丢中间 tid 且打乱游标）。
-- **终止条件 `nextMtid >= mtid`**：兜底防止游标倒退死循环（理论不会发生，防御）。
-- **`sleep(delayMs, signal)`**：`Promise.race([setTimeout, abortPromise])`，abort 立即 resolve 不等完，否则用户点 stop 还要等限速。
+- **site 校验**：v1 仅 site==="1"（cool18 论坛主帖）。xbookcn 虽实现 `fetchHomeLinks`，但游标语义（页码递增）与内容（小说卡片）不同，不接入。删除原 `typeof extractor.fetchHomeLinks !== "function"` 死代码（接口上该方法必选）。未来要接 xbookcn 必须另写按页码推进的游标逻辑，不能复用本 handler。
+- **单页失败策略**：记 `lastError` + break，循环结束后抛错 → Runner 标 `failed` + error 写摘要（不再用 succeeded + `stoppedOnError`，避免"只跑几页却显示绿 badge"）。不重试该页、不跳过该页继续（跳过会丢中间 tid 且打乱游标）。
+- **空标题丢弃**：`page.links.map(trim).filter(title)`，符合 §4.3 `title NOT NULL` 声明。日志里报 dropped 计数。
+- **终止条件**（修复字符串比较 + 起始 "0" 误判）：`nextMtid` 为 null → 停；仅当 `mtid !== "0"` 且数值 `nextMtid >= mtid`（游标未推进）→ 停。首页 mtid="0" 不当上界，正常推进。
+- **delayMs clamp**：非法值（NaN / 负 / 超 [200,5000]）回落默认 800，不抛错（用户友好）。
+- **时钟注入 `now`**：与现有 Store 一致，便于测试断言 `archived_at`。
 - **Handler 依赖 `resolveSite`**：从 `@workspace/core` 导出（已导出）。
 
 ### 6.4 依赖注入与 wiring
@@ -521,7 +576,7 @@ runner.register(new ArchivePostsJob(store))
 runner.recoverOnStartup()
 ```
 
-`JobRunner` 与 `ArchivePostsJob` 从 `@workspace/core` 导出。
+**导出面（`packages/core/src/index.ts`）**：现有只 `export * from "./extractor" | "./upstream" | "./storage"`。新增 `export * from "./jobs"`（或具名导出 `JobRunner`、`ArchivePostsJob`、类型 `JobHandler`/`JobContext`/`JobResult`/`JobStatus`）。**测试专用 `FakeHandler` 不导出**（仅存于 `runner.test.ts`，不进 public API）。
 
 ## 7. API 端点（`apps/api/src/index.ts`）
 
@@ -534,9 +589,9 @@ runner.recoverOnStartup()
 | `GET` | `/api/me/jobs` | query：`type`、`status`、`limit`（默认 20，上限 100）、`offset`。按 `created_at DESC`。返回 `{ items: Job[] }` |
 | `POST` | `/api/me/jobs` | body `{ type: "archive_posts", payload?: { site?, delayMs? } }`。校验 type 已注册（400）、无同 type running（409）。立即返回 `{ job }`（status=running，后台异步执行） |
 | `GET` | `/api/me/jobs/:id` | 单个 job 详情。不存在 404。返回 `{ job }` |
-| `GET` | `/api/me/jobs/:id/logs` | query：`limit`（默认 200，上限 1000）、`offset`、`level`。按 `created_at ASC`。返回 `{ items: JobLog[] }` |
+| `GET` | `/api/me/jobs/:id/logs` | query：`limit`（默认 200，上限 1000）、`offset`、`level`、`order`（`asc` 默认 / `desc`）。长 job 轮询用 `order=desc` 拉尾部（见 §8.3）。返回 `{ items: JobLog[] }` |
 | `POST` | `/api/me/jobs/:id/stop` | 取消。不存在 404；非 running 409。返回 `{ ok: true }`（实际终止异步完成） |
-| `DELETE` | `/api/me/jobs/:id` | 删 job + 级联日志。只允许删终态 job，删 running 409。返回 `{ ok: true }` |
+| `DELETE` | `/api/me/jobs/:id` | 删 job + 级联日志。可删任何非 running 状态（pending / succeeded / failed / interrupted / aborted）；删 running 返回 409（先 stop 等终态再删）。返回 `{ ok: true }` |
 | `DELETE` | `/api/me/jobs` | 清空所有终态 job。返回 `{ ok: true, removed: N }` |
 | `GET` | `/api/me/archive` | query：`site`（默认 1）、`q`、`sort`（title/tid/archived_at）、`order`（asc/desc）、`page`、`limit`（默认 50，上限 100）。返回 `{ items: ArchivePost[], nextPage?: number }` |
 
@@ -605,9 +660,9 @@ parse 失败降级为 null。`runner` 实例需在 `route` 闭包可访问（模
 | `POST /jobs` 同 type 已 running | 409 | `{error:"job already running"}` |
 | `GET/DELETE /jobs/:id` 不存在 | 404 | `{error:"job not found"}` |
 | `POST /jobs/:id/stop` 非 running | 409 | `{error:"cannot stop job in status: X"}` |
-| `DELETE /jobs/:id` 删 running | 409 | `{error:"cannot delete running job"}` |
+| `DELETE /jobs/:id` 删 running | 409 | `{error:"cannot delete running job; stop it first"}` |
 | `POST /jobs/:id/stop` 不存在 | 404 | `{error:"job not found"}` |
-| 参数校验失败 | 400 | `{error:"invalid ..."}` |
+**`delayMs` 不进错误表**：非法值（NaN / 负 / 超 [200,5000]）在 handler 内 clamp 到默认 800（见 §6.3），不返回错误，用户无感。
 
 ## 8. 前端（`apps/web`）
 
@@ -638,7 +693,7 @@ export interface JobLog { id: number; job_id: number; level: "info"|"warn"|"erro
 export async function startJob(type: string, payload?: Record<string, unknown>): Promise<Job>
 export async function listJobs(opts?: { type?: string; status?: string }): Promise<{ items: Job[] }>
 export async function getJob(id: number): Promise<Job>
-export async function getJobLogs(id: number, opts?: { level?: string }): Promise<{ items: JobLog[] }>
+export async function getJobLogs(id: number, opts?: { level?: string; order?: "asc"|"desc" }): Promise<{ items: JobLog[] }>
 export async function stopJob(id: number): Promise<void>
 export async function deleteJob(id: number): Promise<void>
 export async function clearFinishedJobs(): Promise<{ removed: number }>
@@ -649,7 +704,7 @@ export async function clearFinishedJobs(): Promise<{ removed: number }>
 - 加载时 `GET /jobs` 列表。
 - 顶部「开始归档」按钮 → `POST /jobs {type:"archive_posts"}` → 把返回 job 插到列表头 → 设为轮询目标。
 - 轮询间隔：用户可调（下拉 1s/2s/5s/10s），值存 `localStorage`（key `purifier:jobs:pollMs`），默认 1500。
-- running job：按轮询间隔 `GET /jobs/:id` + `GET /jobs/:id/logs`，status 变终态后停轮询。
+- running job：按轮询间隔 `GET /jobs/:id` + `GET /jobs/:id/logs?order=desc&limit=200`。日志按 desc 拉尾部（总是看到最新进度），`JobLogPanel` 渲染前反转为 ASC。长 job 跑久也能看到最新行。status 变终态后停轮询。
 - 点「停止」→ `POST /jobs/:id/stop` → 继续轮询直到 status 变 aborted。
 - 点「删除」→ 确认 → `DELETE /jobs/:id` → 移除。
 - 顶部「清空已结束」→ `DELETE /jobs` → 重新加载列表。
@@ -661,7 +716,7 @@ export async function clearFinishedJobs(): Promise<{ removed: number }>
 - 搜索框输入 → debounce → 带 `q` 重新查。
 - 排序 tab（标题 / 最新 / 最近更新）→ 带 `sort` 重新查。
 - 分页：沿用现有 `nextPage` 机制。
-- 每条：标题（链到 `/read/:tid`）+ tid + archived_at（小字）。
+- 每条：标题（用 `readPath(tid, site)` 生成站内链接，与现有页面统一）+ tid + archived_at（小字）。
 - 空状态：「还没有归档，去 /jobs 开始一次归档任务」。
 
 ### 8.5 路由与导航
@@ -697,7 +752,7 @@ export const api = { ..., meJobs: "/api/me/jobs", meArchive: "/api/me/archive" }
 
 ### 9.2 ArchivePostsJob 内部
 
-单页失败 → warn 日志 + break + succeeded + `result.stoppedOnError=true`。不重试、不跳过。与 `loadCachedReplies` 的"失败回退缓存"不同：归档无缓存可回退，失败如实记录。
+单页失败 → warn 日志 + break + 循环结束抛错 → Runner 标 `failed` + error 写摘要。不重试、不跳过。与 `loadCachedReplies` 的"失败回退缓存"不同：归档无缓存可回退，失败如实记录。空标题项在写入前丢弃（`trim` + filter）。
 
 ### 9.3 API 层
 
@@ -705,7 +760,7 @@ export const api = { ..., meJobs: "/api/me/jobs", meArchive: "/api/me/archive" }
 
 ### 9.4 archive_posts 的 site 校验
 
-见 §6.3：site!=="1" 或 extractor 无 `fetchHomeLinks` → `ExtractorError("site does not support archive", 400)` → job 立即 failed + error 日志。前端按钮 site=2 时禁用。
+见 §6.3：site!=="1" → handler 抛错 → job 标 failed + error 日志。v1 仅 cool18（语义：论坛主帖目录）；xbookcn 虽有 `fetchHomeLinks` 但游标/内容语义不同，不接入。前端按钮 site=2 时禁用。
 
 ## 10. 测试策略
 
@@ -714,12 +769,12 @@ export const api = { ..., meJobs: "/api/me/jobs", meArchive: "/api/me/archive" }
 **`jobs.test.ts`**（新建）：
 
 - `createJob` + `getJob` 往返；payload JSON 序列化往返。
-- `markRunning` 状态流转（pending→running）。
+- `markRunning` 状态流转（pending→running）；`markRunning` 对非 pending 行返回 false（changes=0）。
 - `markFinished` 各终态、`finished_at` 写入。
 - `hasRunningOfType` 单例检测。
 - `clearFinishedJobs` 只删终态、保留 running/pending、CASCADE 清日志。
-- `markStaleRunningAsInterrupted` 只影响 running、返回正确计数。
-- `appendJobLog` + `listJobLogs` ASC 排序、level 过滤、limit/offset。
+- `markStaleJobsInterrupted` 同时清 running 与 pending 两类崩溃残留、返回正确计数。
+- `appendJobLog` + `listJobLogs` ASC/DESC 排序、level 过滤、limit/offset。
 
 **`archive.test.ts`**（新建）：
 
@@ -756,21 +811,24 @@ class FakeHandler implements JobHandler {
 测试场景：
 
 - 正常完成 → succeeded，result 写入，logs 4 条。
-- `stop()` 中途 → aborted，logs 截断。
+- `stop()` 中途 → aborted，logs 截断；abort 后 sleep 不再等完整 delay（验证 `clearTimeout` 生效，无 timer 泄漏）。
 - 同 type 二次 start → 抛 409。
-- `recoverOnStartup` → 残留 running 标 interrupted。
+- `recoverOnStartup` → 残留 running **与** pending 都标 interrupted。
 - handler 抛错 → failed，error 写入。
 - markFinished 只调一次（spy 验证）。
+- `markRunning` 返回 false（行被外部改成非 pending）→ 不执行 handler（无幽灵执行）。
 
 ### 10.3 ArchivePostsJob（`packages/core/src/jobs/handlers/archive_posts.test.ts`，新建）
 
 mock `extractor.fetchHomeLinks`（返回构造的 `HomePage`）：
 
 - 多页正常 → result `{pages, inserted, updated}` 正确。
-- 限速 delayMs 生效（fake timer 验证 sleep 调用）。
-- 单页抛错 → warn 日志 + break + succeeded + result.stoppedOnError。
+- 限速 delayMs 生效（fake timer 验证 sleep 调用）；非法 delayMs（NaN/负/超 5000）回落 800。
+- **游标终止**（关键回归覆盖）：`mtid="0"` → 多页推进（nextMtid 数值递减）→ 末页 `nextMtid=null` 或与上一页相等 → 正常结束，不只抓一页。
+- 单页抛错 → warn 日志 + break + **抛错 → Runner 标 failed**（断言 `job.status === "failed"` 与 error 文案，不断言 HTTP 400——job 路径不映射状态码）。
+- 空标题项被丢弃（`stripHtml` 后 `""`）：clean 后不入库，日志报 dropped 计数。
 - abort 中途 → logs 含 "aborted by user"，result 反映已处理页数。
-- site!=="1" → 立即 failed。
+- site!=="1" → handler 抛错 → job 标 failed。
 
 ### 10.4 API 层
 
