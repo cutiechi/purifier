@@ -27,9 +27,15 @@ export interface MeListItem {
 export function MeItemCard({
   item,
   trailing,
+  titleOverride,
+  subtitleOverride,
 }: {
   item: MeListItem
   trailing?: ReactNode
+  /** 覆盖主标题（如组内子卡用解析后的章节信息） */
+  titleOverride?: string
+  /** 覆盖副标题 */
+  subtitleOverride?: string
 }) {
   const href =
     item.kind === "post"
@@ -52,17 +58,28 @@ export function MeItemCard({
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="line-clamp-2 text-[15px] leading-snug font-medium text-foreground">
-              {item.title}
+              {titleOverride ?? item.title}
             </span>
             <span className="text-xs text-muted-foreground">
-              {time != null && <>{formatDateTime(time)} · </>}
-              {item.visit_count} 次访问
-              {typeof item.read_progress === "number" &&
-                item.read_progress > 0 && (
-                  <span className="ml-1.5 text-xs text-muted-foreground/70">
-                    · 已读 {Math.round(item.read_progress * 100)}%
-                  </span>
-                )}
+              {subtitleOverride != null ? (
+                <>
+                  {subtitleOverride}
+                  {time != null && <> · {formatDateTime(time)}</>}
+                  {" · "}
+                  {item.visit_count} 次访问
+                </>
+              ) : (
+                <>
+                  {time != null && <>{formatDateTime(time)} · </>}
+                  {item.visit_count} 次访问
+                  {typeof item.read_progress === "number" &&
+                    item.read_progress > 0 && (
+                      <span className="ml-1.5 text-xs text-muted-foreground/70">
+                        · 已读 {Math.round(item.read_progress * 100)}%
+                      </span>
+                    )}
+                </>
+              )}
             </span>
           </span>
           {/* 有 trailing 时移动端隐藏 chevron，把横向空间留给标题与操作 */}
