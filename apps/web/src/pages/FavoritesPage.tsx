@@ -66,7 +66,10 @@ export default function FavoritesPage() {
 
   useEffect(() => {
     if (showGroups) void reloadGroups()
-    else setGroups([])
+    else {
+      setGroups([])
+      setGroupsError("")
+    }
   }, [showGroups, reloadGroups])
 
   const renderTrailing = useCallback(

@@ -19,8 +19,12 @@ export function FavoritedGroupCard({
   async function unfavorite() {
     setBusy(true)
     try {
-      await fetch(`${api.meGroups}/${group.id}/favorite`, { method: "DELETE" })
-      onChanged()
+      const res = await fetch(`${api.meGroups}/${group.id}/favorite`, {
+        method: "DELETE",
+      })
+      if (res.ok) onChanged()
+    } catch {
+      // 网络失败：静默（无用户反馈面），避免未处理的 rejection
     } finally {
       setBusy(false)
     }
