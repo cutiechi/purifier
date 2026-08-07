@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
@@ -29,8 +29,10 @@ export default function ArchivePage() {
   const [q, setQ] = useState("")
   const [sort, setSort] = useState<SortKey>("title")
   const [page, setPage] = useState(1)
+  const seqRef = useRef(0)
 
   const reload = useCallback(async () => {
+    const seq = ++seqRef.current
     setLoading(true)
     setError("")
     try {
@@ -44,6 +46,7 @@ export default function ArchivePage() {
         nextPage?: number
         error?: string
       }
+      if (seq !== seqRef.current) return
       if (!res.ok) {
         setError(json.error || "请求失败")
         return
@@ -51,9 +54,11 @@ export default function ArchivePage() {
       setItems(json.items ?? [])
       setNextPage(json.nextPage)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误")
+      if (seq === seqRef.current) {
+        setError(e instanceof Error ? e.message : "未知错误")
+      }
     } finally {
-      setLoading(false)
+      if (seq === seqRef.current) setLoading(false)
     }
   }, [sort, page, q])
 
