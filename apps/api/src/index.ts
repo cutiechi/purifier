@@ -11,6 +11,8 @@ import {
   NO_STORE_HEADERS,
   UpstreamTimeoutError,
   Store,
+  ArchivePostsJob,
+  JobRunner,
   assertSafeId,
   clearCache,
   fetchUpstream,
@@ -28,6 +30,9 @@ import {
   type ItemState,
   type ListQuery,
   type ReplyNode,
+  type Job,
+  type JobLog,
+  type JobStatus,
 } from "@workspace/core"
 
 // Dev: 3001 (Vite on 3000 proxies /api). Prod Docker sets PORT=3000 + WEB_DIST.
@@ -37,6 +42,9 @@ const HOST = process.env.HOSTNAME || "0.0.0.0"
 const WEB_DIST = process.env.WEB_DIST || join(import.meta.dir, "../../web/dist")
 const DATA_DIR = process.env.DATA_DIR || "./data"
 const store = new Store(openDatabase(DATA_DIR))
+const runner = new JobRunner(store)
+runner.register(new ArchivePostsJob(store))
+runner.recoverOnStartup()
 
 function toErrorResponse(err: unknown): Response {
   if (err instanceof UpstreamTimeoutError) {
@@ -566,6 +574,116 @@ function handleGroupsList(url: URL): Response {
   return jsonOk({ groups: store.listGroups(q) }, NO_STORE_HEADERS)
 }
 
+/** jobs 列表 query 解析（limit 默认 20 上限 100，offset 默认 0） */
+function jobsListQuery(url: URL) {
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10) || 20)
+  )
+  const offset = Math.max(
+    0,
+    parseInt(url.searchParams.get("offset") || "0", 10) || 0
+  )
+  return {
+    type: url.searchParams.get("type") ?? undefined,
+    status: url.searchParams.get("status") ?? undefined,
+    limit,
+    offset,
+  }
+}
+
+/** Job 行 payload/result JSON → 对象（失败降级 null） */
+function parseJob(job: Job) {
+  let payload: Record<string, unknown> | null = null
+  let result: Record<string, unknown> | null = null
+  try {
+    payload = job.payload ? JSON.parse(job.payload) : null
+  } catch {
+    payload = null
+  }
+  try {
+    result = job.result ? JSON.parse(job.result) : null
+  } catch {
+    result = null
+  }
+  return { ...job, payload, result }
+}
+
+function handleJobsList(url: URL): Response {
+  const items = store.listJobs(jobsListQuery(url))
+  return jsonOk({ items: items.map(parseJob) }, NO_STORE_HEADERS)
+}
+
+async function handleJobStart(req: Request): Promise<Response> {
+  let body: unknown = {}
+  try {
+    body = await req.json()
+  } catch {
+    // 无 body 走默认
+  }
+  let type = ""
+  let payload: Record<string, unknown> = {}
+  if (body && typeof body === "object") {
+    if ("type" in body) {
+      type = String(body.type)
+    }
+    if ("payload" in body && body.payload && typeof body.payload === "object") {
+      // typeof 已收窄为 object；仅补索引签名以满足 runner.start 参数类型
+      payload = body.payload as Record<string, unknown>
+    }
+  }
+  const job = await runner.start(type, payload)
+  return jsonOk({ job: parseJob(job) }, NO_STORE_HEADERS)
+}
+
+function handleJobGet(id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  return jsonOk({ job: parseJob(job) }, NO_STORE_HEADERS)
+}
+
+function handleJobDelete(id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  if (job.status === "running") {
+    return jsonError("cannot delete running job; stop it first", 409)
+  }
+  store.deleteJob(id)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+function handleJobsClear(): Response {
+  const removed = store.clearFinishedJobs()
+  return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+}
+
+function handleJobLogs(url: URL, id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  const limit = Math.min(
+    1000,
+    Math.max(1, parseInt(url.searchParams.get("limit") || "200", 10) || 200)
+  )
+  const offset = Math.max(
+    0,
+    parseInt(url.searchParams.get("offset") || "0", 10) || 0
+  )
+  const level = url.searchParams.get("level") ?? undefined
+  const order = url.searchParams.get("order") === "desc" ? "desc" : "asc"
+  const items = store.listJobLogs(id, { limit, offset, level, order })
+  return jsonOk({ items }, NO_STORE_HEADERS)
+}
+
+function handleJobStop(id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  if (job.status !== "running") {
+    return jsonError(`cannot stop job in status: ${job.status}`, 409)
+  }
+  runner.stop(id)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
 function isGroupMember(it: unknown): it is { tid: string; title: string } {
   if (!it || typeof it !== "object") return false
   const tid = "tid" in it ? it.tid : undefined
@@ -709,6 +827,37 @@ async function route(req: Request): Promise<Response> {
   }
 
   try {
+    // /api/me/jobs 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
+    const jobsSub = pathname.match(
+      /^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop))?$/
+    )
+    if (jobsSub) {
+      const id = Number(jobsSub[1])
+      const sub = jobsSub[2]
+      if (sub === undefined) {
+        if (req.method === "GET") return handleJobGet(id)
+        if (req.method === "DELETE") return handleJobDelete(id)
+        throw new ExtractorError("method not allowed", 405)
+      }
+      if (sub === "logs") {
+        if (req.method !== "GET") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return handleJobLogs(url, id)
+      }
+      if (sub === "stop") {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return handleJobStop(id)
+      }
+    }
+    if (pathname === "/api/me/jobs") {
+      if (req.method === "GET") return handleJobsList(url)
+      if (req.method === "POST") return await handleJobStart(req)
+      if (req.method === "DELETE") return handleJobsClear()
+      throw new ExtractorError("method not allowed", 405)
+    }
     // /api/me/groups 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
     const groupsSub = pathname.match(
       /^\/api\/me\/groups\/(\d+)(?:\/(items|favorite))?$/
