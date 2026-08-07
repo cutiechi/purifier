@@ -28,28 +28,42 @@ function GroupCard({
   async function toggleFavorite() {
     setBusy(true)
     try {
-      await fetch(`${api.meGroups}/${group.id}/favorite`, {
+      const res = await fetch(`${api.meGroups}/${group.id}/favorite`, {
         method: group.favorited ? "DELETE" : "PUT",
       })
-      onChanged()
+      if (res.ok) onChanged()
     } finally {
       setBusy(false)
     }
   }
 
   async function removeMember(tid: string) {
-    const res = await fetch(`${api.meGroups}/${group.id}/items`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ items: [{ tid }] }),
-    })
-    if (res.ok) onChanged()
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(`${api.meGroups}/${group.id}/items`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ items: [{ tid }] }),
+      })
+      if (res.ok) onChanged()
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function deleteGroup() {
     if (!window.confirm(`删除分组「${group.title}」？`)) return
-    const res = await fetch(`${api.meGroups}/${group.id}`, { method: "DELETE" })
-    if (res.ok) onChanged()
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch(`${api.meGroups}/${group.id}`, {
+        method: "DELETE",
+      })
+      if (res.ok) onChanged()
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -125,7 +139,8 @@ function GroupCard({
                 <button
                   type="button"
                   onClick={() => void removeMember(m.tid)}
-                  className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  disabled={busy}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                 >
                   移除
                 </button>
@@ -142,7 +157,8 @@ function GroupCard({
           <button
             type="button"
             onClick={() => void deleteGroup()}
-            className="mt-1 flex items-center justify-center gap-1.5 self-end rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            disabled={busy}
+            className="mt-1 flex items-center justify-center gap-1.5 self-end rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
           >
             <Trash2 size={13} />
             删除分组
