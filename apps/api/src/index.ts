@@ -463,6 +463,26 @@ function handleMeState(url: URL): Response {
   return jsonOk(state ?? empty, NO_STORE_HEADERS)
 }
 
+function handleMeArchive(url: URL): Response {
+  const site = url.searchParams.get("site") ?? DEFAULT_SITE
+  const q = url.searchParams.get("q") ?? undefined
+  const page = parseInt(url.searchParams.get("page") || "1", 10) || 1
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10) || 50)
+  )
+  const sortRaw = url.searchParams.get("sort") ?? "title"
+  const sort =
+    sortRaw === "title" || sortRaw === "tid" || sortRaw === "archived_at"
+      ? sortRaw
+      : "title"
+  const orderRaw = url.searchParams.get("order")
+  const order =
+    orderRaw === "asc" || orderRaw === "desc" ? orderRaw : undefined
+  const result = store.listArchivePosts(site, { q, page, limit, sort, order })
+  return jsonOk(result, NO_STORE_HEADERS)
+}
+
 async function handleFavoriteWrite(
   req: Request,
   favorite: boolean
@@ -948,6 +968,9 @@ async function route(req: Request): Promise<Response> {
       case "/api/me/state":
         requireGet(req)
         return handleMeState(url)
+      case "/api/me/archive":
+        requireGet(req)
+        return handleMeArchive(url)
       case "/api/me/progress":
         if (req.method === "PUT") return await handleProgressWrite(req)
         throw new ExtractorError("method not allowed", 405)
