@@ -69,8 +69,12 @@ export function CollapsibleBookGroup({
         <button
           type="button"
           onClick={() => {
-            if (!isExpanded) onToggle()
-            setShowSimilar((v) => !v)
+            if (!isExpanded) {
+              onToggle()
+              setShowSimilar(true)
+            } else {
+              setShowSimilar((v) => !v)
+            }
           }}
           aria-expanded={showSimilar}
           className="flex items-center gap-1.5 border-t border-border/60 px-3.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:px-4"
