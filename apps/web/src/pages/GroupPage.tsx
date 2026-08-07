@@ -32,6 +32,8 @@ function GroupCard({
         method: group.favorited ? "DELETE" : "PUT",
       })
       if (res.ok) onChanged()
+    } catch {
+      // 网络失败：静默（无用户反馈面），避免未处理的 rejection
     } finally {
       setBusy(false)
     }
