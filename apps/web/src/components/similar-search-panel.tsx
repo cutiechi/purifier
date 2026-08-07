@@ -48,16 +48,19 @@ export function SimilarSearchPanel({
     setLoading(true)
     setError("")
     try {
-      // 「已加入」以服务端为准：每次展开都拉（个人组量小，不做跨页缓存）
-      let serverTids: Set<string> = new Set()
+      // 「已加入」以服务端为准：每次展开都拉（个人组量小，不做跨页缓存）。
+      // 分组状态拉取失败时中止，避免用「仅 seed」的过期 known 渲染已加入项并重复 PUT。
       const gRes = await fetch(api.meGroups)
-      if (gRes.ok) {
-        const gJson = (await gRes.json()) as { groups: Group[] }
-        serverTids = new Set(
-          (gJson.groups ?? []).find((g) => g.key === groupKey)?.items.map((i) => i.tid) ??
-            []
-        )
+      const gJson = (await gRes.json()) as { groups?: Group[]; error?: string }
+      if (!gRes.ok) {
+        setError(gJson.error || "获取分组状态失败")
+        return
       }
+      const serverTids = new Set(
+        (gJson.groups ?? [])
+          .find((g) => g.key === groupKey)
+          ?.items.map((i) => i.tid) ?? []
+      )
       const res = await fetch(
         `${api.browse}?q=${encodeURIComponent(title)}&site=1`
       )
@@ -98,10 +101,7 @@ export function SimilarSearchPanel({
           title,
           author: meta.author,
           genre: meta.genre,
-          items: [
-            ...seedRef.current,
-            { tid: hit.tid, title: hit.title },
-          ],
+          items: [...seedRef.current, { tid: hit.tid, title: hit.title }],
         }),
       })
       if (!res.ok) {
@@ -171,7 +171,7 @@ export function SimilarSearchPanel({
                     />
                     <button
                       type="button"
-                      disabled={added || busyTid === hit.tid}
+                      disabled={added || busyTid !== null}
                       onClick={() => void addToGroup(hit)}
                       className={cn(
                         "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
