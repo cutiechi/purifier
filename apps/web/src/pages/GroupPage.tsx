@@ -49,6 +49,8 @@ function GroupCard({
         body: JSON.stringify({ items: [{ tid }] }),
       })
       if (res.ok) onChanged()
+    } catch {
+      // 网络失败：静默（无用户反馈面），避免未处理的 rejection
     } finally {
       setBusy(false)
     }
@@ -63,6 +65,8 @@ function GroupCard({
         method: "DELETE",
       })
       if (res.ok) onChanged()
+    } catch {
+      // 网络失败：静默（无用户反馈面），避免未处理的 rejection
     } finally {
       setBusy(false)
     }

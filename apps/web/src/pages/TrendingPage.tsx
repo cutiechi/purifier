@@ -86,14 +86,18 @@ export default function TrendingPage() {
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
                 trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
-                similar={{
-                  title: g.title,
-                  groupKey: g.key,
-                  seedItems: g.items.map((l) => ({
-                    tid: l.tid,
-                    title: l.title,
-                  })),
-                }}
+                similar={
+                  site !== "2"
+                    ? {
+                        title: g.title,
+                        groupKey: g.key,
+                        seedItems: g.items.map((l) => ({
+                          tid: l.tid,
+                          title: l.title,
+                        })),
+                      }
+                    : undefined
+                }
               >
                 {g.items.map((post) => (
                   <ListPostCard
