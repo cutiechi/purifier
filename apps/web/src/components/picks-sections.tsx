@@ -1,9 +1,11 @@
+import { useState } from "react"
 import { Link } from "react-router-dom"
 import { SectionLabel } from "@/components/page-header"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
 import { PostCard, PostList } from "@/components/post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
+import { SimilarTrigger } from "@/components/similar-trigger"
 import { groupBooks } from "@/lib/book-groups"
 import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
@@ -76,6 +78,32 @@ function ChipLink({
   )
 }
 
+/** 扫文单条：整行 raw title 卡片 + 标题行右侧「搜索相似」触发器 + 展开面板 */
+function PicksSimilarSingle({ link }: { link: PickLink }) {
+  const [open, setOpen] = useState(false)
+  const groupKey = groupKeyFromTitle(link.title)
+  return (
+    <div className="flex flex-col gap-1.5">
+      <PostCard
+        href={readPath(link.tid)}
+        title={link.title}
+        trailing={
+          groupKey ? (
+            <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+          ) : undefined
+        }
+      />
+      {groupKey && open && (
+        <SimilarSearchPanel
+          title={groupSearchTitle(link.title)}
+          groupKey={groupKey}
+          seedItems={[{ tid: link.tid, title: link.title }]}
+        />
+      )}
+    </div>
+  )
+}
+
 export function PicksSections({ sections }: { sections: PickSection[] }) {
   const { isExpanded, toggle } = useExpandedBooks("picks")
   return (
@@ -124,17 +152,7 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                   )
                   return grouped.map((g) =>
                     g.type === "single" ? (
-                      <div key={g.item.tid} className="flex flex-col gap-1.5">
-                        <PostCard
-                          href={readPath(g.item.tid)}
-                          title={g.item.title}
-                        />
-                        <SimilarSearchPanel
-                          title={groupSearchTitle(g.item.title)}
-                          groupKey={groupKeyFromTitle(g.item.title)}
-                          seedItems={[{ tid: g.item.tid, title: g.item.title }]}
-                        />
-                      </div>
+                      <PicksSimilarSingle key={g.item.tid} link={g.item} />
                     ) : (
                       <CollapsibleBookGroup
                         key={`group:${g.key}`}

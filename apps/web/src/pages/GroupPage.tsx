@@ -5,9 +5,10 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
+import { SimilarTrigger } from "@/components/similar-trigger"
 import { AsyncBody } from "@/components/ui-state"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
-import { type Group } from "@/lib/groups"
+import { compareTid, type Group } from "@/lib/groups"
 import { api, readPath } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@workspace/ui/lib/utils"
@@ -24,6 +25,7 @@ function GroupCard({
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  const [showSimilar, setShowSimilar] = useState(false)
 
   async function toggleFavorite() {
     setBusy(true)
@@ -121,45 +123,63 @@ function GroupCard({
             className={group.favorited ? "fill-current" : undefined}
           />
         </button>
+        <SimilarTrigger
+          open={showSimilar}
+          onToggle={() => {
+            if (!isExpanded) {
+              onToggle()
+              setShowSimilar(true)
+            } else {
+              setShowSimilar((v) => !v)
+            }
+          }}
+        />
       </div>
       {isExpanded && (
         <div className="flex flex-col gap-1.5 border-t border-border/60 px-3.5 py-3 sm:px-4">
-          {group.items.map((m) => {
-            const parsed = parseListTitle(m.title)
-            const sub = formatTitleMeta(
-              parsed.chapters ? { ...parsed, chapters: null } : parsed
-            )
-            return (
-              <div key={m.tid} className="flex items-center gap-2">
-                <a
-                  href={readPath(m.tid)}
-                  className="flex min-w-0 flex-1 flex-col rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
-                >
-                  <span className="line-clamp-1 text-sm font-medium text-foreground">
-                    {parsed.chapters || m.title}
-                  </span>
-                  {sub && (
-                    <span className="text-xs text-muted-foreground">{sub}</span>
-                  )}
-                </a>
-                <button
-                  type="button"
-                  onClick={() => void removeMember(m.tid)}
-                  disabled={busy}
-                  className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                >
-                  移除
-                </button>
-              </div>
-            )
-          })}
+          {/* 展示按 tid 数字升序（章节顺序），服务端存储顺序不变 */}
+          {[...group.items]
+            .sort((a, b) => compareTid(a.tid, b.tid))
+            .map((m) => {
+              const parsed = parseListTitle(m.title)
+              const sub = formatTitleMeta(
+                parsed.chapters ? { ...parsed, chapters: null } : parsed
+              )
+              return (
+                <div key={m.tid} className="flex items-center gap-2">
+                  <a
+                    href={readPath(m.tid)}
+                    className="flex min-w-0 flex-1 flex-col rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
+                  >
+                    <span className="line-clamp-1 text-sm font-medium text-foreground">
+                      {parsed.chapters || m.title}
+                    </span>
+                    {sub && (
+                      <span className="text-xs text-muted-foreground">
+                        {sub}
+                      </span>
+                    )}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void removeMember(m.tid)}
+                    disabled={busy}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  >
+                    移除
+                  </button>
+                </div>
+              )
+            })}
           {/* 面板在展开区内：成员 → 搜索相似 → 删除（对齐设计 §5.3） */}
-          <SimilarSearchPanel
-            title={group.title}
-            groupKey={group.key}
-            seedItems={group.items}
-            onChanged={onChanged}
-          />
+          {showSimilar && (
+            <SimilarSearchPanel
+              title={group.title}
+              groupKey={group.key}
+              seedItems={group.items}
+              onChanged={onChanged}
+            />
+          )}
           <button
             type="button"
             onClick={() => void deleteGroup()}

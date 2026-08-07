@@ -41,3 +41,11 @@ export function pickGroupMeta(members: { title: string }[]): {
 } {
   return pickHeaderMeta(members, (m) => m.title)
 }
+
+/** tid 比较：全数字按数值升序，否则字符串序（搜索结果与组内成员展示共用） */
+export function compareTid(a: string, b: string): number {
+  const na = Number(a)
+  const nb = Number(b)
+  if (Number.isInteger(na) && Number.isInteger(nb)) return na - nb
+  return a < b ? -1 : a > b ? 1 : 0
+}

@@ -50,6 +50,7 @@ export function ListPostCard({
   statUnit,
   showGenre = true,
   className,
+  trailing,
 }: {
   href: string
   rawTitle: string
@@ -60,6 +61,8 @@ export function ListPostCard({
   /** 是否把题材放到右侧胶囊（默认 true，有统计时题材进副标题） */
   showGenre?: boolean
   className?: string
+  /** 右侧附加插槽（如搜索相似触发器），与统计/题材胶囊并存 */
+  trailing?: ReactNode
 }) {
   const parsed = parseListTitle(rawTitle)
   const genreAsPill = showGenre && !!parsed.genre && statValue == null
@@ -71,12 +74,21 @@ export function ListPostCard({
   if (rank != null) leading = <RankBadge rank={rank} />
   else if (index != null) leading = <IndexBadge n={index} />
 
-  let trailing: ReactNode
+  let defaultTrailing: ReactNode
   if (statValue != null && statUnit) {
-    trailing = <StatTrailing value={statValue} unit={statUnit} />
+    defaultTrailing = <StatTrailing value={statValue} unit={statUnit} />
   } else if (genreAsPill && parsed.genre) {
-    trailing = <GenrePill genre={parsed.genre} />
+    defaultTrailing = <GenrePill genre={parsed.genre} />
   }
+
+  const combined = trailing ? (
+    <span className="flex shrink-0 items-center gap-2">
+      {defaultTrailing}
+      {trailing}
+    </span>
+  ) : (
+    defaultTrailing
+  )
 
   return (
     <PostCard
@@ -84,7 +96,7 @@ export function ListPostCard({
       title={parsed.title}
       subtitle={subtitle || undefined}
       leading={leading}
-      trailing={trailing}
+      trailing={combined}
       className={className}
     />
   )

@@ -1,6 +1,7 @@
-import { type ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { ListPostCard } from "@/components/list-post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
+import { SimilarTrigger } from "@/components/similar-trigger"
 import {
   groupKeyFromTitle,
   groupSearchTitle,
@@ -31,6 +32,7 @@ export function SimilarPostCard({
   showGenre?: boolean
   className?: string
 }): ReactNode {
+  const [open, setOpen] = useState(false)
   const groupKey = groupKeyFromTitle(rawTitle)
   if (site !== "1" || !groupKey) {
     return (
@@ -58,12 +60,17 @@ export function SimilarPostCard({
         statUnit={statUnit}
         showGenre={showGenre}
         className={className}
+        trailing={
+          <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+        }
       />
-      <SimilarSearchPanel
-        title={groupSearchTitle(rawTitle)}
-        groupKey={groupKey}
-        seedItems={[seed]}
-      />
+      {open && (
+        <SimilarSearchPanel
+          title={groupSearchTitle(rawTitle)}
+          groupKey={groupKey}
+          seedItems={[seed]}
+        />
+      )}
     </div>
   )
 }

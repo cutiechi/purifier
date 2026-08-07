@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { groupBooks } from "@/lib/book-groups"
 import {
+  compareTid,
   groupKeyFromTitle,
   groupSearchTitle,
   pickGroupMeta,
@@ -54,5 +55,23 @@ describe("pickGroupMeta", () => {
       { title: "A（3）『都市』" },
     ])
     expect(meta).toEqual({ author: "小明", genre: "都市" })
+  })
+})
+
+describe("compareTid", () => {
+  test("全数字按数值升序", () => {
+    expect(compareTid("2", "10")).toBeLessThan(0)
+    expect(compareTid("10", "2")).toBeGreaterThan(0)
+    expect(compareTid("5", "5")).toBe(0)
+  })
+
+  test("非数字兜底字符串序", () => {
+    expect(compareTid("a10", "a2")).toBeLessThan(0) // 字符串序：a10 < a2
+    expect(compareTid("a1", "10")).toBeGreaterThan(0) // 数字项在前
+  })
+
+  test("sort 后数字升序、字母殿后", () => {
+    const tids = ["10", "a", "2", "1", "3"]
+    expect([...tids].sort(compareTid)).toEqual(["1", "2", "3", "10", "a"])
   })
 })
