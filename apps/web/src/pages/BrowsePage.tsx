@@ -13,6 +13,10 @@ import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
+import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
+import { groupBooks } from "@/lib/book-groups"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { api, bookPath, browsePath, parsePage, parseQuery, readPath } from "@/lib/routes"
 
@@ -47,6 +51,14 @@ function BrowseContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const seqRef = useRef(0)
+
+  const { isExpanded, toggle } = useExpandedBooks("browse")
+  const grouped = useMemo(() => {
+    if (site !== "1") {
+      return links.map((item) => ({ type: "single" as const, item }))
+    }
+    return groupBooks(links, (l) => l.title)
+  }, [links, site])
 
   const loadPage = useCallback(
     async (p: number) => {
@@ -117,18 +129,40 @@ function BrowseContent() {
           emptyText="暂无内容"
         >
           <PostList>
-            {links.map((link) => (
-              <ListPostCard
-                key={link.tid}
-                href={
-                  site === "2"
-                    ? bookPath(link.tid, { site })
-                    : readPath(link.tid, site)
-                }
-                rawTitle={link.title}
-                showGenre
-              />
-            ))}
+            {grouped.map((g) =>
+              g.type === "single" ? (
+                <ListPostCard
+                  key={g.item.tid}
+                  href={
+                    site === "2"
+                      ? bookPath(g.item.tid, { site })
+                      : readPath(g.item.tid, site)
+                  }
+                  rawTitle={g.item.title}
+                  showGenre
+                />
+              ) : (
+                <CollapsibleBookGroup
+                  key={`group:${g.key}`}
+                  title={g.title}
+                  summary={g.author ?? undefined}
+                  count={g.items.length}
+                  bookKey={g.key}
+                  isExpanded={isExpanded(g.key)}
+                  onToggle={() => toggle(g.key)}
+                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                >
+                  {g.items.map((link) => (
+                    <ListPostCard
+                      key={link.tid}
+                      href={readPath(link.tid, site)}
+                      rawTitle={link.title}
+                      showGenre
+                    />
+                  ))}
+                </CollapsibleBookGroup>
+              ),
+            )}
           </PostList>
           <Pager
             page={pageParam}

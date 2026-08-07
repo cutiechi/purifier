@@ -1,4 +1,11 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react"
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
@@ -6,6 +13,10 @@ import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
+import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
+import { groupBooks } from "@/lib/book-groups"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { IconSearch } from "@/components/icons"
 import { useSite } from "@/hooks/use-site"
 import { api, bookPath, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
@@ -34,6 +45,14 @@ function SearchContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const seqRef = useRef(0)
+
+  const { isExpanded, toggle } = useExpandedBooks("search")
+  const grouped = useMemo(() => {
+    if (site !== "1") {
+      return links.map((item) => ({ type: "single" as const, item }))
+    }
+    return groupBooks(links, (l) => l.title)
+  }, [links, site])
 
   useEffect(() => {
     setInput(q)
@@ -141,18 +160,40 @@ function SearchContent() {
           emptyText={q ? `没有找到「${q}」相关内容` : "输入关键词开始搜索"}
         >
           <PostList>
-            {links.map((link) => (
-              <ListPostCard
-                key={link.tid}
-                href={
-                  site === "2"
-                    ? bookPath(link.tid, { site })
-                    : readPath(link.tid, site)
-                }
-                rawTitle={link.title}
-                showGenre
-              />
-            ))}
+            {grouped.map((g) =>
+              g.type === "single" ? (
+                <ListPostCard
+                  key={g.item.tid}
+                  href={
+                    site === "2"
+                      ? bookPath(g.item.tid, { site })
+                      : readPath(g.item.tid, site)
+                  }
+                  rawTitle={g.item.title}
+                  showGenre
+                />
+              ) : (
+                <CollapsibleBookGroup
+                  key={`group:${g.key}`}
+                  title={g.title}
+                  summary={g.author ?? undefined}
+                  count={g.items.length}
+                  bookKey={g.key}
+                  isExpanded={isExpanded(g.key)}
+                  onToggle={() => toggle(g.key)}
+                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                >
+                  {g.items.map((link) => (
+                    <ListPostCard
+                      key={link.tid}
+                      href={readPath(link.tid, site)}
+                      rawTitle={link.title}
+                      showGenre
+                    />
+                  ))}
+                </CollapsibleBookGroup>
+              ),
+            )}
           </PostList>
           <Pager
             page={pageParam}
