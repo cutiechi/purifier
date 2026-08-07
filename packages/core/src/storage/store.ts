@@ -1,6 +1,8 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import type { SiteId } from "../extractor"
 import {
+  Group,
+  GroupMember,
   ItemKind,
   ItemState,
   ListItem,
@@ -441,6 +443,152 @@ export class Store {
       else map.set(key, [r.tag])
     }
     return map
+  }
+
+  listGroups(q?: string): Group[] {
+    const rows = this.db
+      .query(
+        `SELECT id, key, title, author, genre, favorited, favorited_at, created_at, updated_at
+         FROM groups
+         WHERE (?1 = '' OR title LIKE '%' || ?1 || '%' COLLATE NOCASE)
+         ORDER BY updated_at DESC, id DESC`
+      )
+      .all(q ?? "") as {
+      id: number
+      key: string
+      title: string
+      author: string | null
+      genre: string | null
+      favorited: number
+      favorited_at: number | null
+      created_at: number
+      updated_at: number
+    }[]
+    const items = this.db
+      .query(
+        "SELECT group_id, tid, title FROM group_items ORDER BY added_at, rowid"
+      )
+      .all() as { group_id: number; tid: string; title: string }[]
+    const byGroup = new Map<number, GroupMember[]>()
+    for (const it of items) {
+      const arr = byGroup.get(it.group_id)
+      if (arr) arr.push({ tid: it.tid, title: it.title })
+      else byGroup.set(it.group_id, [{ tid: it.tid, title: it.title }])
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      key: r.key,
+      title: r.title,
+      author: r.author,
+      genre: r.genre,
+      favorited: r.favorited === 1,
+      favorited_at: r.favorited_at,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      items: byGroup.get(r.id) ?? [],
+    }))
+  }
+
+  upsertGroup(input: {
+    key: string
+    title: string
+    items: GroupMember[]
+    author?: string | null
+    genre?: string | null
+  }): Group {
+    if (input.items.length === 0) {
+      throw new Error("items must not be empty")
+    }
+    const now = this.now()
+    const run = this.db.transaction(() => {
+      this.db
+        .query(
+          `INSERT INTO groups (key, title, author, genre, favorited, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)
+           ON CONFLICT(key) DO UPDATE SET
+             title      = excluded.title,
+             author     = COALESCE(groups.author, excluded.author),
+             genre      = COALESCE(groups.genre,  excluded.genre),
+             updated_at = excluded.updated_at`
+        )
+        .run(
+          input.key,
+          input.title,
+          input.author ?? null,
+          input.genre ?? null,
+          now
+        )
+      // ON CONFLICT DO UPDATE 路径下 last_insert_rowid() 不可靠，统一按 key 回查
+      const row = this.db
+        .query("SELECT id FROM groups WHERE key = ?1")
+        .get(input.key) as { id: number }
+      const insert = this.db.query(
+        "INSERT OR IGNORE INTO group_items (group_id, tid, title, added_at) VALUES (?1, ?2, ?3, ?4)"
+      )
+      for (const it of input.items) insert.run(row.id, it.tid, it.title, now)
+      return row.id
+    })
+    const id = run()
+    return this.listGroups().find((g) => g.id === id)!
+  }
+
+  deleteGroup(id: number): void {
+    const run = this.db.transaction(() => {
+      this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
+      this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
+    })
+    run()
+  }
+
+  removeGroupItems(
+    id: number,
+    tids: string[]
+  ): { removed: number; deleted: boolean } {
+    let removed = 0
+    const run = this.db.transaction(() => {
+      // 组不存在 → 不删任何东西，避免「COUNT=0 误判为空组自动删组」的假阳性
+      const exists = this.db.query("SELECT 1 FROM groups WHERE id = ?1").get(id)
+      if (!exists) return false
+      const del = this.db.query(
+        "DELETE FROM group_items WHERE group_id = ?1 AND tid = ?2"
+      )
+      for (const tid of tids) removed += Number(del.run(id, tid).changes ?? 0)
+      const remaining = this.db
+        .query("SELECT COUNT(*) AS n FROM group_items WHERE group_id = ?1")
+        .get(id) as { n: number }
+      if (Number(remaining.n ?? 0) === 0) {
+        this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
+        this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
+        return true
+      }
+      this.db
+        .query("UPDATE groups SET updated_at = ?2 WHERE id = ?1")
+        .run(id, this.now())
+      return false
+    })
+    // 注意：先执行事务再取 removed——对象字面量按源码顺序求值，
+    // `{ removed, deleted: run() }` 会在 run() 修改 removed 之前就读取到 0
+    const deleted = run()
+    return { removed, deleted }
+  }
+
+  setGroupFavorite(id: number, favorited: boolean): boolean {
+    const exists = this.db.query("SELECT 1 FROM groups WHERE id = ?1").get(id)
+    if (!exists) return false
+    if (favorited) {
+      this.db
+        .query(
+          "UPDATE groups SET favorited = 1, favorited_at = ?2 WHERE id = ?1"
+        )
+        .run(id, this.now())
+    } else {
+      this.db
+        .query(
+          "UPDATE groups SET favorited = 0, favorited_at = NULL WHERE id = ?1"
+        )
+        .run(id)
+    }
+    return true
   }
 
   close(): void {

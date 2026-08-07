@@ -52,3 +52,21 @@ export interface TagCount {
 }
 
 export const PAGE_SIZE = 20
+
+export interface GroupMember {
+  tid: string
+  title: string
+}
+
+export interface Group {
+  id: number
+  key: string
+  title: string
+  author: string | null
+  genre: string | null
+  favorited: boolean
+  favorited_at: number | null
+  created_at: number
+  updated_at: number
+  items: GroupMember[]
+}
