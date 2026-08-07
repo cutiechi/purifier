@@ -5,6 +5,10 @@ import {
   GroupMember,
   ItemKind,
   ItemState,
+  Job,
+  JobLog,
+  JobLogLevel,
+  JobStatus,
   ListItem,
   ListQuery,
   ListResult,
@@ -589,6 +593,146 @@ export class Store {
         .run(id)
     }
     return true
+  }
+
+  // --- Jobs ---
+
+  createJob(type: string, payload: Record<string, unknown> | null): Job {
+    const now = this.now()
+    this.db
+      .query(
+        `INSERT INTO jobs (type, status, payload, result, error, started_at, finished_at, created_at)
+         VALUES (?1, 'pending', ?2, NULL, NULL, NULL, NULL, ?3)`
+      )
+      .run(type, payload === null ? null : JSON.stringify(payload), now)
+    const id = Number(
+      (this.db.query("SELECT last_insert_rowid() AS i").get() as { i: number })
+        .i
+    )
+    return this.getJob(id)!
+  }
+
+  getJob(id: number): Job | null {
+    const row = this.db.query("SELECT * FROM jobs WHERE id = ?1").get(id) as
+      (Omit<Job, "status"> & { status: string }) | null
+    if (!row) return null
+    return { ...row, status: row.status as JobStatus }
+  }
+
+  listJobs(opts: {
+    type?: string
+    status?: string
+    limit: number
+    offset: number
+  }): Job[] {
+    const rows = this.db
+      .query(
+        `SELECT * FROM jobs
+         WHERE (?1 IS NULL OR type = ?1)
+           AND (?2 IS NULL OR status = ?2)
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?3 OFFSET ?4`
+      )
+      .all(
+        opts.type ?? null,
+        opts.status ?? null,
+        opts.limit,
+        opts.offset
+      ) as (Omit<Job, "status"> & { status: string })[]
+    return rows.map((r) => ({ ...r, status: r.status as JobStatus }))
+  }
+
+  markRunning(id: number): boolean {
+    const res = this.db
+      .query(
+        "UPDATE jobs SET status='running', started_at=?2 WHERE id=?1 AND status='pending'"
+      )
+      .run(id, this.now())
+    return Number(res.changes ?? 0) > 0
+  }
+
+  markFinished(
+    id: number,
+    status: "succeeded" | "failed" | "interrupted" | "aborted",
+    result: Record<string, unknown> | null,
+    error: string | null
+  ): void {
+    this.db
+      .query(
+        `UPDATE jobs SET status=?2, finished_at=?3, result=?4, error=?5 WHERE id=?1`
+      )
+      .run(
+        id,
+        status,
+        this.now(),
+        result === null ? null : JSON.stringify(result),
+        error
+      )
+  }
+
+  hasRunningOfType(type: string): boolean {
+    const row = this.db
+      .query("SELECT 1 FROM jobs WHERE type=?1 AND status='running' LIMIT 1")
+      .get(type)
+    return !!row
+  }
+
+  clearFinishedJobs(): number {
+    // 注意：bun:sqlite 的 changes() 会计入 FK CASCADE 删掉的 job_logs 行，
+    // 直接返回 changes 会多算；先数终态 job 行数再删，返回删除的 job 数。
+    const row = this.db
+      .query(
+        "SELECT COUNT(*) AS n FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')"
+      )
+      .get() as { n: number }
+    this.db
+      .query(
+        `DELETE FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')`
+      )
+      .run()
+    return Number(row.n ?? 0)
+  }
+
+  deleteJob(id: number): void {
+    this.db.query("DELETE FROM jobs WHERE id=?1").run(id)
+  }
+
+  markStaleJobsInterrupted(): number {
+    const res = this.db
+      .query(
+        `UPDATE jobs SET status='interrupted', finished_at=?1
+         WHERE status IN ('running','pending')`
+      )
+      .run(this.now())
+    return Number(res.changes ?? 0)
+  }
+
+  appendJobLog(jobId: number, level: JobLogLevel, message: string): void {
+    this.db
+      .query(
+        "INSERT INTO job_logs (job_id, level, message, created_at) VALUES (?1,?2,?3,?4)"
+      )
+      .run(jobId, level, message, this.now())
+  }
+
+  listJobLogs(
+    jobId: number,
+    opts: {
+      limit: number
+      offset: number
+      level?: string
+      order?: "asc" | "desc"
+    }
+  ): JobLog[] {
+    const order = opts.order === "desc" ? "DESC" : "ASC"
+    return this.db
+      .query(
+        `SELECT * FROM job_logs
+         WHERE job_id=?1 AND (?2 IS NULL OR level=?2)
+         ORDER BY created_at ${order}, id ${order}
+         LIMIT ?3 OFFSET ?4`
+      )
+      .all(jobId, opts.level ?? null, opts.limit, opts.offset) as JobLog[]
   }
 
   close(): void {
