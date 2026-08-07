@@ -1,6 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import type { SiteId } from "../extractor"
 import {
+  ArchivePost,
   Group,
   GroupMember,
   ItemKind,
@@ -733,6 +734,86 @@ export class Store {
          LIMIT ?3 OFFSET ?4`
       )
       .all(jobId, opts.level ?? null, opts.limit, opts.offset) as JobLog[]
+  }
+
+  // --- Archive ---
+
+  upsertArchivePosts(
+    site: string,
+    items: Array<{ tid: string; title: string }>,
+    ts: number
+  ): { inserted: number; updated: number } {
+    if (items.length === 0) return { inserted: 0, updated: 0 }
+    const run = this.db.transaction(() => {
+      const tids = items.map((i) => i.tid)
+      const placeholders = tids.map(() => "?").join(",")
+      const rows = this.db
+        .query(
+          `SELECT tid, title FROM archive_posts WHERE site=? AND tid IN (${placeholders})`
+        )
+        .all(site, ...tids) as { tid: string; title: string }[]
+      const oldTitle = new Map(rows.map((r) => [r.tid, r.title]))
+
+      let inserted = 0
+      let updated = 0
+      const stmt = this.db.query(
+        `INSERT INTO archive_posts (site, tid, title, first_seen_at, archived_at)
+         VALUES (?1,?2,?3,?4,?4)
+         ON CONFLICT(site,tid) DO UPDATE SET
+           title=excluded.title, archived_at=excluded.archived_at`
+      )
+      for (const it of items) {
+        const old = oldTitle.get(it.tid)
+        if (old === it.title) continue // 标题没变，整条跳过
+        stmt.run(site, it.tid, it.title, ts)
+        if (old === undefined) inserted++
+        else updated++
+      }
+      return { inserted, updated }
+    })
+    return run()
+  }
+
+  listArchivePosts(
+    site: string,
+    opts: {
+      q?: string
+      page: number
+      limit: number
+      sort: "title" | "tid" | "archived_at"
+      order?: "asc" | "desc"
+    }
+  ): { items: ArchivePost[]; nextPage?: number } {
+    const SORT_COL: Record<typeof opts.sort, string> = {
+      title: "title COLLATE NOCASE",
+      tid: "tid",
+      archived_at: "archived_at",
+    }
+    const sortCol = SORT_COL[opts.sort]
+    if (!sortCol) throw new Error(`invalid sort: ${opts.sort}`)
+    // 默认 order：title→asc、tid/archived_at→desc
+    const order =
+      opts.order ?? (opts.sort === "title" ? "asc" : "desc")
+    if (order !== "asc" && order !== "desc") {
+      throw new Error(`invalid order: ${order}`)
+    }
+    const page = Math.max(1, opts.page)
+    const q = opts.q?.trim() ?? ""
+    const rows = this.db
+      .query(
+        `SELECT * FROM archive_posts
+         WHERE site=?1
+           AND (?2 = '' OR title LIKE '%' || ?2 || '%' COLLATE NOCASE)
+         ORDER BY ${sortCol} ${order.toUpperCase()}, tid ${order.toUpperCase()}
+         LIMIT ?3 OFFSET ?4`
+      )
+      .all(site, q, opts.limit + 1, (page - 1) * opts.limit) as ArchivePost[]
+    const hasMore = rows.length > opts.limit
+    const items = hasMore ? rows.slice(0, opts.limit) : rows
+    return {
+      items,
+      nextPage: hasMore ? page + 1 : undefined,
+    }
   }
 
   close(): void {
