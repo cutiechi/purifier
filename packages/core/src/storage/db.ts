@@ -57,6 +57,42 @@ CREATE TABLE IF NOT EXISTS group_items (
   added_at INTEGER NOT NULL,
   PRIMARY KEY (group_id, tid)
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  type          TEXT    NOT NULL,
+  status        TEXT    NOT NULL,
+  payload       TEXT,
+  result        TEXT,
+  error         TEXT,
+  started_at    INTEGER,
+  finished_at   INTEGER,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs(status);
+CREATE INDEX IF NOT EXISTS jobs_type_created_idx ON jobs(type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_logs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  level      TEXT    NOT NULL,
+  message    TEXT    NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS job_logs_job_created_idx ON job_logs(job_id, created_at);
+
+CREATE TABLE IF NOT EXISTS archive_posts (
+  site          TEXT    NOT NULL,
+  tid           TEXT    NOT NULL,
+  title         TEXT    NOT NULL,
+  first_seen_at INTEGER NOT NULL,
+  archived_at   INTEGER NOT NULL,
+  PRIMARY KEY (site, tid)
+);
+CREATE INDEX IF NOT EXISTS archive_posts_site_title_idx
+  ON archive_posts(site, title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS archive_posts_site_archived_idx
+  ON archive_posts(site, archived_at DESC);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */

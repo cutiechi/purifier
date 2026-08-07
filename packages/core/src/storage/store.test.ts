@@ -20,10 +20,13 @@ describe("openDatabase", () => {
       )
       .all() as { name: string }[]
     expect(rows.map((r) => r.name)).toEqual([
+      "archive_posts",
       "favorites",
       "group_items",
       "groups",
       "items",
+      "job_logs",
+      "jobs",
       "tags",
     ])
     // 新库直接是 site 主键
@@ -33,6 +36,15 @@ describe("openDatabase", () => {
       )
       .get() as { sql: string }
     expect(meta.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*site,\s*kind,\s*id/i)
+    const idx = db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='archive_posts' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      )
+      .all() as { name: string }[]
+    expect(idx.map((r) => r.name)).toEqual([
+      "archive_posts_site_archived_idx",
+      "archive_posts_site_title_idx",
+    ])
     const fk = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }
     expect(fk.foreign_keys).toBe(1)
     db.close()

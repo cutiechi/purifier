@@ -70,3 +70,36 @@ export interface Group {
   updated_at: number
   items: GroupMember[]
 }
+
+export type JobStatus =
+  "pending" | "running" | "succeeded" | "failed" | "interrupted" | "aborted"
+
+export interface Job {
+  id: number
+  type: string
+  status: JobStatus
+  payload: string | null
+  result: string | null
+  error: string | null
+  started_at: number | null
+  finished_at: number | null
+  created_at: number
+}
+
+export type JobLogLevel = "info" | "warn" | "error"
+
+export interface JobLog {
+  id: number
+  job_id: number
+  level: JobLogLevel
+  message: string
+  created_at: number
+}
+
+export interface ArchivePost {
+  site: string
+  tid: string
+  title: string
+  first_seen_at: number
+  archived_at: number
+}
