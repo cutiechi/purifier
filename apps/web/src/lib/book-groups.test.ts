@@ -20,6 +20,24 @@ test("normalizeTitleKey 空串保持空", () => {
   expect(normalizeTitleKey("【】")).toBe("")
 })
 
+test("normalizeTitleKey 尾随章节号（含 完/区间/中文）不进 key", () => {
+  expect(normalizeTitleKey("马屌少年（完）")).toBe("马屌少年")
+  expect(normalizeTitleKey("马屌少年（30完）")).toBe("马屌少年")
+  expect(normalizeTitleKey("马屌少年（第三部 1-2）")).toBe("马屌少年")
+  expect(normalizeTitleKey("马屌少年（2）")).toBe("马屌少年")
+  // （完）走「作者后缀」路径时 parseListTitle 会保留在 title 里，仍应并组
+  const items = [
+    { tid: "1", title: "马屌少年（1）作者：小明" },
+    { tid: "2", title: "马屌少年（完）作者：小明" },
+  ]
+  const result = groupBooks(items, (it) => it.title)
+  expect(result).toHaveLength(1)
+  expect(result[0].type).toBe("group")
+  if (result[0].type === "group") {
+    expect(result[0].items.map((i) => i.tid)).toEqual(["1", "2"])
+  }
+})
+
 test("同名多章合并为一组，单条为 single", () => {
   const items = [
     { tid: "1", title: "【马屌少年】（1）作者：小明" },

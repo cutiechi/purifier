@@ -15,10 +15,12 @@ export type GroupedItem<T> =
 export function normalizeTitleKey(title: string): string {
   return title
     .replace(/^[《【［[]+|[》】］\]]+$/g, "")
-    // parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把章节号
-    // 留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」），
-    // 这里补一刀：尾随的（章节号）不进桶 key，保证同名不同章落入同一桶
-    .replace(/[（(]\d{1,8}(?:\s*[－\-~～]\s*\d{1,8})?[）)]\s*$/, "")
+    // parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
+    // 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
+    // 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
+    // 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉，
+    // 保证同名不同章落入同一桶。与 title-parse 自身识别范围一致（≤24 字）。
+    .replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
     .trim()
     .toLowerCase()
 }
