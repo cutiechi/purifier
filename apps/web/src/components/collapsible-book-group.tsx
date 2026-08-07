@@ -21,9 +21,10 @@ export function CollapsibleBookGroup({
   trailing?: ReactNode
   children: ReactNode
 }) {
-  // bookKey 用于稳定 contentId 前缀（a11y 关联），useId 保证唯一性
+  // contentId 由 useId 生成、天然唯一；bookKey 由父级用作 React key，
+  // 此处保留以便未来扩展（如改作稳定 id 前缀）
   const contentId = `book-content-${useId()}`
-  void bookKey // 父级用作 React key；此处保留以便未来扩展（如稳定 id）
+  void bookKey
   return (
     <div className="flex flex-col rounded-2xl border border-border/80 bg-card/80 shadow-sm transition-all duration-200 hover:border-border">
       <button
@@ -60,6 +61,7 @@ export function CollapsibleBookGroup({
         <div
           id={contentId}
           role="region"
+          aria-label={title}
           className="flex flex-col gap-2 px-3.5 pb-3.5 opacity-100 transition-opacity duration-150 sm:gap-2.5 sm:px-4 sm:pb-4"
         >
           {children}

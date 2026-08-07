@@ -31,9 +31,12 @@ export function useExpandedBooks(scope: string): {
   isExpanded: (bookKey: string) => boolean
   toggle: (bookKey: string) => void
 } {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  // 惰性初始化直接读 localStorage，避免首屏 hydration 闪折叠
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    readExpanded(scope)
+  )
 
-  // 首屏渲染前 localStorage 未读 → 默认全折叠；mount 后 hydrate
+  // scope 变化（如路由切换）时重新读取
   useEffect(() => {
     setExpanded(readExpanded(scope))
   }, [scope])
@@ -45,15 +48,15 @@ export function useExpandedBooks(scope: string): {
 
   const toggle = useCallback(
     (bookKey: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev)
-        if (next.has(bookKey)) next.delete(bookKey)
-        else next.add(bookKey)
-        writeExpanded(scope, next)
-        return next
-      })
+      // 在闭包内基于当前 expanded 计算 next，避免在 updater 里写
+      // localStorage（StrictMode 会双调用 updater，副作用放里面不安全）
+      const next = new Set(expanded)
+      if (next.has(bookKey)) next.delete(bookKey)
+      else next.add(bookKey)
+      setExpanded(next)
+      writeExpanded(scope, next)
     },
-    [scope]
+    [expanded, scope]
   )
 
   return { isExpanded, toggle }

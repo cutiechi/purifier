@@ -12,19 +12,24 @@ export type GroupedItem<T> =
       genre: string | null
     }
 
+/**
+ * 剥掉尾随的（…）章节/卷标记（与 title-parse 识别范围一致，≤24 字）。
+ * parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
+ * 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
+ * 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
+ * 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉：
+ * key 侧保证同名不同章落入同一桶，组头侧保证显示干净书名。
+ */
+function stripTrailingChapterMarker(title: string): string {
+  return title.replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
+}
+
 export function normalizeTitleKey(title: string): string {
-  return (
-    title
-      .replace(/^[《【［[]+|[》】］\]]+$/g, "")
-      // parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
-      // 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
-      // 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
-      // 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉，
-      // 保证同名不同章落入同一桶。与 title-parse 自身识别范围一致（≤24 字）。
-      .replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
-      .trim()
-      .toLowerCase()
+  return stripTrailingChapterMarker(
+    title.replace(/^[《【［[]+|[》】］\]]+$/g, "")
   )
+    .trim()
+    .toLowerCase()
 }
 
 /** 从一组项里取首个非空 author / genre（用于组头展示） */
@@ -64,7 +69,10 @@ export function groupBooks<T>(
       return
     }
     if (!buckets.has(key)) {
-      displayTitle.set(key, parsed.title || getTitle(item))
+      displayTitle.set(
+        key,
+        stripTrailingChapterMarker(parsed.title || getTitle(item)).trim()
+      )
       buckets.set(key, [])
     }
     buckets.get(key)!.push(item)
@@ -120,7 +128,10 @@ export function groupMeListItems(
     const key = normalizeTitleKey(parsed.title)
     if (!key) continue
     if (!buckets.has(key)) {
-      displayTitle.set(key, parsed.title || it.title)
+      displayTitle.set(
+        key,
+        stripTrailingChapterMarker(parsed.title || it.title).trim()
+      )
       buckets.set(key, [])
     }
     buckets.get(key)!.push(it)

@@ -51,6 +51,8 @@ test("同名多章合并为一组，单条为 single", () => {
     expect(result[0].key).toBe("马屌少年")
     expect(result[0].title).toBe("马屌少年")
     expect(result[0].items).toHaveLength(2)
+    // 组头 author 聚合自组内首条非空值（作者：小明）
+    expect(result[0].author).toBe("小明")
   }
   expect(result[1].type).toBe("single")
 })

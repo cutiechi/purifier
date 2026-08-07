@@ -198,9 +198,11 @@ export function MeListPage({
               >
                 {g.items.map((item) => {
                   const parsed = parseListTitle(item.title)
-                  // 组内主标题用章节号；副标题用 formatTitleMeta（作者/题材）+
-                  // 进度（保留，避免信息丢失）。时间/访问次数由组级上下文决定。
-                  const sub = formatTitleMeta(parsed)
+                  // 组内主标题已用章节号，副标题不再重复（从作者开始）；保留
+                  // 进度后缀（避免信息丢失）。时间/访问次数由组级上下文决定。
+                  const sub = formatTitleMeta(
+                    parsed.chapters ? { ...parsed, chapters: null } : parsed
+                  )
                   const subWithProgress =
                     (sub ? `${sub}` : "") +
                     (typeof item.read_progress === "number" &&
