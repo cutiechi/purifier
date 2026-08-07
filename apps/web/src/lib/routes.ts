@@ -17,6 +17,8 @@
  * | Favorites   | `/favorites`                 |
  * | Tags        | `/tags?tag=&q=&kind=&page=`  |
  * | Group       | `/groups`                    |
+ * | Archive     | `/archive`                   |
+ * | Jobs        | `/jobs`                      |
  */
 
 export type SiteId = string
@@ -39,6 +41,8 @@ export const routes = {
   favorites: "/favorites",
   tags: "/tags",
   groups: "/groups",
+  archive: "/archive",
+  jobs: "/jobs",
 } as const
 
 export const api = {
@@ -58,6 +62,8 @@ export const api = {
   meProgress: "/api/me/progress",
   meCache: "/api/me/cache",
   meGroups: "/api/me/groups",
+  meJobs: "/api/me/jobs",
+  meArchive: "/api/me/archive",
   health: "/api/health",
 } as const
 
