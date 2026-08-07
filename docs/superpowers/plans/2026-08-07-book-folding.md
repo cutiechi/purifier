@@ -56,7 +56,14 @@
 ```ts
 export type GroupedItem<T> =
   | { type: "single"; item: T }
-  | { type: "group"; key: string; title: string; items: T[] }
+  | {
+      type: "group"
+      key: string
+      title: string
+      items: T[]
+      author: string | null   // 组内首个解析出 author 的项（无则 null）
+      genre: string | null    // 组内首个解析出 genre 的项（无则 null）
+    }
 
 export function normalizeTitleKey(title: string): string
 export function groupBooks<T>(
@@ -68,7 +75,11 @@ export function groupMeListItems(
 ): GroupedItem<MeListItem>[]
 ```
 
-`groupMeListItems` 的语义：`kind === "book"` 的项直通 single；`kind === "post"` 的项按 `item.title` 调 `groupBooks`；保持原序 interleave（book 项在原位，post 项的分组结果按 post 子序列首次出现位置插入）。`MeListItem` 从 `@/components/me-item-card` 导入。
+`group` 项的 `author`/`genre` 在 `groupBooks` 内部从组内各项的 `parseListTitle` 结果聚合：取第一个非空的 `author`、第一个非空的 `genre`。各页面据此渲染 `summary`/`trailing`（见 Task 4+ 各接入 Task）。
+
+`groupMeListItems` 的语义：仅 `kind === "post" && site === "1"` 的项参与分组（其余项一律直通 single）；所有**符合条件的 post 项**（无论是否被 book 项隔开）共同进入同一套书名桶，再按原始数组顺序 walk 去重发射——即同名 post 被 book 隔开仍合成一组。`MeListItem` 从 `@/components/me-item-card` 导入。
+
+> **禁止**实现成"按连续 post 段分段 groupBooks"——那会让被 book 隔开的同名 post 拆成两段、各自单条，与 interleave 语义冲突。必须用"全局 post 桶 + 原序 walk"。
 
 - [ ] **Step 1: 给 `apps/web` 加测试入口**
 
@@ -171,12 +182,12 @@ test("多个不同 group 混排互不串扰", () => {
 })
 
 test("groupMeListItems: book 项直通 single，post 项按 title 分组并保持原序", () => {
-  const post = (id: string, title: string): MeListItem => ({
+  const post = (id: string, title: string, site = "1"): MeListItem => ({
     kind: "post",
     id,
     title,
     url: "",
-    site: "1",
+    site,
     visit_count: 1,
     favorited: false,
     tags: [],
@@ -191,6 +202,7 @@ test("groupMeListItems: book 项直通 single，post 项按 title 分组并保�
     favorited: false,
     tags: [],
   })
+  // 同名 post 被 book 隔开，仍应合成一组（全局 post 桶，非连续段）
   const items = [
     post("p1", "故事（1）"),
     book("b1", "某本 xbookcn 书"),
@@ -198,7 +210,7 @@ test("groupMeListItems: book 项直通 single，post 项按 title 分组并保�
   ]
   const result = groupMeListItems(items)
   expect(result).toHaveLength(2)
-  // post 两章合成一组，位置在 index 0（post 子序列首次出现处）
+  // post 两章合成一组，位置在 index 0（首次出现处）
   expect(result[0].type).toBe("group")
   if (result[0].type === "group") {
     expect(result[0].items.map((i) => i.id)).toEqual(["p1", "p2"])
@@ -208,6 +220,27 @@ test("groupMeListItems: book 项直通 single，post 项按 title 分组并保�
   if (result[1].type === "single") {
     expect(result[1].item.id).toBe("b1")
   }
+})
+
+test("groupMeListItems: site !== '1' 的 post 直通 single，不参与分组", () => {
+  const post = (id: string, title: string, site: string): MeListItem => ({
+    kind: "post",
+    id,
+    title,
+    url: "",
+    site,
+    visit_count: 1,
+    favorited: false,
+    tags: [],
+  })
+  // 两章同名，但 site=2，应各自 single
+  const items = [
+    post("p1", "故事（1）", "2"),
+    post("p2", "故事（2）", "2"),
+  ]
+  const result = groupMeListItems(items)
+  expect(result).toHaveLength(2)
+  expect(result.every((g) => g.type === "single")).toBe(true)
 })
 ```
 
@@ -226,7 +259,14 @@ import type { MeListItem } from "@/components/me-item-card"
 
 export type GroupedItem<T> =
   | { type: "single"; item: T }
-  | { type: "group"; key: string; title: string; items: T[] }
+  | {
+      type: "group"
+      key: string
+      title: string
+      items: T[]
+      author: string | null
+      genre: string | null
+    }
 
 export function normalizeTitleKey(title: string): string {
   return title
@@ -235,15 +275,31 @@ export function normalizeTitleKey(title: string): string {
     .toLowerCase()
 }
 
+/** 从一组项里取首个非空 author / genre（用于组头展示） */
+function pickHeaderMeta<T>(
+  items: T[],
+  getTitle: (item: T) => string,
+): { author: string | null; genre: string | null } {
+  let author: string | null = null
+  let genre: string | null = null
+  for (const it of items) {
+    const p = parseListTitle(getTitle(it))
+    if (!author && p.author) author = p.author
+    if (!genre && p.genre) genre = p.genre
+    if (author && genre) break
+  }
+  return { author, genre }
+}
+
 /**
  * 按 parseListTitle 拆出的书名归一化分组。同名 ≥2 条合成一组，
  * 单条为 single；空标题一律 single。保留首次出现顺序，组内保持原序。
+ * group 项附带 author/genre（组内首个非空值）。
  */
 export function groupBooks<T>(
   items: T[],
   getTitle: (item: T) => string,
 ): GroupedItem<T>[] {
-  const order: string[] = []
   const displayTitle = new Map<string, string>()
   const buckets = new Map<string, T[]>()
   const singles: Set<number> = new Set()
@@ -256,7 +312,6 @@ export function groupBooks<T>(
       return
     }
     if (!buckets.has(key)) {
-      order.push(key)
       displayTitle.set(key, parsed.title || getTitle(item))
       buckets.set(key, [])
     }
@@ -264,7 +319,6 @@ export function groupBooks<T>(
   })
 
   const result: GroupedItem<T>[] = []
-  // 用一个指针按首次出现顺序输出：需要在原 items 顺序的对应位置投放
   const emitted = new Set<string>()
   items.forEach((item, idx) => {
     if (singles.has(idx)) {
@@ -273,16 +327,19 @@ export function groupBooks<T>(
     }
     const parsed = parseListTitle(getTitle(item))
     const key = normalizeTitleKey(parsed.title)
-    if (!key) return // 已作为 single 的情况上面处理过，这里防御
+    if (!key) return // 防御：空 key 已在 singles 处理
     if (emitted.has(key)) return
     emitted.add(key)
     const group = buckets.get(key)!
     if (group.length >= 2) {
+      const meta = pickHeaderMeta(group, getTitle)
       result.push({
         type: "group",
         key,
         title: displayTitle.get(key)!,
         items: group,
+        author: meta.author,
+        genre: meta.genre,
       })
     } else {
       result.push({ type: "single", item: group[0]! })
@@ -293,31 +350,58 @@ export function groupBooks<T>(
 
 /**
  * Me 列表（历史/收藏/标签）专用分组：
- * kind === "book" 直通 single，kind === "post" 按 title 分组，
- * 保持原序 interleave。
+ * 仅 kind === "post" && site === "1" 的项参与分组，其余直通 single。
+ * 所有符合条件的 post 共享同一套书名桶（全局，非连续段），
+ * 再按原始数组顺序 walk 去重发射，保持原序 interleave。
  */
 export function groupMeListItems(
   items: MeListItem[],
 ): GroupedItem<MeListItem>[] {
+  const eligible = (it: MeListItem) => it.kind === "post" && it.site === "1"
+
+  // 第一遍：对 eligible 项建全局桶
+  const buckets = new Map<string, MeListItem[]>()
+  const displayTitle = new Map<string, string>()
+  for (const it of items) {
+    if (!eligible(it)) continue
+    const parsed = parseListTitle(it.title)
+    const key = normalizeTitleKey(parsed.title)
+    if (!key) continue
+    if (!buckets.has(key)) {
+      displayTitle.set(key, parsed.title || it.title)
+      buckets.set(key, [])
+    }
+    buckets.get(key)!.push(it)
+  }
+
+  // 第二遍：原序 walk 去重发射
+  const emitted = new Set<string>()
   const result: GroupedItem<MeListItem>[] = []
-  // 按原序遍历；遇到 post 段连续分组，遇到 book 直通
-  let i = 0
-  while (i < items.length) {
-    // 跳过 book 项作为 single
-    while (i < items.length && items[i]!.kind !== "post") {
-      result.push({ type: "single", item: items[i]! })
-      i++
+  for (const it of items) {
+    if (!eligible(it)) {
+      result.push({ type: "single", item: it })
+      continue
     }
-    // 收集连续 post 段
-    const seg: MeListItem[] = []
-    while (i < items.length && items[i]!.kind === "post") {
-      seg.push(items[i]!)
-      i++
+    const key = normalizeTitleKey(parseListTitle(it.title).title)
+    if (!key) {
+      result.push({ type: "single", item: it })
+      continue
     }
-    if (seg.length > 0) {
-      for (const g of groupBooks(seg, (it) => it.title)) {
-        result.push(g)
-      }
+    if (emitted.has(key)) continue
+    emitted.add(key)
+    const group = buckets.get(key)!
+    if (group.length >= 2) {
+      const meta = pickHeaderMeta(group, (it) => it.title)
+      result.push({
+        type: "group",
+        key,
+        title: displayTitle.get(key)!,
+        items: group,
+        author: meta.author,
+        genre: meta.genre,
+      })
+    } else {
+      result.push({ type: "single", item: group[0]! })
     }
   }
   return result
@@ -327,7 +411,7 @@ export function groupMeListItems(
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cd apps/web && bun test src/lib/book-groups.test.ts`
-Expected: 6 个 test 全部 PASS。
+Expected: 8 个 test 全部 PASS。
 
 - [ ] **Step 6: 提交**
 
@@ -530,7 +614,9 @@ export function CollapsibleBookGroup({
   trailing?: ReactNode
   children: ReactNode
 }) {
-  const contentId = useId()
+  // bookKey 用于稳定 contentId 前缀（a11y 关联），useId 保证唯一性
+  const contentId = `book-content-${useId()}`
+  void bookKey // 父级用作 React key；此处保留以便未来扩展（如稳定 id）
   return (
     <div className="flex flex-col rounded-2xl border border-border/80 bg-card/80 shadow-sm transition-all duration-200 hover:border-border">
       <button
@@ -567,7 +653,7 @@ export function CollapsibleBookGroup({
         <div
           id={contentId}
           role="region"
-          className="flex animate-in fade-in flex-col gap-2 px-3.5 pb-3.5 sm:gap-2.5 sm:px-4 sm:pb-4"
+          className="flex flex-col gap-2 px-3.5 pb-3.5 opacity-100 transition-opacity duration-150 sm:gap-2.5 sm:px-4 sm:pb-4"
         >
           {children}
         </div>
@@ -582,7 +668,7 @@ export function CollapsibleBookGroup({
 Run: `cd apps/web && bun run typecheck`
 Expected: PASS。
 
-> 说明：`animate-in fade-in` 是 Tailwind 类名。若该类在项目未启用（`@tailwindcss/vite` 默认不带 `tailwindcss-animate` 插件），typecheck 不会报错（它只是 class 字符串），但视觉上无动画。如需确认，构建后目视检查即可；无动画不影响功能。若发现确实没有该插件，可把 className 改为仅 `transition-opacity`——但这是实现细节微调，不阻塞。
+> 说明：展开用 `opacity-100 transition-opacity`（Tailwind 内置，不依赖 animate 插件）。无进入动画（条件渲染即出现），求稳。`bookKey` 在组件体内用 `void` 标注避免未使用告警——它真正的用途是父级 `key={\`group:${g.key}\`}`；保留 prop 以备将来用 bookKey 做 contentId 后缀（如跨实例稳定）。
 
 - [ ] **Step 3: 提交**
 
@@ -696,6 +782,7 @@ git commit -m "feat(web): MeItemCard support titleOverride/subtitleOverride prop
 ```tsx
 import { useMemo } from "react"  // 合并到已有 react import
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```
@@ -736,10 +823,12 @@ const grouped = useMemo(() => {
               <CollapsibleBookGroup
                 key={`group:${g.key}`}
                 title={g.title}
+                summary={g.author ?? undefined}
                 count={g.items.length}
                 bookKey={g.key}
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
               >
                 {g.items.map((link) => (
                   <ListPostCard
@@ -755,7 +844,7 @@ const grouped = useMemo(() => {
         </PostList>
 ```
 
-> 组内各章都用 `readPath(link.tid, site)`（已是 site=1，但保持一致）。头部不显 rank（首页无 rank）。头部 summary/trailing 暂不传（首页简洁）。
+> 组内各章都用 `readPath(link.tid, site)`。头部不显 rank（首页无 rank）。`summary` 传组头作者、`trailing` 传 `GenrePill` 题材胶囊（来自 `groupBooks` 聚合的 `g.author`/`g.genre`）。
 
 - [ ] **Step 3: 类型检查 + 构建**
 
@@ -798,6 +887,7 @@ git commit -m "feat(web): fold same-book chapters on home timeline
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```
@@ -834,10 +924,12 @@ const grouped = useMemo(() => {
                 <CollapsibleBookGroup
                   key={`group:${g.key}`}
                   title={g.title}
+                  summary={g.author ?? undefined}
                   count={g.items.length}
                   bookKey={g.key}
                   isExpanded={isExpanded(g.key)}
                   onToggle={() => toggle(g.key)}
+                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
                 >
                   {g.items.map((link) => (
                     <ListPostCard
@@ -858,7 +950,7 @@ const grouped = useMemo(() => {
 在 `apps/web/src/pages/SearchPage.tsx` 做相同模式的改动（scope 改为 `"search"`）：
 
 1. L1 react import 加 `useMemo`。
-2. 顶部加同样的 3 个 imports。
+2. 顶部加同样的 4 个 imports（含 `GenrePill`）。
 3. `SearchContent` 函数内（`useSite()` 之后）加：
 
 ```tsx
@@ -871,7 +963,7 @@ const grouped = useMemo(() => {
 }, [links, site])
 ```
 
-4. 把 L143-156 的 `<PostList>{links.map(...)}</PostList>` 替换为与 Browse 完全相同的 grouped 渲染块（scope 不同但渲染代码一致）。
+4. 把 L143-156 的 `<PostList>{links.map(...)}</PostList>` 替换为与 Browse 完全相同的 grouped 渲染块（含 `summary`/`trailing`，scope 不同但渲染代码一致）。
 
 - [ ] **Step 3: 类型检查 + 构建**
 
@@ -914,6 +1006,7 @@ git commit -m "feat(web): fold same-book chapters on browse/search pages
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupMeListItems } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
@@ -956,21 +1049,31 @@ import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
                 <CollapsibleBookGroup
                   key={`group:${g.key}`}
                   title={g.title}
+                  summary={g.author ?? undefined}
                   count={g.items.length}
                   bookKey={g.key}
                   isExpanded={isExpanded(g.key)}
                   onToggle={() => toggle(g.key)}
+                  trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
                 >
                   {g.items.map((item) => {
                     const parsed = parseListTitle(item.title)
+                    // 组内主标题用章节号；副标题用 formatTitleMeta（作者/题材）+
+                    // 进度（保留，避免信息丢失）。时间/访问次数由组级上下文决定。
                     const sub = formatTitleMeta(parsed)
+                    const subWithProgress =
+                      (sub ? `${sub}` : "") +
+                      (typeof item.read_progress === "number" &&
+                      item.read_progress > 0
+                        ? `${sub ? " · " : ""}已读 ${Math.round(item.read_progress * 100)}%`
+                        : "")
                     return (
                       <MeItemCard
                         key={`${item.kind}:${item.id}`}
                         item={item}
                         trailing={renderTrailing?.(item, reload)}
                         titleOverride={parsed.chapters || undefined}
-                        subtitleOverride={sub || undefined}
+                        subtitleOverride={subWithProgress || undefined}
                       />
                     )
                   })}
@@ -980,7 +1083,7 @@ import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
         </PostList>
 ```
 
-> 组内 `titleOverride` 用解析后的章节号（如 "1-2"）作主标题；`subtitleOverride` 用 `formatTitleMeta`（作者/题材等）。若解析无章节，titleOverride 为 undefined → 回退显示 `item.title`。
+> 组内 `titleOverride` 用解析后的章节号（如 "1-2"）作主标题；`subtitleOverride` 用 `formatTitleMeta`（作者/题材）拼上进度。若解析无章节，titleOverride 为 undefined → 回退显示 `item.title`。时间/访问次数在 override 模式下省略（组级上下文已足够）。
 
 - [ ] **Step 2: HistoryPage 传 scope**
 
@@ -1066,34 +1169,27 @@ MeListPage 加 bookGroupScope prop，三页共用分组；组内 MeItemCard
 - Consumes: 同 Task 6。
 - Produces: 榜单页分组渲染。
 
-**背景：** 榜单页是单次拉取（`useAsyncList`），且 `readPath(post.tid)` **不传 site**——这些页面是 cool18 专属（导航项 `sites: ["1"]` 或榜单语义），无需 `site !== "1"` 短路。组内各帖保留各自 `rank`；折叠头部**不显示单个 rank**。
+**背景：** 榜单页是单次拉取（`useAsyncList`）。**Trending 的 `sites: ["1","2"]`，href 是 `site === "2" ? bookPath : readPath` 分支**——必须保留，否则 site=2 链接退回帖子路径（回归）。Comments 导航仅 `sites:["1"]`，href 无 site 分支。两者都加 `site !== "1"` 短路（防 site=2 数据被误折）。组内各帖保留各自 `rank`；折叠头部**不显示单个 rank**。
 
 - [ ] **Step 1: TrendingPage 接入**
 
 编辑 `apps/web/src/pages/TrendingPage.tsx`：
 
-1. L1 react import 加 `useMemo`（在已有 import 行后）。
+1. L1 react import 加 `useMemo`。
 2. 顶部加 imports：
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```
 
+> `useSite` 与 `site` 原文件 L7/L19 已有（用于 `useAsyncList` URL），直接复用，无需新 import。
+
 3. `TrendingPage` 函数内（`useAsyncList` 之后）加：
 
 ```tsx
-const { isExpanded, toggle } = useExpandedBooks("trending")
-const grouped = useMemo(() => groupBooks(items, (p) => p.title), [items])
-```
-
-> 注意：榜单页不短路 site——`useAsyncList` 的 URL 已带 `?site=${site}`，但榜单数据本身是 cool18 专属。若担心 site=2 时榜单数据也被分组，可加 `site !== "1"` 短路。但 NAV_ITEMS 里 trending 的 `sites: ["1", "2"]`，实际 site=2 时榜单页也能访问。为稳妥，**加 site 短路**。
-
-修正为：
-
-```tsx
-const site = useSite()
 const { isExpanded, toggle } = useExpandedBooks("trending")
 const grouped = useMemo(() => {
   if (site !== "1") {
@@ -1103,9 +1199,7 @@ const grouped = useMemo(() => {
 }, [items, site])
 ```
 
-> 需要在 imports 加 `useSite`（`import { useSite } from "@/hooks/use-site"`）。原文件无 `useSite` 导入，TrendingPage 原本用 `useAsyncList(\`${api.trending}?site=${site}\`)`，site 来自 `useSite()`——**重新检查**：原文件 L19 `const site = useSite()`，已存在，只是没用于短路。所以直接用现有 `site` 即可，无需新 import。
-
-4. 把 L43-59 的 `<PostList>{items.map(...)}</PostList>` 替换为：
+4. 把 L43-59 的 `<PostList>{items.map(...)}</PostList>` 替换为（**保留 site 分支 href**）：
 
 ```tsx
         <PostList>
@@ -1113,7 +1207,11 @@ const grouped = useMemo(() => {
             g.type === "single" ? (
               <ListPostCard
                 key={g.item.tid}
-                href={readPath(g.item.tid)}
+                href={
+                  site === "2"
+                    ? bookPath(g.item.tid, { site })
+                    : readPath(g.item.tid, site)
+                }
                 rawTitle={g.item.title}
                 rank={g.item.rank}
                 statValue={formatCount(g.item.reads)}
@@ -1124,15 +1222,21 @@ const grouped = useMemo(() => {
               <CollapsibleBookGroup
                 key={`group:${g.key}`}
                 title={g.title}
+                summary={g.author ?? undefined}
                 count={g.items.length}
                 bookKey={g.key}
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
               >
                 {g.items.map((post) => (
                   <ListPostCard
                     key={post.tid}
-                    href={readPath(post.tid)}
+                    href={
+                      site === "2"
+                        ? bookPath(post.tid, { site })
+                        : readPath(post.tid, site)
+                    }
                     rawTitle={post.title}
                     rank={post.rank}
                     statValue={formatCount(post.reads)}
@@ -1151,10 +1255,11 @@ const grouped = useMemo(() => {
 编辑 `apps/web/src/pages/CommentsPage.tsx`，同模式（scope `"comments"`，字段是 `comments`/`"评"`）：
 
 1. L1 react import 加 `useMemo`。
-2. 顶部加 imports（同 Trending，另需 `useSite`——原文件无，需补）：
+2. 顶部加 imports（Comments 原本无 `useSite`，需补）：
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
@@ -1172,7 +1277,7 @@ const grouped = useMemo(() => {
 }, [items, site])
 ```
 
-4. 把 L41-53 的 `<PostList>{items.map(...)}</PostList>` 替换为：
+4. 把 L41-53 的 `<PostList>{items.map(...)}</PostList>` 替换为（Comments 原本 `readPath(post.tid)` 无 site，保持原样无 site 分支）：
 
 ```tsx
         <PostList>
@@ -1191,10 +1296,12 @@ const grouped = useMemo(() => {
               <CollapsibleBookGroup
                 key={`group:${g.key}`}
                 title={g.title}
+                summary={g.author ?? undefined}
                 count={g.items.length}
                 bookKey={g.key}
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
               >
                 {g.items.map((post) => (
                   <ListPostCard
@@ -1249,6 +1356,7 @@ git commit -m "feat(web): fold same-book chapters on trending/comments
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```
@@ -1258,29 +1366,37 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```tsx
 const { isExpanded, toggle } = useExpandedBooks("featured")
 const grouped = useMemo(() => groupBooks(items, (l) => l.title), [items])
+// 原始 items 下标查找（用于 single 项的 index 兜底，避免 grouped 下标跳变）
+const indexOfItem = useMemo(() => {
+  const m = new Map<string, number>()
+  items.forEach((it, i) => m.set(it.tid, i + 1))
+  return m
+}, [items])
 ```
 
 4. 把 L39-49 的 `<PostList>{items.map(...)}</PostList>` 替换为：
 
 ```tsx
         <PostList>
-          {grouped.map((g, gi) =>
+          {grouped.map((g) =>
             g.type === "single" ? (
               <ListPostCard
                 key={g.item.tid}
                 href={readPath(g.item.tid)}
                 rawTitle={g.item.title}
-                index={g.item.index || gi + 1}
+                index={g.item.index || indexOfItem.get(g.item.tid) || 1}
                 showGenre
               />
             ) : (
               <CollapsibleBookGroup
                 key={`group:${g.key}`}
                 title={g.title}
+                summary={g.author ?? undefined}
                 count={g.items.length}
                 bookKey={g.key}
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
               >
                 {g.items.map((link) => (
                   <ListPostCard
@@ -1297,7 +1413,7 @@ const grouped = useMemo(() => groupBooks(items, (l) => l.title), [items])
         </PostList>
 ```
 
-> 单条时用 `g.item.index || gi + 1`（保持原逻辑：原 `items.map((link, i) => ... index={link.index || i + 1})`，这里 `gi` 是 grouped 数组的下标）。组内项用各自的 `link.index`。
+> single 项用 `g.item.index || indexOfItem.get(tid) || 1`（原始 items 下标兜底，**不用 grouped 下标** `gi`——折叠后序号会跳变）。组内项用各自的 `link.index`（可能为 0/undefined，组内不强制）。
 
 - [ ] **Step 2: 类型检查 + 构建**
 
@@ -1335,6 +1451,7 @@ git commit -m "feat(web): fold same-book chapters on featured page"
 
 ```tsx
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 ```
@@ -1365,10 +1482,14 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                       <CollapsibleBookGroup
                         key={`group:${g.key}`}
                         title={g.title}
+                        summary={g.author ?? undefined}
                         count={g.items.length}
                         bookKey={g.key}
                         isExpanded={isExpanded(g.key)}
                         onToggle={() => toggle(g.key)}
+                        trailing={
+                          g.genre ? <GenrePill genre={g.genre} /> : undefined
+                        }
                       >
                         {g.items.map((link) => (
                           <PostCard
@@ -1385,7 +1506,7 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
             )}
 ```
 
-> 用 IIFE 是因为要在 JSX 分支内调 `groupBooks`。也可以把分组提到 `sections.map` 顶部。若觉得 IIFE 难读，可改为在 `sections.map` 回调开头 `const grouped = useMemo(() => groupBooks(section.links, ...), [section.links])`——但 `section.links` 是引用稳定的，加 useMemo 收益不大，IIFE 更直接。保持 IIFE。
+> 组内仍用 `PostCard` 显示完整原始标题（与 Me 路径的 titleOverride 不对称，YAGNI 可接受——Picks 原本就是 `PostCard` 不解析标题）。用 IIFE 是因为要在 JSX 分支内调 `groupBooks`。
 
 - [ ] **Step 2: 类型检查 + 构建**
 
@@ -1458,6 +1579,18 @@ git commit -m "style: prettier formatting for book folding"
 - §9 测试 → Task 1（单测）+ Task 12（全量验证）✓
 - §10 改动清单 → 4 新增 + 13 修改，全部对应 Task ✓
 
-**类型一致性：** `GroupedItem<T>` 在 Task 1 定义，后续所有 Task 用 `g.type === "single"` / `g.type === "group"` 判别，`g.item` / `g.{key,title,items}` 字段名全程一致 ✓。`CollapsibleBookGroup` props（Task 4）在 Task 6-11 全部用相同签名（`title/count/bookKey/isExpanded/onToggle/trailing/children`）✓。`useExpandedBooks` 返回 `{ isExpanded, toggle }`（Task 2）在所有页面 Task 一致 ✓。
+**类型一致性：** `GroupedItem<T>` 在 Task 1 定义，后续所有 Task 用 `g.type === "single"` / `g.type === "group"` 判别，`g.item` / `g.{key,title,items,author,genre}` 字段名全程一致 ✓。`CollapsibleBookGroup` props（Task 4）在 Task 6-11 全部用相同签名（`title/summary/count/bookKey/isExpanded/onToggle/trailing/children`）✓。`useExpandedBooks` 返回 `{ isExpanded, toggle }`（Task 2）在所有页面 Task 一致 ✓。
 
 **无占位符：** 所有步骤含具体代码块、具体文件路径、具体行号区间。无 TBD/TODO/"类似 Task N"。Task 11 的 IIFE 用法有完整代码示例 ✓。
+
+**Review 修订记录（v2）：** 据计划评审 `review.md` 修订：
+- Critical 1：`groupMeListItems` 从"连续 post 段分段"改为"全局 post 桶 + 原序 walk"，同名 post 被 book 隔开仍合成一组；补对应单测。
+- Critical 2：`groupMeListItems` 过滤加 `site === "1"`，补 site=2 post 直通 single 单测。
+- Important 3：Task 9 Trending 恢复 `site === "2" ? bookPath : readPath` href 分支，避免 site=2 链接退回帖子路径。
+- Important 4：`groupBooks`/`groupMeListItems` 的 group 项聚合 `author`/`genre`，各页 CollapsibleBookGroup 接线 `summary`（作者）+ `trailing`（GenrePill 题材胶囊），与 design §5 一致。
+- Suggestion 5：单测计数 6 → 8。
+- Suggestion 6：`CollapsibleBookGroup` 的 `bookKey` 用 `void` 标注避免未使用告警，contentId 前缀稳定。
+- Suggestion 7：Featured single 项 index 用原始 items 下标（`indexOfItem` Map），不用 grouped 下标 `gi`。
+- Suggestion 8：Task 9 删除"无需 site 短路"矛盾段落，统一为加 site 短路。
+- Suggestion 9：展开动画从 `animate-in fade-in` 改为 `opacity-100 transition-opacity`，不依赖 animate 插件。
+- Suggestion 10：Me 组内 `subtitleOverride` 保留阅读进度。
