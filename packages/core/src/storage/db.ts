@@ -37,6 +37,26 @@ CREATE TABLE IF NOT EXISTS tags (
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags (tag);
 CREATE INDEX IF NOT EXISTS idx_items_visited ON items (last_visited_at DESC);
 CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC);
+
+CREATE TABLE IF NOT EXISTS groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  author TEXT,
+  genre TEXT,
+  favorited INTEGER NOT NULL DEFAULT 0,
+  favorited_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS group_items (
+  group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  tid TEXT NOT NULL,
+  title TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (group_id, tid)
+);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */
@@ -44,6 +64,7 @@ export function openDatabase(dataDir: string): Database {
   mkdirSync(dataDir, { recursive: true })
   const db = new Database(join(dataDir, "purifier.db"))
   db.exec("PRAGMA journal_mode = WAL;")
+  db.exec("PRAGMA foreign_keys = ON;")
   db.exec(DDL)
   // 1. 旧库补 read_progress（保留原幂等块，必须在 site 重建之前）
   const colsRp = db.query("PRAGMA table_info(items)").all() as {

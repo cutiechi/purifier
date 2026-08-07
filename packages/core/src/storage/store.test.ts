@@ -11,22 +11,23 @@ function tempDir(): string {
 }
 
 describe("openDatabase", () => {
-  test("creates items/favorites/tags tables", () => {
+  test("creates items/favorites/tags/groups tables", () => {
     const dir = tempDir()
     const db = openDatabase(dir)
     const rows = db
       .query(
-        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
       )
       .all() as { name: string }[]
-    expect(rows.map((r) => r.name)).toEqual(["favorites", "items", "tags"])
-    // 新库直接是 site 主键
-    const meta = db
-      .query(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
-      )
-      .get() as { sql: string }
-    expect(meta.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*site,\s*kind,\s*id/i)
+    expect(rows.map((r) => r.name)).toEqual([
+      "favorites",
+      "group_items",
+      "groups",
+      "items",
+      "tags",
+    ])
+    const fk = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }
+    expect(fk.foreign_keys).toBe(1)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
