@@ -1,6 +1,10 @@
 import { Link } from "react-router-dom"
 import { SectionLabel } from "@/components/page-header"
+import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { GenrePill } from "@/components/list-post-card"
 import { PostCard, PostList } from "@/components/post-card"
+import { groupBooks } from "@/lib/book-groups"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { readPath } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -71,6 +75,7 @@ function ChipLink({
 }
 
 export function PicksSections({ sections }: { sections: PickSection[] }) {
+  const { isExpanded, toggle } = useExpandedBooks("picks")
   return (
     <div className="flex flex-col gap-8 sm:gap-9">
       {sections.map((section) => {
@@ -109,13 +114,39 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
               </div>
             ) : (
               <PostList>
-                {section.links.map((link) => (
-                  <PostCard
-                    key={link.tid}
-                    href={readPath(link.tid)}
-                    title={link.title}
-                  />
-                ))}
+                {(() => {
+                  const grouped = groupBooks(section.links, (l) => l.title)
+                  return grouped.map((g) =>
+                    g.type === "single" ? (
+                      <PostCard
+                        key={g.item.tid}
+                        href={readPath(g.item.tid)}
+                        title={g.item.title}
+                      />
+                    ) : (
+                      <CollapsibleBookGroup
+                        key={`group:${g.key}`}
+                        title={g.title}
+                        summary={g.author ?? undefined}
+                        count={g.items.length}
+                        bookKey={g.key}
+                        isExpanded={isExpanded(g.key)}
+                        onToggle={() => toggle(g.key)}
+                        trailing={
+                          g.genre ? <GenrePill genre={g.genre} /> : undefined
+                        }
+                      >
+                        {g.items.map((link) => (
+                          <PostCard
+                            key={link.tid}
+                            href={readPath(link.tid)}
+                            title={link.title}
+                          />
+                        ))}
+                      </CollapsibleBookGroup>
+                    ),
+                  )
+                })()}
               </PostList>
             )}
           </section>
