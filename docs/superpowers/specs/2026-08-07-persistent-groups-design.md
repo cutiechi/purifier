@@ -1,7 +1,7 @@
 # 持久化分组 · 搜索相似 · 收藏分组 设计
 
 - 日期：2026-08-07
-- 状态：待评审（v1）
+- 状态：待评审（v2，已据 review 修订）
 - 范围：`packages/core`（存储）+ `apps/api`（接口）+ `apps/web`（前端）
 
 ## 1. 背景与问题
@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS group_items (
 - `author` / `genre` 是展示快照：客户端在创建时用 `pickHeaderMeta` 同款逻辑（组内首个非空）算好随 `PUT` 传入；服务端仅在组为新建或对应字段为空时写入。
 - 收藏状态在 `groups` 表上（`favorited` 列），与逐条 `favorites` 表无关。
 - 清空历史（`DELETE /api/me/history?all=1`）**不触碰** `groups` / `group_items`。
+- **外键级联**：`openDatabase` 每次连接执行 `PRAGMA foreign_keys = ON`（当前只开了 WAL；SQLite 默认关 FK，不开则 `ON DELETE CASCADE` 不生效，删 `groups` 会留孤儿 `group_items`）。同时 `deleteGroup` 与「空组自动删」在 store 层事务内**显式** `DELETE FROM group_items WHERE group_id=?` 再删 `groups` 行，行为不依赖 FK；单测锁死「删组后 `group_items` 为空」。
+- **有意不设 site 列**：v1 分组只收录 cool18 论坛帖（`site=1` 的 post），表结构硬编码该语义；未来扩站需迁移（YAGNI）。
 
 ## 4. API
 
@@ -107,11 +109,44 @@ interface Group {
 }
 ```
 
+### PUT 语义（upsert，事务内）
+
+```sql
+BEGIN;
+INSERT INTO groups (key, title, author, genre, favorited, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)
+ON CONFLICT(key) DO UPDATE SET
+  title      = excluded.title,
+  author     = COALESCE(groups.author, excluded.author),
+  genre      = COALESCE(groups.genre,  excluded.genre),
+  updated_at = excluded.updated_at;
+INSERT OR IGNORE INTO group_items (group_id, tid, title, added_at) VALUES (...);
+COMMIT;
+```
+
+- 同 key 并发两次 `INSERT` 由 `UNIQUE(key)` + `ON CONFLICT(key) DO UPDATE` 收敛为同一组（单连接串行、事务内安全）。
+- `title` 随每次 upsert 刷新（客户端每次算出的展示书名一致，覆盖无害）；**已存在成员不更新** `title` / `added_at`（`INSERT OR IGNORE` 保持首次快照）。
+- `items` 至少 1 条，否则 400（不允许建空组）。
+- `updated_at` 在成员增删（`PUT /api/me/groups`、`DELETE .../items`）时更新；纯收藏切换只写 `favorited` / `favorited_at`，不动 `updated_at`。
+
 ### 校验
 
-- `PUT /api/me/groups`：`key` / `title` 为非空 string（`key` 限长 ≤ 128）；`items` 为 `{ tid: string, title: string }[]`（`tid` 限长 ≤ 64）；不合规 400。
-- `:id` 为纯数字；`DELETE .../items` body 与历史删除同风格。
+- `PUT /api/me/groups`：`key` / `title` 为非空 string（`key` ≤ 128，`title` ≤ 512）；`items` 为 `{ tid, title }[]` 且非空；`tid` 非空且 `/^[A-Za-z0-9]+$/`、≤ 64（对齐现有 `meIdParam`）；`title` ≤ 512；不合规 400。
+- `:id` 为纯数字；`DELETE .../items` body `{ items:[{tid}] }`，每项校验同上。
+- 取消收藏（`DELETE .../favorite`）：`favorited = 0` **且** `favorited_at = NULL`（不留脏时间戳；收藏时两者一起写）。
 - 错误体沿用 `{ "error": "..." }`；未知错误 500。
+
+### 路由算法
+
+API 现为 `switch (pathname)` 精确匹配。分组子资源放在 `switch` **之前**独立前缀分支：
+
+1. `pathname === "/api/me/groups"` → GET 列表 / PUT upsert（其余方法 405）；
+2. 否则匹配 `^/api/me/groups/(\d+)(?:/items|/favorite)?$` → 对应删除 / 收藏切换；方法不符 405；
+3. 未匹配 → 落入现有 404 分支（`/api/*` 已在 API 层，不与 SPA fallback 混淆）。
+
+### 容量假设
+
+个人分组量小，v1 全量返回（预期组数 ≪ 100、每组成员 ≪ 200），不设分页；未来超限再加 `LIMIT` / 分页，不改前端协议。
 
 ### 不改
 
@@ -136,12 +171,20 @@ export interface Group {
   items: GroupMember[]
 }
 
-/** 组 key 与折叠分组同源：normalizeTitleKey(parseListTitle(title).title) */
-export function groupKeyFromTitle(rawTitle: string): string
-/** 由成员标题计算展示作者/题材（与 book-groups pickHeaderMeta 一致） */
-export function pickGroupMeta(members: { title: string }[]): { author: string | null; genre: string | null }
-export const apiMeGroups = "/api/me/groups"
+/** 组 key 与折叠分组同源；复用 book-groups 的 normalizeTitleKey（已导出） */
+export function groupKeyFromTitle(rawTitle: string): string {
+  return normalizeTitleKey(parseListTitle(rawTitle).title)
+}
+
+/** 展示作者/题材：别名复用 book-groups 导出的 pickHeaderMeta（组内首个非空） */
+export const pickGroupMeta = pickHeaderMeta
 ```
+
+要点：
+
+- **复用而非复制**：`normalizeTitleKey`（已导出）、`stripTrailingChapterMarker` 与 `pickHeaderMeta`（后两者现为模块私有）从 `book-groups.ts` **导出**，`groups.ts` 只做一行组合，避免归一化逻辑分叉。展示用 `title` 也走 `stripTrailingChapterMarker`，与折叠组头一致。
+- **API 常量只放 `routes.ts`**（`api.meGroups = "/api/me/groups"`），不在 `lib/groups.ts` 重复导出，避免漂移。
+- **类型策略**：core 不导出 `Group` 类型；前端自持 `Group` / `GroupMember`，与 core 序列化结果结构兼容即可（个人项目，接受轻微重复）。
 
 ### 5.2 共享组件 `SimilarSearchPanel`（`apps/web/src/components/similar-search-panel.tsx`）
 
@@ -149,25 +192,33 @@ export const apiMeGroups = "/api/me/groups"
 
 ```ts
 function SimilarSearchPanel({
-  title,          // 书名（搜索关键词）
-  key: groupKey,  // 分组 key
+  title,          // 展示书名（已 strip 章节标记），作为搜索关键词；不用 raw 整行
+  groupKey,       // 分组 key（注意：不能用 React 保留 prop 名 `key`）
   seedItems,      // 创建分组时的初始成员（折叠组现有成员 / 单条自身 / 分组页现有成员）
-  knownTids,      // 已算作组内成员的 tid 集合 → 显示「已加入」
+  knownTids,      // 判定「已加入」的 tid 集合（数据流见下）
   onChanged,      // 加入成功后回调（刷新分组列表等）
-}: { ... })
+}: { title: string; groupKey: string; seedItems: GroupMember[]; knownTids: Set<string>; onChanged?: () => void })
 ```
 
 行为：
 
-- 点击触发 → 首次展开时 `GET /api/browse?q=<title>&site=1`（page 1）；loading / error / 空态齐全。
+- 点击触发 → 首次展开时 `GET /api/browse?q=<title>&site=1`（page 1）；loading / error / 空态齐全。**搜索词 = 展示书名**（`g.title` / `parseListTitle(raw).title` 再 strip 章节标记），带章节号/作者尾巴的 raw 会降低命中，不传。
 - 结果行复用 `ListPostCard` 视觉（`parseListTitle` 拆主/副标题），行尾按钮：未加入 →「加入本组」；`knownTids` 命中 →「已加入」禁用。
-- 点「加入本组」→ `PUT /api/me/groups`，body 为 `{ key: groupKey, title, items: [...seedItems, { tid, title }] }`（幂等：重复并入被 PK 去重）。成功后该 tid 本地标记「已加入」并触发 `onChanged`。
+- 点「加入本组」→ `PUT /api/me/groups`，body 为 `{ key: groupKey, title, items: [...seedItems, { tid, title }] }`（幂等：重复并入被 PK 去重）。成功后该 tid 本地标记「已加入」，用响应 `group.items` 刷新缓存，并触发 `onChanged`。
 
-> 折叠组场景：`seedItems` = 折叠组当前可见成员（首次加入时自动把原有章节并入新组，实现"补全"）；`knownTids` = 折叠组成员 tid 集合。
+**`knownTids` 数据流（核心，避免假阴性）**：判定「已加入」以**服务端持久组为准**，不能只靠当前页折叠成员。组件维护 `Map<groupKey, Set<tid>>` 缓存：
 
-### 5.3 分组页 `/group`（新增 `apps/web/src/pages/GroupPage.tsx`）
+1. 展开面板时若该 key 无缓存，`GET /api/me/groups` 全量拉一次，按 key 取该组 `items` 建缓存；
+2. `knownTids = 缓存[key] ∪ seedItems.tids`（seedItems 覆盖当前页折叠成员）；
+3. 首次成功 `PUT` 后用响应 `group.items` 合并更新缓存；
+4. 收藏页 / 分组页的增删也会经 `onChanged` 刷新缓存。
 
-- 导航新增「分组」（`NAV_ITEMS`，`sites: ["1"]`，放在「搜索」之后）；`routes.group = "/group"`；`App.tsx` 注册懒加载路由。
+> 折叠组场景：`seedItems` = 折叠组当前可见成员（首次加入时自动把原有章节并入新组，实现"补全"）。
+
+### 5.3 分组页 `/groups`（新增 `apps/web/src/pages/GroupPage.tsx`）
+
+- 导航新增「分组」（`NAV_ITEMS`，`sites: ["1"]`，放在「搜索」之后）；`routes.groups = "/groups"`（**复数**，与 `/api/me/groups` 对称）。
+- `App.tsx` 与现有页面一致**同步 import** 注册 `<Route path="/groups" ...>`，不引入 React.lazy / 路由级懒加载（全仓无此模式，避免夹带无关改动）；注册位置在 catch-all `path="*"`（现指向 `HomePage`）之前，保持"具体路径在前"。
 - 加载 `GET /api/me/groups`，渲染 `GroupCard` 列表：
   - 头部（复用 `CollapsibleBookGroup` 视觉）：书图标 + 书名 + 作者/题材 + `共 N 章` + ⭐收藏切换 + 展开箭头。
   - 展开区：成员行（`parseListTitle` 拆章节/作者副标题，链接 `/read/:tid`，行尾「移除」）→ `SimilarSearchPanel`（`seedItems`= 现有成员，`knownTids`= 现有成员 tid）→ 「删除分组」（confirm）。
@@ -177,7 +228,7 @@ function SimilarSearchPanel({
 
 ### 5.4 各处接线「搜索相似」（原地展开，不跳转）
 
-**折叠组**：`CollapsibleBookGroup` 增加可选 `similar?: { title, key, seedItems, knownTids?, onChanged? }`。头部按钮下方渲染一行常驻副操作「搜索相似」；点击同时展开分组（未展开则先展开）并在内容区显示 `SimilarSearchPanel`。注意头部是 `<button>`，副操作行是**兄弟节点**，避免按钮嵌套。
+**折叠组**：`CollapsibleBookGroup` 增加可选 `similar?: { title, groupKey, seedItems, knownTids?, onChanged? }`。头部按钮下方渲染一行常驻副操作「搜索相似」（**兄弟节点**，头部是 `<button>`，避免按钮嵌套）。展开联动：副操作点击 → 内部 `showSimilar` state 置真，若 `!isExpanded` 则调用 `onToggle()` 展开；`SimilarSearchPanel` 渲染在**展开内容区内**（`showSimilar && isExpanded` 才可见），不放在 `isExpanded` 之外，避免布局分叉。
 
 **单条**：新增包装组件 `SimilarPostCard`（包 `ListPostCard`）与 `SimilarMeItemCard`（包 `MeItemCard`），卡片下方渲染「搜索相似」行 + 面板。仅在 `site === "1"`（Me 路径再加 `kind === "post"`）渲染；空 key（无法成组）不渲染。
 
@@ -198,7 +249,8 @@ function SimilarSearchPanel({
 
 ### 5.5 收藏页「已收藏分组」区块（`pages/FavoritesPage.tsx`）
 
-- 满足 `q` 为空、`kind` 为空、`page === 1` 时，额外拉 `GET /api/me/groups`，过滤 `favorited` 的分组，渲染在列表上方独立区块「已收藏的分组」。
+- **插入点**：`MeListPage` 已有 `toolbar` 插槽（kind 筛选与列表之间、`AsyncBody` **之外**），FavoritesPage 用它在满足 `q` 为空、`kind` 为空、`page === 1` 时渲染「已收藏的分组」区块——收藏列表为空时区块仍可见，不会被 `AsyncBody` 空态盖住。FavoritesPage 当前不读 searchParams，需补 `useSearchParams` 读 `q` / `kind` / `page`。
+- **数据**：条件满足时额外拉 `GET /api/me/groups`，过滤 `favorited`；分组拉取失败显示独立 error，**不影响收藏列表主流程**（loading / 错误态与 `MeListPage` 解耦）。
 - 每组一张 `FavoritedGroupCard`：头部（书图标 + 书名 + 共 N 章 + 取消收藏按钮），可展开成员（链接 `/read/:tid`）。展开态用组件本地 state。
 - 取消收藏 → `DELETE /api/me/groups/:id/favorite` → 重新拉分组，区块即时更新。
 - `MeListItem` 类型**不变**（分组不进 `items`，避免改 `MeListPage` 的分组折叠逻辑）。
@@ -209,27 +261,31 @@ function SimilarSearchPanel({
 2. 移除最后一个成员 → 自动删组，返回 `{ ok, deleted: true }`，前端整组移除。
 3. 删除已收藏的分组 → `favorited` 随行删除，收藏页区块同步消失。
 4. 同名书多次「搜索相似 / 加入」→ 同一个 key → 合并进同一持久化分组。
-5. 折叠组的 `knownTids`/`seedItems` 只含当前页可见成员；已存在持久化成员不在当前页时，再次「加入本组」是幂等 no-op。
+5. `knownTids` = 服务端持久组成员 ∪ 当前页可见成员（见 §5.2 数据流）；已存在持久化成员不在当前页时 UI 已显示「已加入」，不会出现假阴性。
 6. 搜索相似 v1 只展示第一页结果（`nextPage` 忽略）。
 7. `normalizeTitleKey` 为空串的单条不渲染「搜索相似」（无法成组）。
 8. 清空历史不删分组（分组独立于 `items/favorites/tags`）。
-9. 并发/重复点击「加入本组」：`INSERT OR IGNORE` + `UNIQUE(key)` 保证不重复建组、不重复成员。
+9. 并发/重复点击「加入本组」：`INSERT OR IGNORE` + `UNIQUE(key)` + `ON CONFLICT` 保证不重复建组、不重复成员。
+10. 已存在成员不更新 `title` / `added_at`（`INSERT OR IGNORE` 保持首次快照；见 §4）。
+11. 取消收藏后 `favorited_at` 置 NULL，不留脏时间戳（见 §4）。
 
 ## 7. 测试与验证
 
 ### 单测
 
-`packages/core/src/storage/groups.test.ts`（`bun test`）：
+`packages/core/src/storage/groups.test.ts`（`bun test`，沿用 `store.test.ts` 的 db 工厂；分组方法并入 `Store`）：
 
-- `upsertGroup` 新建组含成员；同 key 二次 upsert 并入新成员、不重复；
-- `removeGroupItems` 移除成员；移除最后成员自动删组；
-- `deleteGroup` 级联清理 `group_items`；
-- `setGroupFavorite` 置位/复位并持久化；
+- `upsertGroup` 新建组含成员；同 key 二次 upsert 并入新成员、不重复（含 `ON CONFLICT(key)` 路径）；同 key 连续两次只落一组；
+- 空 `items` 不建组（core 层不落库；API 层 400）；
+- `removeGroupItems` 移除成员；移除最后成员自动删组并返回 `deleted: true`；
+- `deleteGroup` 后 `group_items` 为空（锁死级联/FK 行为）；
+- `setGroupFavorite` 置位/复位并持久化，取消收藏后 `favorited_at` 为 NULL；
 - `listGroups` 返回 `favorited` 标志、内嵌成员、`q` 过滤、`updated_at DESC` 排序。
 
 前端 `apps/web/src/lib/groups.test.ts`：
 
 - `groupKeyFromTitle` 与折叠分组同源（`【X】`/`《X》`/`X` 同 key）；
+- `groupKeyFromTitle` 与 `groupBooks` 对**同一 raw 列表**产出的 key 完全一致（黄金对照样例复用 `book-groups.test.ts`，含书名号/章节标记变体）；
 - `pickGroupMeta` 取首个非空作者/题材。
 
 ### 验证命令
@@ -254,23 +310,24 @@ bun run build
 
 ### 新增
 
-- `packages/core/src/storage/groups.ts` — 分组数据访问（list/upsert/delete/removeItems/setFavorite）
-- `packages/core/src/storage/groups.test.ts` — 单测
-- `apps/web/src/lib/groups.ts` — 类型 + `groupKeyFromTitle` / `pickGroupMeta`
+- `packages/core/src/storage/groups.test.ts` — 分组存储单测（分组方法并入 `Store`，测试沿用 `store.test.ts` 的 db 工厂）
+- `apps/web/src/lib/groups.ts` — 类型 + `groupKeyFromTitle` / `pickGroupMeta`（复用 book-groups）
 - `apps/web/src/lib/groups.test.ts` — 单测
 - `apps/web/src/components/similar-search-panel.tsx` — 搜索相似面板
 - `apps/web/src/components/similar-post-card.tsx` — 单条帖子包装
 - `apps/web/src/components/similar-me-item-card.tsx` — Me 单条包装
 - `apps/web/src/components/favorited-group-card.tsx` — 收藏页分组卡
-- `apps/web/src/pages/GroupPage.tsx` — `/group` 页（含 GroupCard 渲染）
+- `apps/web/src/pages/GroupPage.tsx` — `/groups` 页（含 GroupCard 渲染）
 
 ### 修改
 
-- `packages/core/src/storage/db.ts` — DDL 追加 `groups` / `group_items`
-- `apps/api/src/index.ts` — `/api/me/groups` 路由 + `/api/me/groups/:id[/items|/favorite]` 前缀匹配
-- `apps/web/src/lib/routes.ts` — `api.meGroups`、`routes.group`、`NAV_ITEMS` 加「分组」
-- `apps/web/src/App.tsx` — 注册 `/group`
-- `apps/web/src/components/collapsible-book-group.tsx` — 可选 `similar` prop + 副操作行
+- `packages/core/src/storage/db.ts` — DDL 追加 `groups` / `group_items`；`openDatabase` 增加 `PRAGMA foreign_keys = ON`
+- `packages/core/src/storage/store.ts` — `Store` 增加分组方法：`listGroups` / `upsertGroup` / `deleteGroup` / `removeGroupItems` / `setGroupFavorite`（与 history/favorites/tags 同一实例与 db 工厂）
+- `apps/api/src/index.ts` — `/api/me/groups` 路由 + `^/api/me/groups/(\d+)(?:/items|/favorite)?$` 前缀匹配（放在 `switch` 前独立分支）
+- `apps/web/src/lib/book-groups.ts` — 导出 `pickHeaderMeta` / `stripTrailingChapterMarker`（供 `groups.ts` 复用）
+- `apps/web/src/lib/routes.ts` — `api.meGroups`、`routes.groups`、`NAV_ITEMS` 加「分组」
+- `apps/web/src/App.tsx` — 同步注册 `/groups`（catch-all `*` 之前）
+- `apps/web/src/components/collapsible-book-group.tsx` — 可选 `similar` prop + 副操作行 + `showSimilar` / `onToggle` 展开联动
 - `apps/web/src/pages/HomePage.tsx`
 - `apps/web/src/pages/BrowsePage.tsx`
 - `apps/web/src/pages/SearchPage.tsx`
@@ -279,7 +336,9 @@ bun run build
 - `apps/web/src/pages/TrendingPage.tsx`
 - `apps/web/src/pages/CommentsPage.tsx`
 - `apps/web/src/components/me-list-page.tsx`
-- `apps/web/src/pages/FavoritesPage.tsx`
+- `apps/web/src/pages/FavoritesPage.tsx`（`toolbar` 区块 + `useSearchParams`）
+
+> History / Tags 经由 `me-list-page.tsx` 接入，无需独立改文件。
 
 ### 不改
 
