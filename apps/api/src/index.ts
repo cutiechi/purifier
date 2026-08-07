@@ -561,6 +561,115 @@ async function handleCacheClear(): Promise<Response> {
   return jsonOk({ cleared }, NO_STORE_HEADERS)
 }
 
+function handleGroupsList(url: URL): Response {
+  const q = url.searchParams.get("q")?.trim() ?? ""
+  return jsonOk({ groups: store.listGroups(q) }, NO_STORE_HEADERS)
+}
+
+function isGroupMember(it: unknown): it is { tid: string; title: string } {
+  if (!it || typeof it !== "object") return false
+  const tid = "tid" in it ? it.tid : undefined
+  const title = "title" in it ? it.title : undefined
+  return (
+    typeof tid === "string" &&
+    /^[A-Za-z0-9]+$/.test(tid) &&
+    tid.length <= 64 &&
+    typeof title === "string" &&
+    title.length > 0 &&
+    title.length <= 512
+  )
+}
+
+/** 移除成员 body 单条：只要 { tid }（与 upsert 不同，不含 title） */
+function isGroupTidRef(it: unknown): it is { tid: string } {
+  if (!it || typeof it !== "object") return false
+  const tid = "tid" in it ? it.tid : undefined
+  return (
+    typeof tid === "string" &&
+    /^[A-Za-z0-9]+$/.test(tid) &&
+    tid.length <= 64
+  )
+}
+
+async function handleGroupUpsert(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  const key = "key" in body ? body.key : undefined
+  const title = "title" in body ? body.title : undefined
+  const items = "items" in body ? body.items : undefined
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > 128 ||
+    typeof title !== "string" ||
+    title.length === 0 ||
+    title.length > 512
+  ) {
+    throw new ExtractorError("invalid key or title", 400)
+  }
+  if (!Array.isArray(items) || items.length === 0 || !items.every(isGroupMember)) {
+    throw new ExtractorError("items must be a non-empty {tid,title}[]", 400)
+  }
+  const author = "author" in body ? body.author : null
+  const genre = "genre" in body ? body.genre : null
+  if (
+    (author !== null && (typeof author !== "string" || author.length > 512)) ||
+    (genre !== null && (typeof genre !== "string" || genre.length > 512))
+  ) {
+    throw new ExtractorError("invalid author or genre", 400)
+  }
+  const group = store.upsertGroup({
+    key,
+    title,
+    author: author as string | null,
+    genre: genre as string | null,
+    items: items.map((it) => ({ tid: it.tid, title: it.title })),
+  })
+  return jsonOk({ ok: true, group }, NO_STORE_HEADERS)
+}
+
+function handleGroupDelete(id: number): Response {
+  store.deleteGroup(id)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+async function handleGroupItemsDelete(
+  req: Request,
+  id: number
+): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  const items = "items" in body ? body.items : undefined
+  if (!Array.isArray(items) || items.length === 0 || !items.every(isGroupTidRef)) {
+    throw new ExtractorError("items must be a non-empty {tid}[]", 400)
+  }
+  const { removed, deleted } = store.removeGroupItems(
+    id,
+    items.map((it) => it.tid)
+  )
+  return jsonOk({ ok: true, removed, deleted }, NO_STORE_HEADERS)
+}
+
+function handleGroupFavorite(id: number, favorited: boolean): Response {
+  const ok = store.setGroupFavorite(id, favorited)
+  if (!ok) throw new ExtractorError("group not found", 404)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
 async function handleComments(url: URL): Promise<Response> {
   const site = url.searchParams.get("site") ?? undefined
   const extractor = resolveSite(site)
@@ -600,6 +709,34 @@ async function route(req: Request): Promise<Response> {
   }
 
   try {
+    // /api/me/groups 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
+    const groupsSub = pathname.match(
+      /^\/api\/me\/groups\/(\d+)(?:\/(items|favorite))?$/
+    )
+    if (groupsSub) {
+      const id = Number(groupsSub[1])
+      const sub = groupsSub[2]
+      if (sub === undefined) {
+        if (req.method !== "DELETE") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return handleGroupDelete(id)
+      }
+      if (sub === "items") {
+        if (req.method !== "DELETE") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return await handleGroupItemsDelete(req, id)
+      }
+      if (req.method === "PUT") return handleGroupFavorite(id, true)
+      if (req.method === "DELETE") return handleGroupFavorite(id, false)
+      throw new ExtractorError("method not allowed", 405)
+    }
+    if (pathname === "/api/me/groups") {
+      if (req.method === "GET") return handleGroupsList(url)
+      if (req.method === "PUT") return await handleGroupUpsert(req)
+      throw new ExtractorError("method not allowed", 405)
+    }
     switch (pathname) {
       case "/api/health":
         requireGet(req)
