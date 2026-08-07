@@ -5,6 +5,7 @@ import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
+import { SimilarPostCard } from "@/components/similar-post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
@@ -60,10 +61,12 @@ export default function CommentsPage() {
         <PostList>
           {grouped.map((g) =>
             g.type === "single" ? (
-              <ListPostCard
+              <SimilarPostCard
                 key={g.item.tid}
                 href={readPath(g.item.tid)}
                 rawTitle={g.item.title}
+                tid={g.item.tid}
+                site="1"
                 rank={g.item.rank}
                 statValue={formatCount(g.item.comments)}
                 statUnit="评"
@@ -79,6 +82,14 @@ export default function CommentsPage() {
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
                 trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                similar={{
+                  title: g.title,
+                  groupKey: g.key,
+                  seedItems: g.items.map((l) => ({
+                    tid: l.tid,
+                    title: l.title,
+                  })),
+                }}
               >
                 {g.items.map((post) => (
                   <ListPostCard

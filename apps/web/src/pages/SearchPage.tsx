@@ -15,6 +15,7 @@ import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
+import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { IconSearch } from "@/components/icons"
@@ -176,7 +177,7 @@ function SearchContent() {
           <PostList>
             {grouped.map((g) =>
               g.type === "single" ? (
-                <ListPostCard
+                <SimilarPostCard
                   key={g.item.tid}
                   href={
                     site === "2"
@@ -184,6 +185,8 @@ function SearchContent() {
                       : readPath(g.item.tid, site)
                   }
                   rawTitle={g.item.title}
+                  tid={g.item.tid}
+                  site={site}
                   showGenre
                 />
               ) : (
@@ -196,6 +199,14 @@ function SearchContent() {
                   isExpanded={isExpanded(g.key)}
                   onToggle={() => toggle(g.key)}
                   trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                  similar={{
+                    title: g.title,
+                    groupKey: g.key,
+                    seedItems: g.items.map((l) => ({
+                      tid: l.tid,
+                      title: l.title,
+                    })),
+                  }}
                 >
                   {g.items.map((link) => (
                     <ListPostCard

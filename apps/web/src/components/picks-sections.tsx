@@ -3,7 +3,9 @@ import { SectionLabel } from "@/components/page-header"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
 import { PostCard, PostList } from "@/components/post-card"
+import { SimilarSearchPanel } from "@/components/similar-search-panel"
 import { groupBooks } from "@/lib/book-groups"
+import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { readPath } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
@@ -122,11 +124,17 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                   )
                   return grouped.map((g) =>
                     g.type === "single" ? (
-                      <PostCard
-                        key={g.item.tid}
-                        href={readPath(g.item.tid)}
-                        title={g.item.title}
-                      />
+                      <div key={g.item.tid} className="flex flex-col gap-1.5">
+                        <PostCard
+                          href={readPath(g.item.tid)}
+                          title={g.item.title}
+                        />
+                        <SimilarSearchPanel
+                          title={groupSearchTitle(g.item.title)}
+                          groupKey={groupKeyFromTitle(g.item.title)}
+                          seedItems={[{ tid: g.item.tid, title: g.item.title }]}
+                        />
+                      </div>
                     ) : (
                       <CollapsibleBookGroup
                         key={`group:${g.key}`}
@@ -139,6 +147,14 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                         trailing={
                           g.genre ? <GenrePill genre={g.genre} /> : undefined
                         }
+                        similar={{
+                          title: g.title,
+                          groupKey: g.key,
+                          seedItems: g.items.map((l) => ({
+                            tid: l.tid,
+                            title: l.title,
+                          })),
+                        }}
                       >
                         {g.items.map((link) => (
                           <PostCard

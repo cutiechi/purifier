@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
 import { MeItemCard, type MeListItem } from "@/components/me-item-card"
+import { SimilarMeItemCard } from "@/components/similar-me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
@@ -180,7 +181,7 @@ export function MeListPage({
             grouped ?? items.map((item) => ({ type: "single" as const, item }))
           ).map((g) =>
             g.type === "single" ? (
-              <MeItemCard
+              <SimilarMeItemCard
                 key={`${g.item.kind}:${g.item.id}`}
                 item={g.item}
                 trailing={renderTrailing?.(g.item, reload)}
@@ -195,6 +196,14 @@ export function MeListPage({
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
                 trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                similar={{
+                  title: g.title,
+                  groupKey: g.key,
+                  seedItems: g.items.map((it) => ({
+                    tid: it.id,
+                    title: it.title,
+                  })),
+                }}
               >
                 {g.items.map((item) => {
                   const parsed = parseListTitle(item.title)

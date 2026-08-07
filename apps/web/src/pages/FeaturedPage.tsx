@@ -6,6 +6,7 @@ import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
+import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useAsyncList } from "@/hooks/use-async-list"
@@ -61,10 +62,12 @@ export default function FeaturedPage() {
         <PostList>
           {grouped.map((g) =>
             g.type === "single" ? (
-              <ListPostCard
+              <SimilarPostCard
                 key={g.item.tid}
                 href={readPath(g.item.tid)}
                 rawTitle={g.item.title}
+                tid={g.item.tid}
+                site="1"
                 index={g.item.index || indexOfItem.get(g.item.tid) || 1}
                 showGenre
               />
@@ -78,6 +81,14 @@ export default function FeaturedPage() {
                 isExpanded={isExpanded(g.key)}
                 onToggle={() => toggle(g.key)}
                 trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                similar={{
+                  title: g.title,
+                  groupKey: g.key,
+                  seedItems: g.items.map((l) => ({
+                    tid: l.tid,
+                    title: l.title,
+                  })),
+                }}
               >
                 {g.items.map((link) => (
                   <ListPostCard
