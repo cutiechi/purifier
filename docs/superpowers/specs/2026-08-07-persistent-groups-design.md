@@ -1,7 +1,7 @@
 # 持久化分组 · 搜索相似 · 收藏分组 设计
 
 - 日期：2026-08-07
-- 状态：待评审（v2，已据 review 修订）
+- 状态：待评审（v3，已据 v2 复审修订）
 - 范围：`packages/core`（存储）+ `apps/api`（接口）+ `apps/web`（前端）
 
 ## 1. 背景与问题
@@ -120,6 +120,9 @@ ON CONFLICT(key) DO UPDATE SET
   author     = COALESCE(groups.author, excluded.author),
   genre      = COALESCE(groups.genre,  excluded.genre),
   updated_at = excluded.updated_at;
+-- 取 group_id：ON CONFLICT DO UPDATE 路径下 last_insert_rowid() 不可靠（常为 0/旧值），
+-- 统一按 key 回查，不用 rowid。
+SELECT id FROM groups WHERE key = ?1;
 INSERT OR IGNORE INTO group_items (group_id, tid, title, added_at) VALUES (...);
 COMMIT;
 ```
@@ -127,7 +130,7 @@ COMMIT;
 - 同 key 并发两次 `INSERT` 由 `UNIQUE(key)` + `ON CONFLICT(key) DO UPDATE` 收敛为同一组（单连接串行、事务内安全）。
 - `title` 随每次 upsert 刷新（客户端每次算出的展示书名一致，覆盖无害）；**已存在成员不更新** `title` / `added_at`（`INSERT OR IGNORE` 保持首次快照）。
 - `items` 至少 1 条，否则 400（不允许建空组）。
-- `updated_at` 在成员增删（`PUT /api/me/groups`、`DELETE .../items`）时更新；纯收藏切换只写 `favorited` / `favorited_at`，不动 `updated_at`。
+- `updated_at`：`PUT` **一律 bump**（即使本次全部 `INSERT OR IGNORE`、无新成员也刷新——实现简单，与 `excluded.updated_at` 一致）；`DELETE .../items` 移除成员时 bump；纯收藏切换只写 `favorited` / `favorited_at`，不动 `updated_at`。
 
 ### 校验
 
@@ -176,8 +179,12 @@ export function groupKeyFromTitle(rawTitle: string): string {
   return normalizeTitleKey(parseListTitle(rawTitle).title)
 }
 
-/** 展示作者/题材：别名复用 book-groups 导出的 pickHeaderMeta（组内首个非空） */
-export const pickGroupMeta = pickHeaderMeta
+/** 展示作者/题材：包一层复用 book-groups 导出的 pickHeaderMeta（组内首个非空） */
+export function pickGroupMeta(
+  members: { title: string }[]
+): { author: string | null; genre: string | null } {
+  return pickHeaderMeta(members, (m) => m.title)
+}
 ```
 
 要点：
@@ -195,23 +202,17 @@ function SimilarSearchPanel({
   title,          // 展示书名（已 strip 章节标记），作为搜索关键词；不用 raw 整行
   groupKey,       // 分组 key（注意：不能用 React 保留 prop 名 `key`）
   seedItems,      // 创建分组时的初始成员（折叠组现有成员 / 单条自身 / 分组页现有成员）
-  knownTids,      // 判定「已加入」的 tid 集合（数据流见下）
   onChanged,      // 加入成功后回调（刷新分组列表等）
-}: { title: string; groupKey: string; seedItems: GroupMember[]; knownTids: Set<string>; onChanged?: () => void })
+}: { title: string; groupKey: string; seedItems: GroupMember[]; onChanged?: () => void })
 ```
 
 行为：
 
 - 点击触发 → 首次展开时 `GET /api/browse?q=<title>&site=1`（page 1）；loading / error / 空态齐全。**搜索词 = 展示书名**（`g.title` / `parseListTitle(raw).title` 再 strip 章节标记），带章节号/作者尾巴的 raw 会降低命中，不传。
-- 结果行复用 `ListPostCard` 视觉（`parseListTitle` 拆主/副标题），行尾按钮：未加入 →「加入本组」；`knownTids` 命中 →「已加入」禁用。
-- 点「加入本组」→ `PUT /api/me/groups`，body 为 `{ key: groupKey, title, items: [...seedItems, { tid, title }] }`（幂等：重复并入被 PK 去重）。成功后该 tid 本地标记「已加入」，用响应 `group.items` 刷新缓存，并触发 `onChanged`。
+- 结果行复用 `ListPostCard` 视觉（`parseListTitle` 拆主/副标题），行尾按钮：未加入 →「加入本组」；已判定在组内 →「已加入」禁用。
+- 点「加入本组」→ `PUT /api/me/groups`，body 为 `{ key: groupKey, title, items: [...seedItems, { tid, title }] }`（幂等：重复并入被 PK 去重）。成功后该 tid 本地标记「已加入」，并触发 `onChanged`。
 
-**`knownTids` 数据流（核心，避免假阴性）**：判定「已加入」以**服务端持久组为准**，不能只靠当前页折叠成员。组件维护 `Map<groupKey, Set<tid>>` 缓存：
-
-1. 展开面板时若该 key 无缓存，`GET /api/me/groups` 全量拉一次，按 key 取该组 `items` 建缓存；
-2. `knownTids = 缓存[key] ∪ seedItems.tids`（seedItems 覆盖当前页折叠成员）；
-3. 首次成功 `PUT` 后用响应 `group.items` 合并更新缓存；
-4. 收藏页 / 分组页的增删也会经 `onChanged` 刷新缓存。
+**「已加入」判定（服务端为准，避免假阴性/假阳性）**：不设跨页共享缓存（作用域与失效难管），**每次展开面板**都 `GET /api/me/groups` 拉全量（个人组量小，v1 可接受），取该 `groupKey` 对应组的 `items` tid **∪ `seedItems` tid** 作为当次「已加入」集合。面板**不接收**外部 `knownTids` prop——`seedItems` 是唯一来源之一，无双源；成功 `PUT` 后本地并入本次加入的 tid。
 
 > 折叠组场景：`seedItems` = 折叠组当前可见成员（首次加入时自动把原有章节并入新组，实现"补全"）。
 
@@ -221,14 +222,14 @@ function SimilarSearchPanel({
 - `App.tsx` 与现有页面一致**同步 import** 注册 `<Route path="/groups" ...>`，不引入 React.lazy / 路由级懒加载（全仓无此模式，避免夹带无关改动）；注册位置在 catch-all `path="*"`（现指向 `HomePage`）之前，保持"具体路径在前"。
 - 加载 `GET /api/me/groups`，渲染 `GroupCard` 列表：
   - 头部（复用 `CollapsibleBookGroup` 视觉）：书图标 + 书名 + 作者/题材 + `共 N 章` + ⭐收藏切换 + 展开箭头。
-  - 展开区：成员行（`parseListTitle` 拆章节/作者副标题，链接 `/read/:tid`，行尾「移除」）→ `SimilarSearchPanel`（`seedItems`= 现有成员，`knownTids`= 现有成员 tid）→ 「删除分组」（confirm）。
+  - 展开区：成员行（`parseListTitle` 拆章节/作者副标题，链接 `/read/:tid`，行尾「移除」）→ `SimilarSearchPanel`（`seedItems`= 现有成员）→ 「删除分组」（confirm）。
   - 移除成员：`DELETE /api/me/groups/:id/items`；返回 `deleted: true` 则整组从列表移除。
   - 收藏切换：`PUT/DELETE /api/me/groups/:id/favorite`。
 - 空态：「还没有分组，去列表页点『搜索相似』创建」。
 
 ### 5.4 各处接线「搜索相似」（原地展开，不跳转）
 
-**折叠组**：`CollapsibleBookGroup` 增加可选 `similar?: { title, groupKey, seedItems, knownTids?, onChanged? }`。头部按钮下方渲染一行常驻副操作「搜索相似」（**兄弟节点**，头部是 `<button>`，避免按钮嵌套）。展开联动：副操作点击 → 内部 `showSimilar` state 置真，若 `!isExpanded` 则调用 `onToggle()` 展开；`SimilarSearchPanel` 渲染在**展开内容区内**（`showSimilar && isExpanded` 才可见），不放在 `isExpanded` 之外，避免布局分叉。
+**折叠组**：`CollapsibleBookGroup` 增加可选 `similar?: { title, groupKey, seedItems, onChanged? }`。头部按钮下方渲染一行常驻副操作「搜索相似」（**兄弟节点**，头部是 `<button>`，避免按钮嵌套）。展开联动：副操作点击 → 内部 `showSimilar` state 置真，若 `!isExpanded` 则调用 `onToggle()` 展开；`SimilarSearchPanel` 渲染在**展开内容区内**（`showSimilar && isExpanded` 才可见），不放在 `isExpanded` 之外，避免布局分叉。
 
 **单条**：新增包装组件 `SimilarPostCard`（包 `ListPostCard`）与 `SimilarMeItemCard`（包 `MeItemCard`），卡片下方渲染「搜索相似」行 + 面板。仅在 `site === "1"`（Me 路径再加 `kind === "post"`）渲染；空 key（无法成组）不渲染。
 
@@ -261,7 +262,7 @@ function SimilarSearchPanel({
 2. 移除最后一个成员 → 自动删组，返回 `{ ok, deleted: true }`，前端整组移除。
 3. 删除已收藏的分组 → `favorited` 随行删除，收藏页区块同步消失。
 4. 同名书多次「搜索相似 / 加入」→ 同一个 key → 合并进同一持久化分组。
-5. `knownTids` = 服务端持久组成员 ∪ 当前页可见成员（见 §5.2 数据流）；已存在持久化成员不在当前页时 UI 已显示「已加入」，不会出现假阴性。
+5. 「已加入」判定以服务端为准：每次展开面板都 `GET /api/me/groups` 取持久组成员 ∪ `seedItems`（见 §5.2）；不设跨页共享缓存，避免作用域/失效导致的假阳性与假阴性。
 6. 搜索相似 v1 只展示第一页结果（`nextPage` 忽略）。
 7. `normalizeTitleKey` 为空串的单条不渲染「搜索相似」（无法成组）。
 8. 清空历史不删分组（分组独立于 `items/favorites/tags`）。
