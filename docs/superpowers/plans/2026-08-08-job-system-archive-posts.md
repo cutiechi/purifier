@@ -28,7 +28,7 @@
 ## File Structure
 
 **Create:**
-- `packages/core/src/jobs/handler.ts` — `JobHandler` / `JobContext` / `JobResult` / `JobStatus` 接口与类型。
+- `packages/core/src/jobs/handler.ts` — `JobHandler` / `JobContext` / `JobResult` 接口（`JobStatus` 等数据类型在 `storage/types.ts`，不在此重复导出）。
 - `packages/core/src/jobs/runner.ts` — `JobRunner` 类。
 - `packages/core/src/jobs/sleep.ts` — abort-aware `sleep` 工具。
 - `packages/core/src/jobs/handlers/archive_posts.ts` — `ArchivePostsJob`。
@@ -40,8 +40,8 @@
 - `apps/web/src/lib/jobs.ts` — job API 封装 + 类型。
 - `apps/web/src/pages/JobsPage.tsx` — 任务管理页。
 - `apps/web/src/pages/ArchivePage.tsx` — 归档目录页。
-- `apps/web/src/components/JobRow.tsx` — 单个 job 行。
-- `apps/web/src/components/JobLogPanel.tsx` — 日志面板（desc 拉尾 + UI 反转）。
+- `apps/web/src/components/job-row.tsx` — 单个 job 行。
+- `apps/web/src/components/job-log-panel.tsx` — 日志面板（desc 拉尾 + UI 反转）。
 
 **Modify:**
 - `packages/core/src/storage/db.ts` — DDL 追加三表 + 索引。
@@ -209,7 +209,7 @@ git commit -m "feat(core): add jobs/job_logs/archive_posts tables and types"
 
 **Interfaces:**
 - Consumes: `Job` / `JobStatus` / `JobLog` 类型（Task 1）。
-- Produces: `Store.createJob` / `getJob` / `listJobs` / `markRunning` / `markFinished` / `hasRunningOfType` / `clearFinishedJobs` / `markStaleJobsInterrupted` / `appendJobLog` / `listJobLogs`。
+- Produces: `Store.createJob` / `getJob` / `listJobs` / `markRunning` / `markFinished` / `hasRunningOfType` / `clearFinishedJobs` / `deleteJob` / `markStaleJobsInterrupted` / `appendJobLog` / `listJobLogs`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -268,7 +268,7 @@ describe("jobs store", () => {
     expect(done.status).toBe("succeeded")
     expect(done.result).toBe(JSON.stringify({ pages: 3 }))
     expect(done.error).toBeNull()
-    expect(done.finished_at).toBe(1_003)
+    expect(done.finished_at).toBe(1_002)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -846,7 +846,7 @@ git commit -m "feat(core): Store methods for archive_posts (upsert + list)"
 
 **Interfaces:**
 - Consumes: 无。
-- Produces: `sleep(ms, signal): Promise<void>`（abort 时 clearTimeout）；`JobHandler` / `JobContext` / `JobResult` 接口。
+- Produces: `sleep(ms, signal?): Promise<void>`（signal 可选；传则 abort 时 clearTimeout）；`JobHandler` / `JobContext` / `JobResult` 接口。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -893,11 +893,18 @@ Expected: FAIL（模块不存在）。
 
 ```ts
 /**
- * abort-aware sleep：abort 时 clearTimeout 并立即 resolve，不泄漏 timer。
- * 已 aborted 的 signal 立即 resolve。
+ * abort-aware sleep：传 signal 时，abort 立即 clearTimeout 并 resolve（不泄漏 timer、不等完整 delay）。
+ * signal 可选：不传则退化为普通 setTimeout（测试与无取消需求场景用）。
  */
-export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+export function sleep(
+  ms: number,
+  signal?: AbortSignal
+): Promise<void> {
   return new Promise((resolve) => {
+    if (!signal) {
+      setTimeout(resolve, ms)
+      return
+    }
     if (signal.aborted) return resolve()
     const onAbort = () => {
       clearTimeout(t)
@@ -1046,8 +1053,12 @@ describe("JobRunner", () => {
   test("同 type 二次 start → 抛错（单例）", async () => {
     const { runner, store, dir } = makeRunner()
     runner.register(new FakeHandler())
-    await runner.start("fake")
+    const job = await runner.start("fake")
     await expect(runner.start("fake")).rejects.toThrow(/already running/)
+    // 清理：停掉后台 job 并等 finally，避免写已删目录
+    runner.stop(job.id)
+    await sleep(40)
+    void store
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1218,9 +1229,18 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openDatabase } from "../../storage/db"
 import { Store } from "../../storage/store"
-import type { HomePage } from "../../extractor"
+import type { ChapterLink, HomePage } from "../../extractor"
 import { ArchivePostsJob } from "./archive_posts"
 import type { JobContext } from "../handler"
+
+/** ChapterLink 必填 index；工厂补默认 0（handler 不读 index） */
+function link(tid: string, title: string): ChapterLink {
+  return { index: 0, tid, title }
+}
+
+function page(links: ChapterLink[], nextMtid: string | null): HomePage {
+  return { links, nextMtid }
+}
 
 function makeJob() {
   const dir = mkdtempSync(join(tmpdir(), "purifier-archive-job-"))
@@ -1251,13 +1271,13 @@ describe("ArchivePostsJob", () => {
   test("多页正常 → result 正确，游标推进到底", async () => {
     const { job, store, dir } = makeJob()
     const pages: HomePage[] = [
-      { links: [{ tid: "300", title: "C" }, { tid: "200", title: "B" }], nextMtid: "200" },
-      { links: [{ tid: "150", title: "A" }], nextMtid: "150" },
-      { links: [{ tid: "100", title: "旧" }], nextMtid: null },
+      page([link("300", "C"), link("200", "B")], "200"),
+      page([link("150", "A")], "150"),
+      page([link("100", "旧")], null),
     ]
     let i = 0
-    job.fetchPage = async () => pages[i++] ?? { links: [], nextMtid: null }
-    const { ctx } = makeCtx({ delayMs: 1 })
+    job.fetchPage = async () => pages[i++] ?? page([], null)
+    const { ctx } = makeCtx({ delayMs: 200 }) // 合法下界，避免回落 800 拖慢
     const result = await job.run(ctx)
     expect(result).toEqual({ pages: 3, inserted: 4, updated: 0, site: "1" })
     const list = store.listArchivePosts("1", { page: 1, limit: 10, sort: "tid" })
@@ -1266,16 +1286,13 @@ describe("ArchivePostsJob", () => {
   })
 
   test("重跑：标题不变跳过，变化计数 updated", async () => {
-    const { job, store, dir } = makeJob()
-    const page: HomePage = {
-      links: [{ tid: "100", title: "A" }],
-      nextMtid: null,
-    }
-    job.fetchPage = async () => page
-    await job.run(makeCtx({ delayMs: 1 }).ctx)
+    const { job, dir } = makeJob()
+    const p: HomePage = page([link("100", "A")], null)
+    job.fetchPage = async () => p
+    await job.run(makeCtx({ delayMs: 200 }).ctx)
     // 第二次：标题变了
-    page.links[0]!.title = "A 改"
-    const result = await job.run(makeCtx({ delayMs: 1 }).ctx)
+    p.links[0]!.title = "A 改"
+    const result = await job.run(makeCtx({ delayMs: 200 }).ctx)
     expect(result).toEqual({ pages: 1, inserted: 0, updated: 1, site: "1" })
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1283,12 +1300,12 @@ describe("ArchivePostsJob", () => {
   test("游标起始 mtid=0 不被当成上界，正常推进（不只抓一页）", async () => {
     const { job, dir } = makeJob()
     const pages: HomePage[] = [
-      { links: [{ tid: "5000", title: "X" }], nextMtid: "4000" },
-      { links: [{ tid: "4000", title: "Y" }], nextMtid: null },
+      page([link("5000", "X")], "4000"),
+      page([link("4000", "Y")], null),
     ]
     let i = 0
-    job.fetchPage = async () => pages[i++] ?? { links: [], nextMtid: null }
-    const result = await job.run(makeCtx({ delayMs: 1 }).ctx)
+    job.fetchPage = async () => pages[i++] ?? page([], null)
+    const result = await job.run(makeCtx({ delayMs: 200 }).ctx)
     expect(result.pages).toBe(2) // 关键：不是 1
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1299,27 +1316,30 @@ describe("ArchivePostsJob", () => {
     job.fetchPage = async () => {
       call++
       if (call === 2) throw new Error("upstream 502")
-      return { links: [{ tid: "10", title: "A" }], nextMtid: "10" }
+      return page([link("10", "A")], "10")
     }
-    const { ctx, logs } = makeCtx({ delayMs: 1 })
+    const { ctx, logs } = makeCtx({ delayMs: 200 })
     await expect(job.run(ctx)).rejects.toThrow(/upstream 502/)
-    expect(logs.some((l) => l.level === "warn" && /page 2 failed/.test(l.message))).toBe(true)
+    expect(
+      logs.some((l) => l.level === "warn" && /page 2 failed/.test(l.message))
+    ).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 
   test("空标题项被丢弃，日志报 dropped", async () => {
     const { job, store, dir } = makeJob()
-    job.fetchPage = async () => ({
-      links: [
-        { tid: "100", title: "A" },
-        { tid: "101", title: "   " },
-        { tid: "102", title: "" },
-      ],
-      nextMtid: null,
-    })
-    const { ctx, logs } = makeCtx({ delayMs: 1 })
+    job.fetchPage = async () =>
+      page(
+        [link("100", "A"), link("101", "   "), link("102", "")],
+        null
+      )
+    const { ctx, logs } = makeCtx({ delayMs: 200 })
     await job.run(ctx)
-    const list = store.listArchivePosts("1", { page: 1, limit: 10, sort: "tid" })
+    const list = store.listArchivePosts("1", {
+      page: 1,
+      limit: 10,
+      sort: "tid",
+    })
     expect(list.items.map((x) => x.tid)).toEqual(["100"])
     expect(logs.some((l) => /2 empty dropped/.test(l.message))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
@@ -1327,15 +1347,18 @@ describe("ArchivePostsJob", () => {
 
   test("abort 中途 → logs 含 aborted by user，result 反映已处理页", async () => {
     const { job, dir } = makeJob()
-    const { ctx, controller } = makeCtx({ delayMs: 1 })
+    const { ctx, logs, controller } = makeCtx({ delayMs: 200 })
     let call = 0
     job.fetchPage = async () => {
       call++
       if (call === 2) controller.abort()
-      return { links: [{ tid: String(call * 100), title: "T" }], nextMtid: String(call * 100) }
+      return page([link(String(call * 100), "T")], String(call * 100))
     }
     const result = await job.run(ctx)
     expect(result.pages).toBeGreaterThanOrEqual(1)
+    expect(
+      logs.some((l) => /aborted by user/.test(l.message))
+    ).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1348,7 +1371,7 @@ describe("ArchivePostsJob", () => {
 
   test("非法 delayMs（NaN/负/超 5000）回落 800", async () => {
     const { job, dir } = makeJob()
-    job.fetchPage = async () => ({ links: [], nextMtid: null })
+    job.fetchPage = async () => page([], null)
     for (const bad of [NaN, -1, 99999]) {
       const { ctx } = makeCtx({ delayMs: bad })
       // 不抛错即代表 clamp 生效（空页直接结束）
@@ -1930,11 +1953,12 @@ export async function getJob(id: number): Promise<Job> {
 
 export async function getJobLogs(
   id: number,
-  opts?: { level?: string; order?: "asc" | "desc" }
+  opts?: { level?: string; order?: "asc" | "desc"; limit?: number }
 ): Promise<JobLog[]> {
   const params = new URLSearchParams()
   if (opts?.level) params.set("level", opts.level)
   if (opts?.order) params.set("order", opts.order)
+  if (opts?.limit) params.set("limit", String(opts.limit))
   const qs = params.toString()
   const res = await fetch(`${api.meJobs}/${id}/logs${qs ? `?${qs}` : ""}`)
   await throwIfNotOk(res)
@@ -1996,8 +2020,8 @@ git commit -m "feat(web): job API client + routes constants"
 ## Task 11: JobsPage + 组件
 
 **Files:**
-- Create: `apps/web/src/components/JobRow.tsx`
-- Create: `apps/web/src/components/JobLogPanel.tsx`
+- Create: `apps/web/src/components/job-row.tsx`
+- Create: `apps/web/src/components/job-log-panel.tsx`
 - Create: `apps/web/src/pages/JobsPage.tsx`
 - Modify: `apps/web/src/App.tsx`
 
@@ -2015,7 +2039,7 @@ git commit -m "feat(web): job API client + routes constants"
 
 - [ ] **Step 2: 写 JobLogPanel**
 
-新建 `apps/web/src/components/JobLogPanel.tsx`：
+新建 `apps/web/src/components/job-log-panel.tsx`：
 
 ```tsx
 import { useEffect, useRef, useState } from "react"
@@ -2057,18 +2081,20 @@ export function JobLogPanel({
     }
   }, [jobId, running, pollMs])
 
-  if (logs.length === 0) return <p className="text-sm text-stone-500">暂无日志</p>
+  if (logs.length === 0) {
+    return <p className="py-4 text-sm text-muted-foreground">暂无日志</p>
+  }
   return (
-    <pre className="max-h-72 overflow-auto rounded bg-stone-900 p-3 text-xs text-stone-100">
+    <pre className="max-h-72 overflow-auto rounded-xl bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
       {logs.map((l) => (
         <div
           key={l.id}
           className={
             l.level === "error"
-              ? "text-red-400"
+              ? "text-destructive"
               : l.level === "warn"
-                ? "text-yellow-400"
-                : "text-stone-300"
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
           }
         >
           [{l.level}] {l.message}
@@ -2081,21 +2107,21 @@ export function JobLogPanel({
 
 - [ ] **Step 3: 写 JobRow**
 
-新建 `apps/web/src/components/JobRow.tsx`：
+新建 `apps/web/src/components/job-row.tsx`：
 
 ```tsx
 import { useState } from "react"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import type { Job } from "@/lib/jobs"
-import { JobLogPanel } from "./JobLogPanel"
+import { JobLogPanel } from "./job-log-panel"
 
-const STATUS_COLOR: Record<Job["status"], string> = {
-  pending: "bg-stone-200 text-stone-700",
-  running: "bg-blue-100 text-blue-700",
-  succeeded: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-  interrupted: "bg-stone-200 text-stone-600",
-  aborted: "bg-stone-200 text-stone-600",
+const STATUS_BADGE: Record<Job["status"], string> = {
+  pending: "bg-muted text-muted-foreground",
+  running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  succeeded: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  failed: "bg-destructive/15 text-destructive",
+  interrupted: "bg-muted text-muted-foreground",
+  aborted: "bg-muted text-muted-foreground",
 }
 
 const STATUS_LABEL: Record<Job["status"], string> = {
@@ -2127,37 +2153,41 @@ export function JobRow({
         ? "进行中"
         : "-"
   return (
-    <li className="rounded border border-stone-200">
-      <div className="flex items-center gap-2 p-3">
+    <li className="rounded-2xl border border-border/80 bg-card/80 shadow-sm">
+      <div className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-stone-500 hover:text-stone-800"
+          className="text-muted-foreground transition-colors hover:text-foreground"
           aria-label={open ? "收起日志" : "展开日志"}
         >
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         <span
-          className={`rounded px-2 py-0.5 text-xs ${STATUS_COLOR[job.status]}`}
+          className={`rounded-lg px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[job.status]}`}
         >
           {STATUS_LABEL[job.status]}
         </span>
-        <span className="text-sm text-stone-800">{job.type}</span>
-        <span className="text-xs text-stone-500">#{job.id}</span>
-        <span className="text-xs text-stone-400">{duration}</span>
+        <span className="text-sm font-medium text-foreground">{job.type}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          #{job.id}
+        </span>
+        <span className="text-xs text-muted-foreground/70 tabular-nums">
+          {duration}
+        </span>
         {job.result && (
-          <span className="text-xs text-stone-500">
+          <span className="hidden text-xs text-muted-foreground sm:inline">
             {Object.entries(job.result)
               .map(([k, v]) => `${k}=${v}`)
               .join(" ")}
           </span>
         )}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex gap-1">
           {running && (
             <button
               type="button"
               onClick={() => onStop(job.id)}
-              className="rounded border border-stone-300 px-2 py-0.5 text-xs hover:bg-stone-100"
+              className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               停止
             </button>
@@ -2166,7 +2196,7 @@ export function JobRow({
             <button
               type="button"
               onClick={() => onDelete(job.id)}
-              className="rounded border border-red-300 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
+              className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
             >
               删除
             </button>
@@ -2174,9 +2204,9 @@ export function JobRow({
         </div>
       </div>
       {open && (
-        <div className="border-t border-stone-200 p-3">
+        <div className="border-t border-border/60 px-3 py-3 sm:px-4">
           {job.error && (
-            <p className="mb-2 text-xs text-red-600">{job.error}</p>
+            <p className="mb-2 text-xs text-destructive">{job.error}</p>
           )}
           <JobLogPanel jobId={job.id} running={running} pollMs={pollMs} />
         </div>
@@ -2188,14 +2218,16 @@ export function JobRow({
 
 - [ ] **Step 4: 写 JobsPage**
 
-新建 `apps/web/src/pages/JobsPage.tsx`（复用现有 `PageShell` / `PageHeader`，参照 `GroupPage` 的 fetch 模式）：
+新建 `apps/web/src/pages/JobsPage.tsx`（参照 `GroupPage.tsx`：kebab-case 组件路径、`AsyncBody` 三态、design tokens）：
 
 ```tsx
 import { useCallback, useEffect, useState } from "react"
 import { Play, Trash2 } from "lucide-react"
-import { PageShell } from "@/components/PageShell"
-import { PageHeader } from "@/components/PageHeader"
-import { JobRow } from "@/components/JobRow"
+import { PageShell } from "@/components/page-shell"
+import { AsyncBody } from "@/components/ui-state"
+import { PageHeader } from "@/components/page-header"
+import { JobRow } from "@/components/job-row"
+import { useSite } from "@/hooks/use-site"
 import {
   clearFinishedJobs,
   deleteJob,
@@ -2209,6 +2241,8 @@ import {
 } from "@/lib/jobs"
 
 export default function JobsPage() {
+  const site = useSite()
+  const archiveSupported = site === "1"
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -2219,15 +2253,16 @@ export default function JobsPage() {
     setPollMsState(getPollMs())
   }, [])
 
-  const reload = useCallback(async () => {
-    setLoading(true)
+  // silent：轮询/操作后局部刷新，不闪 loading；首屏 loading 由调用方控制
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     setError("")
     try {
       setJobs(await listJobs())
     } catch (e) {
       setError(e instanceof Error ? e.message : "未知错误")
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [])
 
@@ -2235,11 +2270,11 @@ export default function JobsPage() {
     void reload()
   }, [reload])
 
-  // 有 running job 时按 pollMs 刷新列表
+  // 有 running job 时按 pollMs silent 刷新列表
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === "running")
     if (!hasRunning) return
-    const t = setTimeout(() => void reload(), pollMs)
+    const t = setTimeout(() => void reload({ silent: true }), pollMs)
     return () => clearTimeout(t)
   }, [jobs, pollMs, reload])
 
@@ -2248,7 +2283,7 @@ export default function JobsPage() {
     setError("")
     try {
       await startJob("archive_posts", { site: "1" })
-      await reload()
+      await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
     } finally {
@@ -2259,7 +2294,7 @@ export default function JobsPage() {
   const onStop = async (id: number) => {
     try {
       await stopJob(id)
-      await reload()
+      await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "停止失败")
     }
@@ -2269,7 +2304,7 @@ export default function JobsPage() {
     if (!confirm("删除该任务及其日志？")) return
     try {
       await deleteJob(id)
-      await reload()
+      await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败")
     }
@@ -2279,7 +2314,7 @@ export default function JobsPage() {
     if (!confirm("清空所有已结束的任务？")) return
     try {
       await clearFinishedJobs()
-      await reload()
+      await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "清空失败")
     }
@@ -2290,34 +2325,37 @@ export default function JobsPage() {
     setPollMsState(ms)
   }
 
+  const hasRunning = jobs.some((j) => j.status === "running")
+
   return (
     <PageShell>
       <PageHeader
         title="任务"
         description="后台长跑任务（全站主帖归档等）"
       />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onStart}
-          disabled={busy || jobs.some((j) => j.status === "running")}
-          className="inline-flex items-center gap-1 rounded bg-stone-800 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+          disabled={busy || hasRunning || !archiveSupported}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          title={!archiveSupported ? "当前站点不支持归档" : undefined}
         >
           <Play size={14} /> 开始归档
         </button>
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex items-center gap-1 rounded border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Trash2 size={14} /> 清空已结束
         </button>
-        <label className="ml-auto text-xs text-stone-500">
+        <label className="ml-auto text-xs text-muted-foreground">
           刷新间隔
           <select
             value={pollMs}
             onChange={(e) => onChangePoll(Number(e.target.value))}
-            className="ml-2 rounded border border-stone-300 px-1 py-0.5"
+            className="ml-2 rounded-lg border border-border bg-background px-1.5 py-1"
           >
             {POLL_OPTIONS.map((ms) => (
               <option key={ms} value={ms}>
@@ -2327,13 +2365,19 @@ export default function JobsPage() {
           </select>
         </label>
       </div>
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-      {loading ? (
-        <p className="text-sm text-stone-500">加载中…</p>
-      ) : jobs.length === 0 ? (
-        <p className="text-sm text-stone-500">暂无任务</p>
-      ) : (
-        <ul className="space-y-2">
+      {!archiveSupported && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          当前站点不支持归档（仅论坛站可归档主帖）。
+        </p>
+      )}
+      <AsyncBody
+        loading={loading}
+        error={error}
+        empty={jobs.length === 0}
+        onRetry={() => void reload()}
+        emptyText="暂无任务"
+      >
+        <ul className="space-y-2.5">
           {jobs.map((job) => (
             <JobRow
               key={job.id}
@@ -2344,13 +2388,11 @@ export default function JobsPage() {
             />
           ))}
         </ul>
-      )}
+      </AsyncBody>
     </PageShell>
   )
 }
 ```
-
-> 实现时确认 `PageShell` / `PageHeader` 的 import 路径与 props 形状与 `GroupPage.tsx` 一致；若组件名或 props 不同，参照 `GroupPage.tsx` 实际用法调整。
 
 - [ ] **Step 5: typecheck + 构建验证**
 
@@ -2360,7 +2402,7 @@ Expected: PASS。
 - [ ] **Step 6: 提交**
 
 ```bash
-git add apps/web/src/pages/JobsPage.tsx apps/web/src/components/JobRow.tsx apps/web/src/components/JobLogPanel.tsx apps/web/src/App.tsx
+git add apps/web/src/pages/JobsPage.tsx apps/web/src/components/job-row.tsx apps/web/src/components/job-log-panel.tsx apps/web/src/App.tsx
 git commit -m "feat(web): /jobs page with polling log panel and poll interval control"
 ```
 
@@ -2406,13 +2448,15 @@ git commit -m "feat(web): /jobs page with polling log panel and poll interval co
 
 - [ ] **Step 3: 写 ArchivePage**
 
-新建 `apps/web/src/pages/ArchivePage.tsx`：
+新建 `apps/web/src/pages/ArchivePage.tsx`（参照现网风格：kebab-case 组件路径、`AsyncBody`、design tokens）：
 
 ```tsx
 import { useCallback, useEffect, useState } from "react"
-import { PageShell } from "@/components/PageShell"
-import { PageHeader } from "@/components/PageHeader"
-import { api, readPath } from "@/lib/routes"
+import { Link } from "react-router-dom"
+import { PageShell } from "@/components/page-shell"
+import { AsyncBody } from "@/components/ui-state"
+import { PageHeader } from "@/components/page-header"
+import { api, readPath, routes } from "@/lib/routes"
 
 interface ArchivePost {
   site: string
@@ -2474,7 +2518,7 @@ export default function ArchivePage() {
   return (
     <PageShell>
       <PageHeader title="归档" description="全站主帖目录（tid + 标题）" />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         <input
           value={q}
           onChange={(e) => {
@@ -2482,7 +2526,7 @@ export default function ArchivePage() {
             setPage(1)
           }}
           placeholder="搜索标题"
-          className="rounded border border-stone-300 px-2 py-1 text-sm"
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
         />
         <div className="ml-auto flex gap-1">
           {(Object.keys(SORT_LABEL) as SortKey[]).map((key) => (
@@ -2493,10 +2537,10 @@ export default function ArchivePage() {
                 setSort(key)
                 setPage(1)
               }}
-              className={`rounded px-2 py-1 text-sm ${
+              className={`rounded-lg px-2.5 py-1 text-sm transition-colors ${
                 sort === key
-                  ? "bg-stone-800 text-white"
-                  : "border border-stone-300 hover:bg-stone-100"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
               }`}
             >
               {SORT_LABEL[key]}
@@ -2504,50 +2548,64 @@ export default function ArchivePage() {
           ))}
         </div>
       </div>
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-      {loading ? (
-        <p className="text-sm text-stone-500">加载中…</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-stone-500">
-          还没有归档，去<a className="text-blue-600 underline">/jobs</a>
-          开始一次归档任务
-        </p>
-      ) : (
-        <>
-          <ul className="space-y-1">
-            {items.map((it) => (
-              <li key={`${it.site}:${it.tid}`} className="flex items-baseline gap-2">
-                <a
-                  href={readPath(it.tid, it.site)}
-                  className="text-sm text-stone-800 hover:underline"
-                >
-                  {it.title}
-                </a>
-                <span className="text-xs text-stone-400">#{it.tid}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded border border-stone-300 px-2 py-1 text-sm disabled:opacity-50"
+      <AsyncBody
+        loading={loading}
+        error={error}
+        empty={items.length === 0}
+        onRetry={() => void reload()}
+        emptyText={
+          <>
+            还没有归档，去
+            <Link
+              to={routes.jobs}
+              className="text-foreground underline underline-offset-2"
             >
-              上一页
-            </button>
-            <span className="px-2 py-1 text-sm text-stone-500">第 {page} 页</span>
-            <button
-              type="button"
-              disabled={!nextPage}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded border border-stone-300 px-2 py-1 text-sm disabled:opacity-50"
+              任务
+            </Link>
+            开始一次归档
+          </>
+        }
+      >
+        <ul className="space-y-1.5">
+          {items.map((it) => (
+            <li
+              key={`${it.site}:${it.tid}`}
+              className="flex items-baseline gap-2"
             >
-              下一页
-            </button>
-          </div>
-        </>
-      )}
+              <a
+                href={readPath(it.tid, it.site)}
+                className="text-sm text-foreground hover:underline"
+              >
+                {it.title}
+              </a>
+              <span className="text-xs text-muted-foreground/70 tabular-nums">
+                #{it.tid}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-5 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="rounded-lg border border-border px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            上一页
+          </button>
+          <span className="px-2 py-1 text-sm text-muted-foreground tabular-nums">
+            第 {page} 页
+          </span>
+          <button
+            type="button"
+            disabled={!nextPage}
+            onClick={() => setPage((p) => p + 1)}
+            className="rounded-lg border border-border px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            下一页
+          </button>
+        </div>
+      </AsyncBody>
     </PageShell>
   )
 }
