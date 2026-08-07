@@ -113,15 +113,24 @@ const POLL_MS_KEY = "purifier:jobs:pollMs"
 const POLL_OPTIONS = [1000, 1500, 2000, 5000, 10000] as const
 
 export function getPollMs(): number {
-  const raw = Number(localStorage.getItem(POLL_MS_KEY))
-  return POLL_OPTIONS.includes(raw as (typeof POLL_OPTIONS)[number])
-    ? raw
-    : 1500
+  try {
+    const raw = Number(localStorage.getItem(POLL_MS_KEY))
+    return POLL_OPTIONS.includes(raw as (typeof POLL_OPTIONS)[number])
+      ? raw
+      : 1500
+  } catch {
+    // 隐私模式/配额：静默，用默认值
+    return 1500
+  }
 }
 
 export function setPollMs(ms: number): void {
   if (POLL_OPTIONS.includes(ms as (typeof POLL_OPTIONS)[number])) {
-    localStorage.setItem(POLL_MS_KEY, String(ms))
+    try {
+      localStorage.setItem(POLL_MS_KEY, String(ms))
+    } catch {
+      // 隐私模式/配额：静默，仅内存态生效
+    }
   }
 }
 
