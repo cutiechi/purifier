@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { ChevronDown } from "lucide-react"
 import { IconBookOpen } from "@/components/icons"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
@@ -88,9 +89,9 @@ export function FavoritedGroupCard({
                 parsed.chapters ? { ...parsed, chapters: null } : parsed
               )
               return (
-                <a
+                <Link
                   key={m.tid}
-                  href={readPath(m.tid)}
+                  to={readPath(m.tid)}
                   className="flex min-w-0 flex-col rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
                 >
                   <span className="line-clamp-1 text-sm font-medium text-foreground">
@@ -99,7 +100,7 @@ export function FavoritedGroupCard({
                   {sub && (
                     <span className="text-xs text-muted-foreground">{sub}</span>
                   )}
-                </a>
+                </Link>
               )
             })}
           {showSimilar && (

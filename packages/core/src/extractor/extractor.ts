@@ -269,13 +269,11 @@ export class Cool18Extractor implements Extractor {
       })
     }
 
-    // threadInfo JS
-    const threadInfoMatch = html.match(
-      /const\s+threadInfo\s*=\s*(\{[\s\S]*?\});/
-    )
-    if (threadInfoMatch?.[1]) {
+    // threadInfo JS：括号深度提取，避免 [\s\S]*? ReDoS
+    const threadInfoRaw = extractJsonObjectAfter(html, "const threadInfo")
+    if (threadInfoRaw) {
       try {
-        const info = JSON.parse(threadInfoMatch[1]) as {
+        const info = JSON.parse(threadInfoRaw) as {
           uid?: string | number
           username?: string
         }
@@ -293,12 +291,10 @@ export class Cool18Extractor implements Extractor {
     }
 
     // JSON-LD Article
-    const ldMatch = html.match(
-      /<script[^>]*type=["']application\/ld\+json["'][^>]*>\s*(\{[\s\S]*?\})\s*<\/script>/i
-    )
-    if (ldMatch?.[1]) {
+    const ldRaw = extractJsonObjectAfter(html, "application/ld+json")
+    if (ldRaw) {
       try {
-        const ld = JSON.parse(ldMatch[1]) as {
+        const ld = JSON.parse(ldRaw) as {
           author?: { name?: string }
           datePublished?: string
           commentCount?: string | number
@@ -675,12 +671,18 @@ export class Cool18Extractor implements Extractor {
       if (list) list.push(item)
       else byUptid.set(key, [item])
     }
+    // 路径环检测：互引 uptid 时不再递归，避免栈溢出
+    const visiting = new Set<string>()
     const build = (id: string): ReplyNode[] => {
+      if (visiting.has(id)) return []
+      visiting.add(id)
       const children = byUptid.get(String(id)) ?? []
-      return children.map((item) => ({
+      const nodes = children.map((item) => ({
         ...item,
         children: build(item.tid),
       }))
+      visiting.delete(id)
+      return nodes
     }
     return build(parentId)
   }
@@ -825,7 +827,10 @@ export class Cool18Extractor implements Extractor {
     return text.trim()
   }
 
-  async fetchHomeLinks(mtid: string): Promise<HomePage> {
+  async fetchHomeLinks(
+    mtid: string,
+    signal?: AbortSignal
+  ): Promise<HomePage> {
     // 仅允许数字游标，防止脏 query 注入
     if (!/^\d+$/.test(mtid)) {
       throw new ExtractorError("invalid mtid", 400)
@@ -836,6 +841,7 @@ export class Cool18Extractor implements Extractor {
         headers: {
           Referer: "https://www.cool18.com/bbs4/index.php",
         },
+        signal,
       }
     )
 
@@ -843,34 +849,45 @@ export class Cool18Extractor implements Extractor {
       throw new ExtractorError(`upstream error: ${resp.status}`, 502)
     }
 
-    const data = (await resp.json()) as Array<{
-      tid: string
-      subject: string
-      rootid: string
-    }>
+    let data: unknown
+    try {
+      data = await resp.json()
+    } catch {
+      throw new ExtractorError("invalid home links response", 502)
+    }
+    if (!Array.isArray(data)) {
+      throw new ExtractorError("invalid home links response", 502)
+    }
 
     // 只取主帖（rootid === "0"），去重，清理标题中的 HTML
     const seen = new Set<string>()
     const links: ChapterLink[] = []
     let nextMtid: string | null = null
 
-    for (const item of data) {
-      if (item.rootid !== "0") continue
-      if (!item.tid || seen.has(item.tid)) continue
-      seen.add(item.tid)
+    for (const item0 of data) {
+      if (!item0 || typeof item0 !== "object") continue
+      const item = item0 as {
+        tid?: string
+        subject?: string
+        rootid?: string
+      }
+      if (String(item.rootid ?? "") !== "0") continue
+      const tid = String(item.tid ?? "")
+      if (!tid || !/^\d+$/.test(tid) || seen.has(tid)) continue
+      seen.add(tid)
 
       // 下一页游标：本批主帖中最小的 tid（与原站 _mtid 推进逻辑一致）
       if (
         nextMtid === null ||
-        parseInt(item.tid, 10) < parseInt(nextMtid, 10)
+        parseInt(tid, 10) < parseInt(nextMtid, 10)
       ) {
-        nextMtid = item.tid
+        nextMtid = tid
       }
 
       links.push({
         index: 0,
-        title: this.stripHtml(item.subject),
-        tid: item.tid,
+        title: this.stripHtml(String(item.subject ?? "")),
+        tid,
       })
     }
 
@@ -897,20 +914,64 @@ export class Cool18Extractor implements Extractor {
   }
 
   private extractTid(href: string): string | null {
-    const m = href.match(/[?&#]tid=([^&#"'\s]+)/i)
+    const m = href.match(/[?&#]tid=(\d+)/i)
     if (m?.[1]) return m[1]
-    // bare query: tid=123
-    const bare = href.match(/(?:^|[?&])tid=([^&#"'\s]+)/i)
+    const bare = href.match(/(?:^|[?&])tid=(\d+)/i)
     return bare?.[1] ?? null
   }
 
   private extractCid(href: string): string | null {
-    const m = href.match(/[?&#]cid=([^&#"'\s]+)/i)
+    // cool18 book cid 与 xbook 不同；此处仅 cool18，限制安全 id 字符
+    const m = href.match(/[?&#]cid=([A-Za-z0-9]+)/i)
     if (m?.[1]) return m[1]
     if (/bookview/i.test(href)) {
-      const bare = href.match(/(?:^|[?&])cid=([^&#"'\s]+)/i)
+      const bare = href.match(/(?:^|[?&])cid=([A-Za-z0-9]+)/i)
       return bare?.[1] ?? null
     }
     return null
   }
+}
+
+/**
+ * 从 marker 之后找首个 `{`，按括号深度（识别字符串转义）截取完整 JSON 对象。
+ * 替代 `\{[\s\S]*?\}` 避免 ReDoS / 二次扫描。
+ */
+function extractJsonObjectAfter(
+  html: string,
+  marker: string,
+  maxLen = 50_000
+): string | null {
+  const mi = html.indexOf(marker)
+  if (mi < 0) return null
+  const start = html.indexOf("{", mi)
+  if (start < 0) return null
+  let depth = 0
+  let inStr = false
+  let esc = false
+  const end = Math.min(html.length, start + maxLen)
+  for (let i = start; i < end; i++) {
+    const c = html[i]!
+    if (inStr) {
+      if (esc) {
+        esc = false
+        continue
+      }
+      if (c === "\\") {
+        esc = true
+        continue
+      }
+      if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') {
+      inStr = true
+      continue
+    }
+    if (c === "{") depth++
+    else if (c === "}") {
+      depth--
+      if (depth === 0) return html.slice(start, i + 1)
+    }
+  }
+  return null
 }

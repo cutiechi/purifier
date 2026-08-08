@@ -251,10 +251,13 @@ export class XbookcnExtractor implements Extractor {
    * - mtid=0 或空 → 抓首页 `/`，解析「时间线更新」卡片；nextMtid="1"
    * - mtid=n (n≥1) → 抓 `/novels/{n}`（实测 /novels/1 可用）；有「下一页」则 nextMtid=String(n+1)
    */
-  async fetchHomeLinks(mtid: string): Promise<HomePage> {
+  async fetchHomeLinks(
+    mtid: string,
+    signal?: AbortSignal
+  ): Promise<HomePage> {
     const page = parseInt(mtid, 10) || 0
     const url = page >= 1 ? `${this.homeUrl}/novels/${page}` : this.homeUrl
-    const resp = await fetchUpstream(url)
+    const resp = await fetchUpstream(url, { signal })
     if (!resp.ok)
       throw new ExtractorError(`upstream error: ${resp.status}`, 502)
     const html = await resp.text()

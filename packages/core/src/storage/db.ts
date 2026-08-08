@@ -110,6 +110,7 @@ export function openDatabase(dataDir: string): Database {
   const db = new Database(join(dataDir, "purifier.db"))
   db.exec("PRAGMA journal_mode = WAL;")
   db.exec("PRAGMA foreign_keys = ON;")
+  db.exec("PRAGMA busy_timeout = 5000;")
   db.exec(DDL)
   // 1. 旧库补 read_progress（保留原幂等块，必须在 site 重建之前）
   const colsRp = db.query("PRAGMA table_info(items)").all() as {

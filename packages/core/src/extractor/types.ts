@@ -138,7 +138,7 @@ export interface Extractor {
   /** 章节 URL（xbookcn 用；cool18 不实现即 undefined，API 层可选链调用） */
   buildChapterUrl?(cid: string, chapter: string | number): string
   fetchCategoryPage(query: CategoryQuery, page: number): Promise<CategoryPage>
-  fetchHomeLinks(mtid: string): Promise<HomePage>
+  fetchHomeLinks(mtid: string, signal?: AbortSignal): Promise<HomePage>
   fetchReplies(tid: string): Promise<ReplyNode[]>
   /** 拉取 achildlist 原始文本（Referer: buildUrl(tid)）；网络失败抛 ExtractorError(502) */
   fetchRepliesRaw(tid: string): Promise<string>

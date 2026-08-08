@@ -28,7 +28,12 @@ export async function fetchUpstream(
 ): Promise<Response> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, headers, signal, ...rest } = init
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  // 区分「本函数超时」与「外部 signal 取消」，避免客户端取消被记成 504
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
 
   const onAbort = () => controller.abort()
   signal?.addEventListener("abort", onAbort)
@@ -36,6 +41,8 @@ export async function fetchUpstream(
   try {
     const mergedHeaders: Record<string, string> = {
       "User-Agent": DEFAULT_UA,
+      Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
       ...Object.fromEntries(new Headers(headers).entries()),
     }
 
@@ -46,8 +53,14 @@ export async function fetchUpstream(
       signal: controller.signal,
       headers: mergedHeaders,
     }
-    if (proxy && typeof Bun !== "undefined") {
-      opts.proxy = proxy
+    if (proxy) {
+      if (typeof globalThis.Bun !== "undefined") {
+        opts.proxy = proxy
+      } else {
+        console.warn(
+          "[upstream] HTTPS_PROXY set but runtime is not Bun; proxy ignored"
+        )
+      }
     }
 
     return await fetch(url, opts)
@@ -56,7 +69,9 @@ export async function fetchUpstream(
       err instanceof Error &&
       (err.name === "AbortError" || err.name === "TimeoutError")
     ) {
-      throw new UpstreamTimeoutError()
+      if (timedOut) throw new UpstreamTimeoutError()
+      // 外部取消：透传 AbortError，API 可映射为非 504
+      throw err
     }
     throw err
   } finally {

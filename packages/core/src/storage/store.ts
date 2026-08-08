@@ -774,12 +774,20 @@ export class Store {
   }
 
   markStaleJobsInterrupted(): number {
+    const now = this.now()
     const res = this.db
       .query(
         `UPDATE jobs SET status='interrupted', finished_at=?1
          WHERE status IN ('running','pending')`
       )
-      .run(this.now())
+      .run(now)
+    // 崩溃后归档游标可能残留 running，一并标 interrupted（续跑仍靠 next_mtid）
+    this.db
+      .query(
+        `UPDATE archive_cursors SET status='interrupted', updated_at=?1
+         WHERE status='running'`
+      )
+      .run(now)
     return Number(res.changes ?? 0)
   }
 

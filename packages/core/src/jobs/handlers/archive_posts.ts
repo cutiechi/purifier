@@ -13,9 +13,12 @@ export class ArchivePostsJob implements JobHandler {
    * 测试 seam：默认走真实 extractor.fetchHomeLinks；测试可覆盖。
    * 生产代码用 this.run 里的实现，这里给个可覆盖的实例方法。
    */
-  fetchPage = async (mtid: string): Promise<HomePage> => {
+  fetchPage = async (
+    mtid: string,
+    signal?: AbortSignal
+  ): Promise<HomePage> => {
     const extractor = resolveSite("1")
-    return extractor.fetchHomeLinks(mtid)
+    return extractor.fetchHomeLinks(mtid, signal)
   }
 
   constructor(
@@ -101,7 +104,7 @@ export class ArchivePostsJob implements JobHandler {
     while (!ctx.signal.aborted) {
       let page: HomePage
       try {
-        page = await this.fetchPage(mtid)
+        page = await this.fetchPage(mtid, ctx.signal)
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
         ctx.log("warn", `page ${pages + 1} failed: ${lastError}; stopping`)
@@ -216,10 +219,11 @@ export class ArchivePostsJob implements JobHandler {
 
       if (maxPages != null && pages >= maxPages) {
         ctx.log("info", `maxPages=${maxPages} reached; pause for resume`)
+        // keep actual mode (not force full) so status display stays correct
         stopReason = "max_pages"
         this.store.setArchiveCursor(site, {
           next_mtid: page.nextMtid,
-          mode: "full",
+          mode,
           status: "interrupted",
           pages,
         })

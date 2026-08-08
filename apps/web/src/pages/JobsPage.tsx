@@ -77,25 +77,32 @@ export default function JobsPage() {
     void reload()
   }, [reload])
 
-  // 有 running job 时按 pollMs silent 刷新
+  // 有 running job 时按 pollMs silent 刷新（用 ref 读 jobs，避免每次 setJobs 重建计时器）
+  const jobsRef = useRef(jobs)
+  jobsRef.current = jobs
   useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running")
-    if (!hasRunning) return
     let cancelled = false
     let t: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
+      const hasRunning = jobsRef.current.some((j) => j.status === "running")
+      if (!hasRunning || cancelled) return
       try {
         await reload({ silent: true })
       } finally {
-        if (!cancelled) t = setTimeout(tick, pollMs)
+        if (!cancelled && jobsRef.current.some((j) => j.status === "running")) {
+          t = setTimeout(tick, pollMs)
+        }
       }
     }
-    t = setTimeout(tick, pollMs)
+    // 仅当当前已有 running 时启动轮询
+    if (jobsRef.current.some((j) => j.status === "running")) {
+      t = setTimeout(tick, pollMs)
+    }
     return () => {
       cancelled = true
       if (t) clearTimeout(t)
     }
-  }, [jobs, pollMs, reload])
+  }, [pollMs, reload, !!jobs.some((j) => j.status === "running")])
 
   // 运行中 → 结束：完成提示 + 可选系统通知
   useEffect(() => {

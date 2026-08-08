@@ -1,4 +1,5 @@
-import { type ReactNode, useCallback } from "react"
+import { type ReactNode, useCallback, useMemo } from "react"
+import DOMPurify from "dompurify"
 import { useNavigate } from "react-router-dom"
 import { IconExternal } from "@/components/icons"
 import { PostMetaBar, type PostMetaFields } from "@/components/post-meta"
@@ -7,16 +8,27 @@ import { ReadingProgress } from "@/components/reading-progress"
 import { readPath } from "@/lib/routes"
 
 function withParagraphs(html: string): string {
-  // 内容已由 extractPreHtml 清洗：仅转义文本 + 站内 /read|/book 锚点。
-  // 这里只处理字面 \n，不做二次 innerHTML 解析。
+  // 后端 extractPreHtml 已清洗；前端再 DOMPurify 兜底（纵深防御）。
   return html
     .split(/\n{2,}/)
     .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
     .join("")
 }
 
+function sanitizeBodyHtml(html: string): string {
+  // 仅保留段落/换行/站内链接；剥 script/img/on* 等
+  return DOMPurify.sanitize(withParagraphs(html), {
+    ALLOWED_TAGS: ["p", "br", "a"],
+    ALLOWED_ATTR: ["href"],
+    ALLOW_DATA_ATTR: false,
+    // 相对站内路径
+    ALLOWED_URI_REGEXP: /^(?:\/(?:read|book)\/)/i,
+  })
+}
+
 export function ContentBody({ html }: { html: string }) {
   const navigate = useNavigate()
+  const safeHtml = useMemo(() => sanitizeBodyHtml(html), [html])
 
   const onClick = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
@@ -35,7 +47,7 @@ export function ContentBody({ html }: { html: string }) {
   return (
     <div
       className="reading-body text-foreground/85"
-      dangerouslySetInnerHTML={{ __html: withParagraphs(html) }}
+      dangerouslySetInnerHTML={{ __html: safeHtml }}
       onClick={onClick}
     />
   )

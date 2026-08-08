@@ -48,7 +48,14 @@ export class ArchiveAutoGroupJob implements JobHandler {
     }
     const buckets = new Map<string, Bucket>()
 
+    let scanned = 0
     for (const p of posts) {
+      scanned++
+      // 分桶阶段也可中止，避免大库扫完才响应 stop
+      if (scanned % 500 === 0 && ctx.signal.aborted) {
+        ctx.log("warn", "aborted during bucket scan")
+        break
+      }
       const parsed = parseListTitle(p.title)
       const key = normalizeTitleKey(parsed.title)
       if (!key) continue

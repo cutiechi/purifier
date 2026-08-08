@@ -32,8 +32,12 @@ export class JobRunner {
     }
     const controller = new AbortController()
     this.running.set(job.id, controller)
-    // 不 await：后台跑，立即返回 running job
-    void this.runJob(job.id, handler, payload ?? {}, controller.signal)
+    // 不 await：后台跑，立即返回 running job；挂 catch 防未处理 rejection
+    void this.runJob(job.id, handler, payload ?? {}, controller.signal).catch(
+      (err) => {
+        console.error(`[jobs] runJob ${job.id} unhandled:`, err)
+      }
+    )
     return this.store.getJob(job.id)!
   }
 
@@ -75,7 +79,21 @@ export class JobRunner {
       ctx.log("error", `job failed: ${error}`)
     } finally {
       this.running.delete(jobId)
-      this.store.markFinished(jobId, status, result, error)
+      try {
+        this.store.markFinished(jobId, status, result, error)
+      } catch (finalizeErr) {
+        console.error(`[jobs] markFinished ${jobId} failed:`, finalizeErr)
+        try {
+          this.store.markFinished(
+            jobId,
+            "failed",
+            null,
+            "finalize failed"
+          )
+        } catch (e2) {
+          console.error(`[jobs] markFinished fallback ${jobId} failed:`, e2)
+        }
+      }
     }
   }
 }

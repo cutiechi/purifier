@@ -26,18 +26,22 @@ export function useAsyncList<T>(
   const [error, setError] = useState("")
   const pickRef = useRef(pick)
   pickRef.current = pick
+  const seqRef = useRef(0)
 
   const reload = useCallback(async () => {
+    const seq = ++seqRef.current
     setLoading(true)
     setError("")
     try {
       const next = await fetchJsonList(url, (json) => pickRef.current(json))
+      if (seq !== seqRef.current) return
       setItems(next)
     } catch (e) {
+      if (seq !== seqRef.current) return
       setError(e instanceof Error ? e.message : "未知错误")
       setItems([])
     } finally {
-      setLoading(false)
+      if (seq === seqRef.current) setLoading(false)
     }
   }, [url])
 

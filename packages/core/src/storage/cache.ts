@@ -1,4 +1,12 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises"
 import { join } from "node:path"
 import { ExtractorError } from "../extractor/types"
 import { ItemKind } from "./types"
@@ -70,7 +78,10 @@ export async function writeContentCache(
 ): Promise<void> {
   const path = contentCachePath(dataDir, site, kind, id, chapter)
   await mkdir(join(dataDir, "cache", site), { recursive: true })
-  await writeFile(path, html, "utf8")
+  // 原子写：先 tmp 再 rename，避免崩溃留下截断文件被当成命中
+  const tmp = `${path}.tmp`
+  await writeFile(tmp, html, "utf8")
+  await rename(tmp, path)
 }
 
 /** 读回复 JSON 缓存；无缓存返回 null（data 类型由调用方校验，损坏 JSON 抛错） */
@@ -100,11 +111,50 @@ export async function writeRepliesCache(
   replies: unknown
 ): Promise<void> {
   await mkdir(join(dataDir, "cache", site), { recursive: true })
-  await writeFile(
-    repliesCachePath(dataDir, site, id),
-    JSON.stringify(replies),
-    "utf8"
-  )
+  const path = repliesCachePath(dataDir, site, id)
+  const tmp = `${path}.tmp`
+  await writeFile(tmp, JSON.stringify(replies), "utf8")
+  await rename(tmp, path)
+}
+
+/**
+ * 删除某条目相关磁盘缓存（正文/章节/回复）。
+ * 删历史/收藏时调用，避免 DB 无记录但缓存仍命中旧正文。
+ */
+export async function deleteItemCaches(
+  dataDir: string,
+  site: string,
+  kind: ItemKind,
+  id: string
+): Promise<number> {
+  assertSafeId(site)
+  assertSafeId(id)
+  const dir = join(dataDir, "cache", site)
+  let n = 0
+  try {
+    const files = await readdir(dir)
+    for (const name of files) {
+      const hit =
+        kind === "post"
+          ? name === `post-${id}.html` ||
+            name === `replies-${id}.json` ||
+            name.startsWith(`post-${id}.`)
+          : name === `book-${id}.html` ||
+            name.startsWith(`book-${id}-ch`) ||
+            name.startsWith(`book-${id}.`)
+      if (!hit) continue
+      // 跳过进行中的 .tmp（rename 目标会覆盖）
+      try {
+        await rm(join(dir, name), { force: true })
+        n++
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
+  }
+  return n
 }
 
 /** 清空 cache/ 目录下全部文件（含 site 子目录）；返回删除数量；目录不存在返回 0 */

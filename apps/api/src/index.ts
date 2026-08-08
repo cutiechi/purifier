@@ -16,6 +16,7 @@ import {
   JobRunner,
   assertSafeId,
   clearCache,
+  deleteItemCaches,
   fetchUpstream,
   jsonError,
   jsonOk,
@@ -55,10 +56,13 @@ function toErrorResponse(err: unknown): Response {
   if (err instanceof ExtractorError) {
     return jsonError(err.message, err.statusCode)
   }
-  if (err instanceof Error) {
-    return jsonError(err.message, 500)
+  // 客户端取消等 AbortError：不当 504
+  if (err instanceof Error && err.name === "AbortError") {
+    return jsonError("request aborted", 499)
   }
-  return jsonError("unknown error", 500)
+  // 未知错误不回传内部 message（路径/SQL 等）
+  console.error("[api] internal error:", err)
+  return jsonError("internal error", 500)
 }
 
 function requireGet(req: Request): void {
@@ -189,8 +193,10 @@ async function loadCachedContent(
   }
 }
 
-/** 列表接口进程内 TTL 缓存（CDN s-maxage 在自建场景不落地） */
+/** 列表接口进程内 TTL + LRU（CDN s-maxage 在自建场景不落地） */
 const LIST_MEM_TTL_MS = 45_000
+const LIST_MEM_MAX = 256
+const LIST_MEM_KEY_MAX = 512
 const listMemCache = new Map<string, { expires: number; data: unknown }>()
 
 function getListMemCache<T>(key: string): T | null {
@@ -200,10 +206,27 @@ function getListMemCache<T>(key: string): T | null {
     listMemCache.delete(key)
     return null
   }
+  // LRU：移到末尾
+  listMemCache.delete(key)
+  listMemCache.set(key, e)
   return e.data as T
 }
 
 function setListMemCache(key: string, data: unknown): void {
+  if (key.length > LIST_MEM_KEY_MAX) return
+  // 顺手清一批过期
+  if (listMemCache.size >= LIST_MEM_MAX) {
+    const now = Date.now()
+    for (const [k, v] of listMemCache) {
+      if (v.expires <= now) listMemCache.delete(k)
+    }
+  }
+  while (listMemCache.size >= LIST_MEM_MAX) {
+    const oldest = listMemCache.keys().next().value
+    if (oldest === undefined) break
+    listMemCache.delete(oldest)
+  }
+  if (listMemCache.has(key)) listMemCache.delete(key)
   listMemCache.set(key, { expires: Date.now() + LIST_MEM_TTL_MS, data })
 }
 
@@ -427,7 +450,13 @@ async function handleBooks(url: URL): Promise<Response> {
 async function handleBrowse(url: URL): Promise<Response> {
   const type = url.searchParams.get("type")
   const q = url.searchParams.get("q")
-  const page = parseInt(url.searchParams.get("page") || "1", 10) || 1
+  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1)
+  if (type && type.length > 200) {
+    return jsonError("type too long", 400)
+  }
+  if (q && q.length > 200) {
+    return jsonError("q too long", 400)
+  }
   const query = type ? { type } : q ? { keywords: q } : null
   if (!query) return jsonError("missing type or q parameter", 400)
 
@@ -477,7 +506,12 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const site = url.searchParams.get("site") ?? undefined
   if (url.searchParams.get("all") === "1") {
+    // 全清历史：顺带清全部内容缓存（无按站精确枚举文件，整清 cache/）
     const removed = store.clearHistory(site)
+    if (!site) {
+      await clearCache(DATA_DIR)
+    }
+    // 带 site 时不全清 cache 目录（避免误伤他站）；单站孤儿缓存可接受，下次 refresh 覆盖
     return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
   }
 
@@ -486,7 +520,9 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
   if (kindRaw !== null || idRaw !== null) {
     const kind = meKindParam(url)
     const id = meIdParam(url)
-    const existed = store.deleteItem(site ?? "1", kind, id)
+    const siteId = site ?? "1"
+    const existed = store.deleteItem(siteId, kind, id)
+    if (existed) await deleteItemCaches(DATA_DIR, siteId, kind, id)
     return jsonOk({ ok: true, removed: existed ? 1 : 0 }, NO_STORE_HEADERS)
   }
 
@@ -505,6 +541,9 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
   if (!Array.isArray(items) || valid.length !== items.length) {
     return jsonError("items must be {site?,kind,id}[]", 400)
   }
+  if (valid.length > 1000) {
+    return jsonError("items too many (max 1000)", 400)
+  }
   // review I1：每条带自己的 site（缺省 "1"），跨站"清空本页"不会删错站
   const pairs = valid.map((it) => ({
     site: it.site ?? "1",
@@ -512,6 +551,9 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
     id: it.id,
   }))
   const removed = store.deleteItems(pairs)
+  await Promise.all(
+    pairs.map((p) => deleteItemCaches(DATA_DIR, p.site, p.kind, p.id))
+  )
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
 }
 
@@ -956,14 +998,26 @@ async function handleTrending(url: URL): Promise<Response> {
 
 async function route(req: Request): Promise<Response> {
   const t0 = Date.now()
-  const res = await routeInner(req)
-  const url = new URL(req.url)
-  if (url.pathname.startsWith("/api")) {
-    console.log(
-      `${req.method} ${url.pathname}${url.search} ${res.status} ${Date.now() - t0}ms`
-    )
+  try {
+    const res = await routeInner(req)
+    const url = new URL(req.url)
+    if (url.pathname.startsWith("/api")) {
+      console.log(
+        `${req.method} ${url.pathname}${url.search} ${res.status} ${Date.now() - t0}ms`
+      )
+    }
+    return res
+  } catch (err) {
+    // 含 SPA 路径未捕获异常
+    const res = toErrorResponse(err)
+    const url = new URL(req.url)
+    if (url.pathname.startsWith("/api")) {
+      console.log(
+        `${req.method} ${url.pathname}${url.search} ${res.status} ${Date.now() - t0}ms`
+      )
+    }
+    return res
   }
-  return res
 }
 
 async function routeInner(req: Request): Promise<Response> {
