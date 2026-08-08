@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, Navigate, useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import {
   Download,
   FolderTree,
@@ -36,13 +36,14 @@ import {
   type ArchiveStatus,
   type Job,
 } from "@/lib/jobs"
-import { api, parsePage, routes } from "@/lib/routes"
+import { api, parsePage, routes, siteUrl } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
 export default function JobsPage() {
   const site = useSite()
   const confirm = useConfirm()
-  const archiveSupported = site === "1"
+  const isBooks = site === "2"
+  const archiveJobType = isBooks ? "archive_books" : "archive_posts"
   const [searchParams, setSearchParams] = useSearchParams()
   const page = parsePage(searchParams)
   const [jobs, setJobs] = useState<Job[]>([])
@@ -77,9 +78,7 @@ export default function JobsPage() {
       try {
         const [data, st] = await Promise.all([
           listJobs({ page }),
-          archiveSupported
-            ? getArchiveStatus("1")
-            : Promise.resolve<ArchiveStatus | null>(null),
+          getArchiveStatus(site),
         ])
         setJobs(data.items)
         setNextPage(data.nextPage)
@@ -91,7 +90,7 @@ export default function JobsPage() {
         if (!opts?.silent) setLoading(false)
       }
     },
-    [archiveSupported, page]
+    [site, page]
   )
 
   useEffect(() => {
@@ -187,7 +186,7 @@ export default function JobsPage() {
     setError("")
     try {
       requestNotify()
-      await startJob("archive_posts", { site: "1", mode })
+      await startJob(archiveJobType, { site, mode })
       if (page !== 1) update({ page: 1 })
       else await reload({ silent: true })
     } catch (e) {
@@ -202,7 +201,7 @@ export default function JobsPage() {
     setError("")
     try {
       requestNotify()
-      await startJob("archive_auto_group", { site: "1", minMembers: 2 })
+      await startJob("archive_auto_group", { site, minMembers: 2 })
       if (page !== 1) update({ page: 1 })
       else await reload({ silent: true })
     } catch (e) {
@@ -279,9 +278,8 @@ export default function JobsPage() {
   const runningJob = jobs.find((j) => j.status === "running")
   const hasRunning = !!runningJob
   const lastSuccess = jobs.find((j) => j.status === "succeeded")
-  const startDisabled = busy || hasRunning || !archiveSupported
+  const startDisabled = busy || hasRunning
   const canResume =
-    archiveSupported &&
     !!status?.cursor?.next_mtid &&
     (status.cursor.status === "interrupted" ||
       status.cursor.status === "running")
@@ -290,18 +288,16 @@ export default function JobsPage() {
     !startDisabled &&
     !!status?.cursor?.next_mtid &&
     status.cursor.status !== "done"
-  const startHint = !archiveSupported
-    ? "当前站点不支持归档（仅论坛站）"
-    : hasRunning
-      ? "已有任务在运行"
-      : busy
-        ? "启动中…"
-        : undefined
+  const startHint = hasRunning
+    ? "已有任务在运行"
+    : busy
+      ? "启动中…"
+      : undefined
 
   const cursorHint = status
     ? [
         `库内 ${status.total} 条`,
-        status.maxTid ? `最新 tid ${status.maxTid}` : null,
+        status.maxTid && !isBooks ? `最新 tid ${status.maxTid}` : null,
         status.cursor
           ? `游标 ${status.cursor.status}${
               status.cursor.next_mtid
@@ -316,16 +312,13 @@ export default function JobsPage() {
         .join(" · ")
     : null
 
-  // 任务仅论坛目录相关；带 ?site=2 时清回默认站
-  if (site !== "1") {
-    return <Navigate to={routes.jobs} replace />
-  }
+  // 任务页按站可用：论坛 archive_posts、书库 archive_books
 
   return (
     <PageShell>
       <PageHeader
         title="任务"
-        description="同步目录、自动分组与备份"
+        description={isBooks ? "同步书库目录与备份" : "同步目录、自动分组与备份"}
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -343,7 +336,7 @@ export default function JobsPage() {
               <Trash2 size={14} /> 清空缓存
             </button>
             <Link
-              to={routes.archive}
+              to={siteUrl(routes.archive, site)}
               className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               返回目录
@@ -351,7 +344,7 @@ export default function JobsPage() {
           </div>
         }
       />
-      <PageSiteTabs sites={["1"]} />
+      <PageSiteTabs sites={["1", "2"]} />
 
       {toast && (
         <div
@@ -379,7 +372,7 @@ export default function JobsPage() {
               to={
                 runningJob.type === "archive_auto_group"
                   ? routes.groups
-                  : routes.archive
+                  : siteUrl(routes.archive, site)
               }
               className="underline underline-offset-2"
             >
@@ -397,14 +390,17 @@ export default function JobsPage() {
           <div className="mt-0.5 text-xs opacity-90">
             {formatJobProgress(lastSuccess.result)}
             {" · "}
-            <Link to={routes.archive} className="underline underline-offset-2">
+            <Link
+              to={siteUrl(routes.archive, site)}
+              className="underline underline-offset-2"
+            >
               查看归档
             </Link>
           </div>
         </div>
       )}
 
-      {cursorHint && archiveSupported && (
+      {cursorHint && (
         <p className="mb-3 text-xs text-muted-foreground tabular-nums">
           {cursorHint}
         </p>
@@ -416,7 +412,7 @@ export default function JobsPage() {
             type="button"
             onClick={() => void onStart("full")}
             disabled={startDisabled}
-            title={startHint ?? "从最新帖往回全量扫描"}
+            title={startHint ?? (isBooks ? "从第 1 页（最新收录）往后扫" : "从最新帖往回全量扫描")}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             <Play size={14} /> 全量归档
@@ -427,7 +423,9 @@ export default function JobsPage() {
             disabled={!resumeEnabled}
             title={
               resumeEnabled
-                ? `从游标 ${status?.cursor?.next_mtid} 继续`
+                ? isBooks
+                  ? `从第 ${status?.cursor?.next_mtid} 页继续`
+                  : `从游标 ${status?.cursor?.next_mtid} 继续`
                 : "没有可续跑的游标（先跑全量或中断后再试）"
             }
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
@@ -438,20 +436,22 @@ export default function JobsPage() {
             type="button"
             onClick={() => void onStart("incremental")}
             disabled={startDisabled}
-            title="只扫比库内最新 tid 还新的帖子"
+            title={isBooks ? "只补比库内更新收录的书" : "只扫比库内最新 tid 还新的帖子"}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
           >
             <RefreshCw size={14} /> 增量更新
           </button>
-          <button
-            type="button"
-            onClick={() => void onAutoGroup()}
-            disabled={startDisabled}
-            title="按书名把归档里多章帖子自动写入分组（≥2 章）"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-          >
-            <FolderTree size={14} /> 归档自动分组
-          </button>
+          {!isBooks && (
+            <button
+              type="button"
+              onClick={() => void onAutoGroup()}
+              disabled={startDisabled}
+              title="按书名把归档里多章帖子自动写入分组（≥2 章）"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+            >
+              <FolderTree size={14} /> 归档自动分组
+            </button>
+          )}
           <button
             type="button"
             onClick={onClear}
@@ -478,12 +478,7 @@ export default function JobsPage() {
         </label>
       </div>
 
-      {!archiveSupported && (
-        <p className="mb-4 text-sm text-muted-foreground">
-          当前站点不支持归档（仅论坛站可归档主帖）。可切换到「论坛」后再启动。
-        </p>
-      )}
-      {startHint && archiveSupported && hasRunning && (
+      {startHint && hasRunning && (
         <p className="mb-4 text-xs text-muted-foreground">{startHint}</p>
       )}
       {canResume && !hasRunning && (
@@ -498,11 +493,11 @@ export default function JobsPage() {
         empty={jobs.length === 0}
         onRetry={() => void reload()}
         emptyText={
-          archiveSupported ? (
+          isBooks ? (
             <>
-              暂无任务。可用「全量归档」扫全站，「增量更新」只补新帖；中断后用「继续归档」。完成后可在
+              暂无任务。可用「全量归档」从第 1 页（最新收录）往后扫，「增量更新」只补新书；中断后用「继续归档」。完成后可在
               <Link
-                to={routes.archive}
+                to={siteUrl(routes.archive, site)}
                 className="text-foreground underline underline-offset-2"
               >
                 归档
@@ -510,7 +505,16 @@ export default function JobsPage() {
               浏览，或点「导出备份」下载本地数据。
             </>
           ) : (
-            "暂无任务"
+            <>
+              暂无任务。可用「全量归档」扫全站，「增量更新」只补新帖；中断后用「继续归档」。完成后可在
+              <Link
+                to={siteUrl(routes.archive, site)}
+                className="text-foreground underline underline-offset-2"
+              >
+                归档
+              </Link>
+              浏览，或点「导出备份」下载本地数据。
+            </>
           )
         }
       >

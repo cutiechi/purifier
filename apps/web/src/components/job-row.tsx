@@ -8,7 +8,7 @@ import {
   STATUS_LABEL,
   type Job,
 } from "@/lib/jobs"
-import { routes } from "@/lib/routes"
+import { routes, siteUrl } from "@/lib/routes"
 import { JobLogPanel } from "./job-log-panel"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -36,7 +36,11 @@ export function JobRow({
   const running = job.status === "running"
   const progress = formatJobProgress(job.result)
   const duration = formatJobDuration(job)
-  const isArchive = job.type === "archive_posts"
+  const isArchive =
+    job.type === "archive_posts" || job.type === "archive_books"
+  // 链接按任务 payload 的 site 落站（书库任务看书库归档）
+  const archiveSite =
+    typeof job.payload?.site === "string" ? job.payload.site : "1"
   const showArchiveLink =
     isArchive && (job.status === "succeeded" || job.status === "running")
 
@@ -84,7 +88,7 @@ export function JobRow({
           <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">
             {showArchiveLink && (
               <Link
-                to={routes.archive}
+                to={siteUrl(routes.archive, archiveSite)}
                 className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 查看归档

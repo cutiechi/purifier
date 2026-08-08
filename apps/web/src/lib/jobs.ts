@@ -32,6 +32,7 @@ export type ArchiveMode = "full" | "resume" | "incremental"
 
 export const JOB_TYPE_LABEL: Record<string, string> = {
   archive_posts: "全站主帖归档",
+  archive_books: "书库归档",
   archive_auto_group: "归档自动分组",
 }
 
