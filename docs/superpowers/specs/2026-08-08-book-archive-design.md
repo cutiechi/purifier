@@ -42,10 +42,11 @@ archive_books job（新）          archive_posts 表（已有，加 site=2 数�
 
 - `type = "archive_books"`
 - `fetchPage` 调 `resolveSite("2").fetchHomeLinks(页码, signal)` —— 复用已有的 `/novels/{n}` 抓取
-- 游标语义：`mtid` 是页码（"1", "2", ... 递增），起始页为 "1"
+- 游标语义：`mtid` 是页码（"1", "2", ... 递增），起始页为 **"1"**（不要从 "0" 起：`fetchHomeLinks("0")` 抓的是首页时间线，卡片语义不同）
 - 每页 sleep（默认 800ms，可配 delayMs），支持 maxPages 上限
 - payload：`{ site: "2", mode, delayMs?, maxPages? }`
 - progress 字段 shape 与 `archive_posts` 一致（`mode/pages/inserted/updated/nextMtid`），以便 `formatJobProgress` 直接复用
+- site 校验与 archive_posts 对称：`site` 非 `"2"` 抛错（payload 默认 `"2"`）
 
 三种模式：
 - **full**：从第 1 页翻到末页（nextMtid 为 null）
@@ -80,8 +81,9 @@ stop iff inserted === 0 && links.length > 0 && pages >= savedDepth
 - 去掉 `site !== "1"` 重定向（`:150-152`）
 - `PageSiteTabs` `sites={["1"]}` → `["1", "2"]`（`:168`）
 - **🔴 reload 必须传 site（评审问题 2）**：当前 `:79` 的请求只带 `sort/page/q`，API 默认 site="1"。改为 `params.set("site", site)`，否则 `/archive?site=2` 拉到的是论坛数据
+- **「更新目录」链接（:161）带 site**：否则书库站点击后回落 site=1，看到的是论坛任务页
 - **🔴 书库条目链接走 `/book/:cid`（评审问题 3）**：当前 `:225`/`:255` 统一用 `readPath(it.tid, it.site)`，书库 cid 走 `/read/:tid` 会 404（ReadPage 请求 `/api/posts?tid=`）。按 `it.site` 分流：site=2 用 `bookPath(it.tid, { site: it.site })`，参照 `me-item-card.tsx:42-43` / `BrowsePage.tsx:164`
-- **排序适配（评审问题 4，方案 A）**：书库默认 `sort=archived_at`（full 从第1页往后扫，第1页先入库=archived_at 最早，但第1页是 xbookcn 最新收录，故 archived_at desc 近似「最新收录」序），书库站隐藏「按 tid」选项（`CAST(tid AS INTEGER)` 对 base64 cid 全为 0，排序无意义）
+- **排序适配（评审问题 4，方案 A）**：书库默认 `sort=archived_at` + `order=asc`，书库站隐藏「按 tid」选项（`CAST(tid AS INTEGER)` 对 base64 cid 全为 0，排序无意义）。方向注意：full 从第 1 页（最新收录）往后扫，第 1 页先入库、archived_at 最早——**asc 才是最新收录在前**（API 对 archived_at 默认 desc，需显式传 `order=asc`；desc 会把最旧收录排最前）
 - **跳过书库标题分组（评审问题 8）**：`groupBooks`（`:139-147`）按标题折叠成 CollapsibleBookGroup，论坛语义是「多章帖子聚合」。书库每条本身是一本书，同名不同 cid 会误折叠，`parseListTitle` 的「【】」解析也可能误伤。site=2 直接渲染单条列表，不做分组
 - 描述 / 空态文案按站区分（论坛「本地全站主帖目录」/ 书库「本地全站书库目录」；空态同理）
 
@@ -103,7 +105,7 @@ stop iff inserted === 0 && links.length > 0 && pages >= savedDepth
 - 解除 `site !== "1"` 重定向（`:320-322`），书库站可访问
 - `onStart`（`:190`）按 site 切换 job type：论坛 `startJob("archive_posts", { site: "1", mode })`、书库 `startJob("archive_books", { site: "2", mode })`；`getArchiveStatus` 同理按当前 site 查（`:81`）
 - 按钮文案按站区分：论坛「从最新帖往回全量扫描」、书库「从第 1 页（最新收录）往后扫」
-- runningJob 横幅「打开归档目录」链接（`:386-388`）、「最近一次归档成功 / 查看归档」（`:400`）带 site；书库站「打开分组」不出现
+- runningJob 横幅「打开归档目录」链接（`:386-388`）、「最近一次归档成功 / 查看归档」（`:400`）、头部「返回目录」（`:346`）均带 site；书库站「打开分组」不出现
 - 空态文案（`:503-505`）按站区分（不再写死「全站主帖归档」）
 - 状态卡 cursorHint：书库的 maxTid 是随机 cid，文案改「最新 cid xxx」或不展示 maxTid 行（评审问题 4 连带）
 
@@ -141,6 +143,6 @@ bun run build
 浏览器（chrome-devtools）补充清单（评审问题 3、4）：
 - 书库站「目录」可进入、显示书库列表（归档后）、无分组 Tab
 - site=2 列表项点击进 `/book/:cid` 正常（不是 /read）
-- site=2 默认排序为归档时间序（archived_at desc，近似最新收录）
+- site=2 默认排序为归档时间序（archived_at asc，最新收录在前）
 - site=2 不显示「按 tid」排序选项
 - 搜索/分页可用、任务页可启动书库归档
