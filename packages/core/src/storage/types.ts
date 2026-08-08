@@ -73,6 +73,25 @@ export interface Group {
   items: GroupMember[]
 }
 
+/** 分组列表查询（分页 / 筛选 / 排序） */
+export type GroupSort = "updated" | "title" | "chapters"
+
+export interface GroupListQuery {
+  q?: string
+  page?: number
+  /** 默认 PAGE_SIZE，上限 100 */
+  limit?: number
+  /** true 只返回已收藏 */
+  favorited?: boolean
+  sort?: GroupSort
+}
+
+export interface GroupListResult {
+  items: Group[]
+  nextPage?: number
+  total: number
+}
+
 export type JobStatus =
   "pending" | "running" | "succeeded" | "failed" | "interrupted" | "aborted"
 

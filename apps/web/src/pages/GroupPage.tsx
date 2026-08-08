@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link, Navigate, useLocation } from "react-router-dom"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useSearchParams,
+} from "react-router-dom"
 import { ChevronDown, Star, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FilterTabs, ListMeta } from "@/components/form-controls"
+import {
+  FilterTabs,
+  ListMeta,
+  SearchForm,
+  useScrollTop,
+} from "@/components/form-controls"
 import { IconBookOpen } from "@/components/icons"
 import { GenrePill } from "@/components/list-post-card"
 import { PageHeader } from "@/components/page-header"
-import { PageShell } from "@/components/page-shell"
+import { PageShell, Pager } from "@/components/page-shell"
 import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
@@ -17,7 +27,12 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { useMeTabs } from "@/lib/hub-tabs"
 import { compareTid, type Group } from "@/lib/groups"
-import { api, readPath, routes } from "@/lib/routes"
+import {
+  formatListPagination,
+  ME_PAGE_SIZE,
+  totalPages as calcTotalPages,
+} from "@/lib/list-meta"
+import { api, parsePage, parseQuery, readPath, routes } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -122,141 +137,129 @@ function GroupCard({
     }
   }
 
+  const parsed = parseListTitle(group.title)
+  const meta = formatTitleMeta(
+    parsed.chapters ? { ...parsed, chapters: null } : parsed
+  )
+
   return (
-    <div
-      className={cn(
-        "rounded-2xl border bg-card/80 shadow-sm transition-all duration-200",
-        isExpanded
-          ? "border-border shadow-md"
-          : "border-border/80 hover:border-border"
-      )}
-    >
-      <div className="flex items-start gap-1.5 px-3 py-3 sm:items-center sm:gap-2 sm:px-4 sm:py-3.5">
+    <div className="overflow-hidden rounded-2xl border border-border/80 bg-card/90 shadow-sm">
+      <div className="flex items-stretch gap-0">
         <button
           type="button"
           onClick={onToggle}
-          aria-expanded={isExpanded}
-          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left sm:gap-3.5"
+          className="flex min-w-0 flex-1 items-start gap-3 px-3.5 py-3.5 text-left transition-colors hover:bg-accent/40 sm:px-4"
         >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground sm:h-9 sm:w-9 sm:rounded-lg">
+          <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <IconBookOpen size={16} />
           </span>
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="line-clamp-2 text-[15px] leading-snug font-medium text-foreground">
-              {group.title}
-            </span>
-            <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              {group.author ? (
-                <span className="truncate">
-                  {group.genre && group.author.includes(group.genre)
-                    ? group.author
-                        .replace(group.genre, "")
-                        .replace(/\s*[·•|]\s*$/, "")
-                        .replace(/^\s*[·•|]\s*/, "")
-                        .trim() || group.author
-                    : group.author}
-                </span>
-              ) : (
-                <span className="tabular-nums">共 {group.items.length} 章</span>
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="line-clamp-2 text-[15px] font-semibold leading-snug text-foreground">
+                {group.title}
+              </span>
+              {group.favorited && (
+                <Star
+                  size={13}
+                  className="shrink-0 fill-amber-400 text-amber-500"
+                  aria-label="已收藏"
+                />
               )}
-              {group.genre ? <GenrePill genre={group.genre} /> : null}
+              {group.genre && <GenrePill genre={group.genre} />}
             </span>
-          </span>
-          <span className="hidden shrink-0 rounded-lg bg-muted/70 px-2 py-1 text-xs font-medium text-muted-foreground tabular-nums sm:inline">
-            {group.items.length} 章
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+              <span>{group.items.length} 章</span>
+              {group.author && <span>· {group.author}</span>}
+              {meta && <span className="opacity-80">· {meta}</span>}
+            </span>
           </span>
           <ChevronDown
             size={16}
             className={cn(
-              "shrink-0 text-muted-foreground/50 transition-transform duration-200",
+              "mt-2 shrink-0 text-muted-foreground transition-transform",
               isExpanded && "rotate-180"
             )}
           />
         </button>
-        <button
-          type="button"
-          onClick={() => void toggleFavorite()}
-          disabled={busy}
-          aria-label={group.favorited ? "取消收藏分组" : "收藏分组"}
-          className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-50 sm:size-10",
-            group.favorited
-              ? "bg-amber-400/15 text-amber-600 dark:text-amber-400"
-              : "text-muted-foreground hover:bg-accent"
-          )}
-        >
-          <Star
-            size={16}
-            className={group.favorited ? "fill-current" : undefined}
-          />
-        </button>
-        <SimilarTrigger
-          open={showSimilar}
-          onToggle={() => {
-            if (!isExpanded) {
-              onToggle()
-              setShowSimilar(true)
-            } else {
-              setShowSimilar((v) => !v)
-            }
-          }}
-          className="min-h-11 px-2.5 sm:min-h-0"
-        />
       </div>
 
-      {isExpanded && (
-        <div className="flex flex-col gap-1.5 border-t border-border/60 px-3 py-3 sm:px-4">
-          {localError && (
-            <p className="mb-1 text-xs text-destructive">{localError}</p>
-          )}
-          {members.map((m, idx) => {
-            const parsed = parseListTitle(m.title)
-            const chapterLabel =
-              parsed.chapters ||
-              (members.length > 1 ? `第 ${idx + 1} 章` : null)
-            const sub = formatTitleMeta(
-              parsed.chapters
-                ? { ...parsed, chapters: null, genre: null }
-                : { ...parsed, genre: null }
-            )
-            const main =
-              chapterLabel && parsed.title
-                ? chapterLabel
-                : parsed.title || m.title
-            return (
-              <div key={m.tid} className="flex items-center gap-2">
-                <Link
-                  to={readPath(m.tid)}
-                  className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-background/80 text-[11px] font-semibold text-muted-foreground tabular-nums">
-                    {idx + 1}
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="line-clamp-1 text-sm font-medium text-foreground">
-                      {main}
-                    </span>
-                    <span className="line-clamp-1 text-xs text-muted-foreground">
-                      {[sub, `#${m.tid}`].filter(Boolean).join(" · ")}
-                    </span>
-                  </span>
-                </Link>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void removeMember(m.tid, chapterLabel || parsed.title || m.title)
-                  }
-                  disabled={busy}
-                  className="inline-flex min-h-11 shrink-0 items-center rounded-xl px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                >
-                  移除
-                </button>
-              </div>
-            )
-          })}
+      {localError && (
+        <p className="border-t border-border/60 px-3.5 py-2 text-xs text-destructive sm:px-4">
+          {localError}
+        </p>
+      )}
 
+      {isExpanded && (
+        <div className="border-t border-border/60 px-3.5 py-3 sm:px-4">
+          <ul className="mb-3 space-y-1">
+            {members.map((m) => {
+              const mp = parseListTitle(m.title)
+              const sub = formatTitleMeta(
+                mp.chapters ? { ...mp, chapters: null } : mp
+              )
+              return (
+                <li
+                  key={m.tid}
+                  className="flex items-center gap-2 rounded-xl bg-muted/40 px-2.5 py-1.5"
+                >
+                  <Link
+                    to={readPath(m.tid)}
+                    className="min-w-0 flex-1 transition-colors hover:text-foreground"
+                  >
+                    <span className="line-clamp-1 text-sm font-medium text-foreground">
+                      {mp.chapters || m.title}
+                    </span>
+                    {sub && (
+                      <span className="text-xs text-muted-foreground">
+                        {sub}
+                      </span>
+                    )}
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void removeMember(m.tid, mp.chapters || m.title)
+                    }
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  >
+                    移除
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void toggleFavorite()}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            >
+              <Star
+                size={13}
+                className={cn(
+                  group.favorited && "fill-amber-400 text-amber-500"
+                )}
+              />
+              {group.favorited ? "取消收藏" : "收藏分组"}
+            </button>
+            <SimilarTrigger
+              open={showSimilar}
+              onToggle={() => setShowSimilar((v) => !v)}
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void deleteGroup()}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            >
+              <Trash2 size={13} />
+              删除分组
+            </button>
+          </div>
           {showSimilar && (
-            <div className="mt-1">
+            <div className="mt-3">
               <SimilarSearchPanel
                 title={group.title}
                 groupKey={group.key}
@@ -265,118 +268,149 @@ function GroupCard({
               />
             </div>
           )}
-
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-2">
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {group.items.length} 个成员
-              {group.favorited ? " · 已收藏" : ""}
-            </span>
-            <button
-              type="button"
-              onClick={() => void deleteGroup()}
-              disabled={busy}
-              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-            >
-              <Trash2 size={13} />
-              删除分组
-            </button>
-          </div>
         </div>
       )}
     </div>
   )
 }
 
+function groupsListUrl(opts: {
+  q: string
+  filter: FilterKey
+  sort: SortKey
+  page: number
+}): string {
+  const params = new URLSearchParams()
+  params.set("page", String(opts.page))
+  params.set("limit", String(ME_PAGE_SIZE))
+  if (opts.q) params.set("q", opts.q)
+  if (opts.filter === "fav") params.set("favorited", "1")
+  if (opts.sort !== "updated") params.set("sort", opts.sort)
+  return `${api.meGroups}?${params.toString()}`
+}
+
 export default function GroupPage() {
   const site = useSite()
   const { pathname } = useLocation()
   const sectionTabs = useMeTabs(pathname)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const q = parseQuery(searchParams)
+  const filter: FilterKey =
+    searchParams.get("filter") === "fav" ? "fav" : "all"
+  const sortRaw = searchParams.get("sort")
+  const sort: SortKey =
+    sortRaw === "title" || sortRaw === "chapters" ? sortRaw : "updated"
+  const page = parsePage(searchParams)
+
   const [groups, setGroups] = useState<Group[]>([])
+  const [nextPage, setNextPage] = useState<number | undefined>()
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [q, setQ] = useState("")
-  const [filter, setFilter] = useState<FilterKey>("all")
-  const [sort, setSort] = useState<SortKey>("updated")
+  const [draftQ, setDraftQ] = useState(q)
+  const seqRef = useRef(0)
   const { isExpanded, toggle } = useExpandedBooks("groups")
 
-  const reload = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true)
-    setError("")
-    try {
-      const res = await fetch(api.meGroups)
-      const json = (await res.json()) as { groups: Group[] }
-      if (!res.ok) {
-        setError(String((json as { error?: string }).error || "请求失败"))
-        return
+  useEffect(() => {
+    setDraftQ(q)
+  }, [q])
+
+  const listUrl = useMemo(
+    () => groupsListUrl({ q, filter, sort, page }),
+    [q, filter, sort, page]
+  )
+
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const seq = ++seqRef.current
+      if (!opts?.silent) setLoading(true)
+      setError("")
+      try {
+        const res = await fetch(listUrl)
+        const json = (await res.json()) as {
+          items?: Group[]
+          nextPage?: number
+          total?: number
+          error?: string
+        }
+        if (seq !== seqRef.current) return
+        if (!res.ok) {
+          setError(String(json.error || "请求失败"))
+          return
+        }
+        setGroups(json.items ?? [])
+        setNextPage(json.nextPage)
+        setTotal(typeof json.total === "number" ? json.total : 0)
+      } catch (e) {
+        if (seq === seqRef.current) {
+          setError(e instanceof Error ? e.message : "未知错误")
+        }
+      } finally {
+        if (seq === seqRef.current && !opts?.silent) setLoading(false)
       }
-      setGroups(json.groups ?? [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误")
-    } finally {
-      if (!opts?.silent) setLoading(false)
-    }
-  }, [])
+    },
+    [listUrl]
+  )
 
   useEffect(() => {
     if (site === "1") void reload()
   }, [reload, site])
 
-  const favCount = useMemo(
-    () => groups.filter((g) => g.favorited).length,
-    [groups]
-  )
-  const chapterTotal = useMemo(
-    () => groups.reduce((n, g) => n + g.items.length, 0),
-    [groups]
-  )
+  function update(next: {
+    q?: string
+    filter?: FilterKey
+    sort?: SortKey
+    page?: number
+  }) {
+    const params = new URLSearchParams(searchParams)
+    if (next.q !== undefined) {
+      if (next.q) params.set("q", next.q)
+      else params.delete("q")
+    }
+    if (next.filter !== undefined) {
+      if (next.filter === "fav") params.set("filter", "fav")
+      else params.delete("filter")
+    }
+    if (next.sort !== undefined) {
+      if (next.sort === "updated") params.delete("sort")
+      else params.set("sort", next.sort)
+    }
+    const resetPage =
+      next.q !== undefined ||
+      next.filter !== undefined ||
+      next.sort !== undefined ||
+      next.page === 1
+    if (next.page !== undefined && next.page > 1) {
+      params.set("page", String(next.page))
+    } else if (resetPage || next.page === 1) {
+      params.delete("page")
+    }
+    setSearchParams(params, { replace: true })
+  }
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    let list = groups
-    if (filter === "fav") list = list.filter((g) => g.favorited)
-    if (needle) {
-      list = list.filter((g) => {
-        const hay = [g.title, g.author, g.genre, ...g.items.map((i) => i.title)]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-        return hay.includes(needle)
-      })
-    }
-    const sorted = [...list]
-    if (sort === "chapters") {
-      sorted.sort(
-        (a, b) =>
-          b.items.length - a.items.length ||
-          b.updated_at - a.updated_at
-      )
-    } else if (sort === "title") {
-      sorted.sort((a, b) =>
-        a.title.localeCompare(b.title, "zh-CN", { sensitivity: "base" })
-      )
-    } else {
-      // updated：收藏优先，再按更新时间
-      sorted.sort((a, b) => {
-        if (a.favorited !== b.favorited) return a.favorited ? -1 : 1
-        return b.updated_at - a.updated_at
-      })
-    }
-    return sorted
-  }, [groups, q, filter, sort])
+  // 搜索防抖写 URL
+  useEffect(() => {
+    if (draftQ === q) return
+    const t = setTimeout(() => update({ q: draftQ.trim(), page: 1 }), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only draftQ
+  }, [draftQ])
+
+  useScrollTop([page, filter, sort, q])
 
   if (site !== "1") {
     return <Navigate to={`${routes.history}?site=${site}`} replace />
   }
+
+  const pages = calcTotalPages(total, ME_PAGE_SIZE)
 
   return (
     <PageShell>
       <PageHeader
         title="我的"
         description={
-          !loading && groups.length > 0
-            ? `分组 · 共 ${groups.length} 组 · ${chapterTotal} 章${
-                favCount ? ` · ${favCount} 已收藏` : ""
-              }`
+          !loading && total > 0
+            ? `分组 · 共 ${total} 组`
             : "分组 · 同书多章合集"
         }
         action={
@@ -391,45 +425,45 @@ export default function GroupPage() {
       <PageSiteTabs sites={["1"]} />
       <SectionTabs items={sectionTabs} />
 
-      {!loading && groups.length > 0 && (
-        <>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            type="search"
-            placeholder="筛选标题、作者、成员…"
-            className="mb-3 h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
-          />
-          <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <FilterTabs
-              options={FILTER_OPTS}
-              value={filter}
-              onChange={setFilter}
-              className="mb-0"
-            />
-            <FilterTabs
-              options={SORT_OPTS}
-              value={sort}
-              onChange={setSort}
-              variant="primary"
-              className="mb-0"
-            />
-          </div>
-        </>
-      )}
+      <SearchForm
+        value={draftQ}
+        onChange={setDraftQ}
+        placeholder="搜索标题、作者、成员…"
+        onSubmit={(next) => update({ q: next, page: 1 })}
+      />
 
-      {!loading && !error && filtered.length > 0 && (
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <FilterTabs
+          options={FILTER_OPTS}
+          value={filter}
+          onChange={(v) => update({ filter: v as FilterKey, page: 1 })}
+          className="mb-0"
+        />
+        <FilterTabs
+          options={SORT_OPTS}
+          value={sort}
+          onChange={(v) => update({ sort: v as SortKey, page: 1 })}
+          variant="primary"
+          className="mb-0"
+        />
+      </div>
+
+      {!loading && !error && total > 0 && (
         <ListMeta>
-          {q.trim() || filter === "fav"
-            ? `显示 ${filtered.length} / ${groups.length} 组`
-            : `共 ${groups.length} 组 · ${chapterTotal} 章`}
+          {formatListPagination({
+            page,
+            pageCount: groups.length,
+            pageSize: ME_PAGE_SIZE,
+            total,
+            hasNext: nextPage !== undefined,
+          })}
         </ListMeta>
       )}
 
       <AsyncBody
         loading={loading}
         error={error}
-        empty={filtered.length === 0}
+        empty={groups.length === 0}
         onRetry={() => void reload()}
         emptyText={
           q.trim() || filter === "fav" ? (
@@ -459,7 +493,7 @@ export default function GroupPage() {
         }
       >
         <PostList>
-          {filtered.map((g) => (
+          {groups.map((g) => (
             <GroupCard
               key={g.id}
               group={g}
@@ -469,6 +503,17 @@ export default function GroupPage() {
             />
           ))}
         </PostList>
+        {(total > ME_PAGE_SIZE || nextPage !== undefined) && (
+          <Pager
+            page={page}
+            hasNext={nextPage !== undefined}
+            totalPages={pages}
+            total={total}
+            onPrev={() => update({ page: Math.max(1, page - 1) })}
+            onNext={() => update({ page: page + 1 })}
+            disabled={loading}
+          />
+        )}
       </AsyncBody>
     </PageShell>
   )

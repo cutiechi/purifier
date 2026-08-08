@@ -59,13 +59,16 @@ export default function FavoritesPage() {
 
   const reloadGroups = useCallback(async () => {
     try {
-      const res = await fetch(api.meGroups)
+      // 后端分页：收藏页只取已收藏分组第一页
+      const res = await fetch(
+        `${api.meGroups}?favorited=1&page=1&limit=50&sort=updated`
+      )
       if (!res.ok) {
         setGroupsError("分组加载失败")
         return
       }
-      const json = (await res.json()) as { groups: Group[] }
-      setGroups((json.groups ?? []).filter((g) => g.favorited))
+      const json = (await res.json()) as { items?: Group[]; groups?: Group[] }
+      setGroups(json.items ?? json.groups ?? [])
       setGroupsError("")
     } catch {
       setGroupsError("分组加载失败")

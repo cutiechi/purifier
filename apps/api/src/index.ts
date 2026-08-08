@@ -743,7 +743,30 @@ async function handleCacheClear(): Promise<Response> {
 
 function handleGroupsList(url: URL): Response {
   const q = url.searchParams.get("q")?.trim() ?? ""
-  return jsonOk({ groups: store.listGroups(q) }, NO_STORE_HEADERS)
+  const pageRaw = url.searchParams.get("page")
+  const limitRaw = url.searchParams.get("limit")
+  const favoritedRaw = url.searchParams.get("favorited")
+  const sortRaw = url.searchParams.get("sort")
+  // 无 page/limit：兼容旧客户端，返回全量 { groups }
+  // 有 page 或 limit：分页 { items, nextPage?, total }
+  if (pageRaw === null && limitRaw === null) {
+    return jsonOk({ groups: store.listGroups(q) }, NO_STORE_HEADERS)
+  }
+  const page = Math.max(1, parseInt(pageRaw || "1", 10) || 1)
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(limitRaw || "20", 10) || 20)
+  )
+  const favorited =
+    favoritedRaw === "1" || favoritedRaw === "true"
+      ? true
+      : undefined
+  const sort =
+    sortRaw === "title" || sortRaw === "chapters" || sortRaw === "updated"
+      ? sortRaw
+      : "updated"
+  const result = store.listGroupsPage({ q, page, limit, favorited, sort })
+  return jsonOk(result, NO_STORE_HEADERS)
 }
 
 /** jobs 列表 query 解析（limit 默认 20 上限 100，offset 默认 0） */

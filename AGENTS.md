@@ -80,7 +80,7 @@ packages/typescript-config/               # base / react-library 配置
 | `GET /api/me/state`                      | `kind`、`id`、`site`（默认 `1`）                            | 条目收藏/标签/访问状态；无记录返回 200 空状态                                                           |
 | `PUT /api/me/progress`                   | body `{ kind, id, progress, site?, chapter? }`              | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                              |
 | `DELETE /api/me/cache`                   | 无                                                          | 清空内容缓存 `{ cleared: n }`                                                                           |
-| `GET /api/me/groups`                     | `q`                                                         | `{ groups }` 全部分组（含成员）；v1 仅论坛帖（无 site 参数）                                            |
+| `GET /api/me/groups`                     | `q`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters` | 无 page/limit 时 `{ groups }` 全量；有 page 或 limit 时 `{ items, nextPage?, total }` 分页；v1 仅论坛 |
 | `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }` | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空                                                    |
 | `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
 | `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |

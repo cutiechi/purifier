@@ -476,15 +476,72 @@ export class Store {
     return map
   }
 
+  /**
+   * 全量分组（导出 / 兼容旧调用）。量大时优先 listGroupsPage。
+   */
   listGroups(q?: string): Group[] {
+    return this.listGroupsPage({
+      q,
+      page: 1,
+      limit: 100_000,
+    }).items
+  }
+
+  /**
+   * 分组分页列表：q 匹配 title/author/genre/成员标题；
+   * sort=updated|title|chapters；favorited 只看已收藏。
+   */
+  listGroupsPage(opts: {
+    q?: string
+    page?: number
+    limit?: number
+    favorited?: boolean
+    sort?: "updated" | "title" | "chapters"
+  }): { items: Group[]; nextPage?: number; total: number } {
+    const q = opts.q?.trim() ?? ""
+    const page = Math.max(1, opts.page ?? 1)
+    const limit = Math.min(100, Math.max(1, opts.limit ?? PAGE_SIZE))
+    const sort = opts.sort ?? "updated"
+    const favOnly = opts.favorited === true
+
+    const where = `
+      WHERE (?1 = '' OR
+        g.title LIKE '%' || ?1 || '%' COLLATE NOCASE OR
+        IFNULL(g.author,'') LIKE '%' || ?1 || '%' COLLATE NOCASE OR
+        IFNULL(g.genre,'') LIKE '%' || ?1 || '%' COLLATE NOCASE OR
+        EXISTS (
+          SELECT 1 FROM group_items gi
+          WHERE gi.group_id = g.id
+            AND gi.title LIKE '%' || ?1 || '%' COLLATE NOCASE
+        )
+      )
+      AND (?2 = 0 OR g.favorited = 1)`
+
+    const orderSql =
+      sort === "title"
+        ? "g.title COLLATE NOCASE ASC, g.id ASC"
+        : sort === "chapters"
+          ? `(SELECT COUNT(*) FROM group_items gi2 WHERE gi2.group_id = g.id) DESC, g.updated_at DESC, g.id DESC`
+          : // updated：收藏优先 + 最近更新
+            "g.favorited DESC, g.updated_at DESC, g.id DESC"
+
+    const totalRow = this.db
+      .query(
+        `SELECT COUNT(*) AS n FROM groups g ${where}`
+      )
+      .get(q, favOnly ? 1 : 0) as { n: number }
+    const total = Number(totalRow.n ?? 0)
+
     const rows = this.db
       .query(
-        `SELECT id, key, title, author, genre, favorited, favorited_at, created_at, updated_at
-         FROM groups
-         WHERE (?1 = '' OR title LIKE '%' || ?1 || '%' COLLATE NOCASE)
-         ORDER BY updated_at DESC, id DESC`
+        `SELECT g.id, g.key, g.title, g.author, g.genre, g.favorited, g.favorited_at,
+                g.created_at, g.updated_at
+         FROM groups g
+         ${where}
+         ORDER BY ${orderSql}
+         LIMIT ?3 OFFSET ?4`
       )
-      .all(q ?? "") as {
+      .all(q, favOnly ? 1 : 0, limit + 1, (page - 1) * limit) as {
       id: number
       key: string
       title: string
@@ -495,29 +552,48 @@ export class Store {
       created_at: number
       updated_at: number
     }[]
-    const items = this.db
-      .query(
-        "SELECT group_id, tid, title FROM group_items ORDER BY added_at, rowid"
-      )
-      .all() as { group_id: number; tid: string; title: string }[]
-    const byGroup = new Map<number, GroupMember[]>()
-    for (const it of items) {
-      const arr = byGroup.get(it.group_id)
-      if (arr) arr.push({ tid: it.tid, title: it.title })
-      else byGroup.set(it.group_id, [{ tid: it.tid, title: it.title }])
+
+    const hasMore = rows.length > limit
+    const pageRows = hasMore ? rows.slice(0, limit) : rows
+    const byGroup = this.membersForGroupIds(pageRows.map((r) => r.id))
+
+    return {
+      items: pageRows.map((r) => ({
+        id: r.id,
+        key: r.key,
+        title: r.title,
+        author: r.author,
+        genre: r.genre,
+        favorited: r.favorited === 1,
+        favorited_at: r.favorited_at,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        items: byGroup.get(r.id) ?? [],
+      })),
+      nextPage: hasMore ? page + 1 : undefined,
+      total,
     }
-    return rows.map((r) => ({
-      id: r.id,
-      key: r.key,
-      title: r.title,
-      author: r.author,
-      genre: r.genre,
-      favorited: r.favorited === 1,
-      favorited_at: r.favorited_at,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      items: byGroup.get(r.id) ?? [],
-    }))
+  }
+
+  private membersForGroupIds(
+    ids: number[]
+  ): Map<number, GroupMember[]> {
+    const map = new Map<number, GroupMember[]>()
+    if (ids.length === 0) return map
+    const placeholders = ids.map(() => "?").join(",")
+    const rows = this.db
+      .query(
+        `SELECT group_id, tid, title FROM group_items
+         WHERE group_id IN (${placeholders})
+         ORDER BY added_at, rowid`
+      )
+      .all(...ids) as { group_id: number; tid: string; title: string }[]
+    for (const it of rows) {
+      const arr = map.get(it.group_id)
+      if (arr) arr.push({ tid: it.tid, title: it.title })
+      else map.set(it.group_id, [{ tid: it.tid, title: it.title }])
+    }
+    return map
   }
 
   /** 单组查询（含成员），避免 upsert 后 listGroups 全表重建 */

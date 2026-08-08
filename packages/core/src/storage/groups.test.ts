@@ -187,4 +187,46 @@ describe("groups", () => {
     expect(store.listGroups("alpha").map((g) => g.title)).toEqual(["Alpha"])
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test("listGroupsPage 分页 + favorited + sort + 成员标题搜索", () => {
+    const { store, dir } = makeStore()
+    for (let i = 1; i <= 25; i++) {
+      store.upsertGroup({
+        key: `k${i}`,
+        title: `Book ${String(i).padStart(2, "0")}`,
+        items: [
+          { tid: String(100 + i), title: `Book ${i}（1）` },
+          ...(i % 5 === 0
+            ? [{ tid: String(200 + i), title: `Book ${i}（2）` }]
+            : []),
+        ],
+      })
+    }
+    store.setGroupFavorite(store.listGroups()[0]!.id, true)
+
+    const p1 = store.listGroupsPage({ page: 1, limit: 10, sort: "title" })
+    expect(p1.total).toBe(25)
+    expect(p1.items).toHaveLength(10)
+    expect(p1.nextPage).toBe(2)
+    expect(p1.items[0]!.title).toBe("Book 01")
+
+    const p3 = store.listGroupsPage({ page: 3, limit: 10, sort: "title" })
+    expect(p3.items).toHaveLength(5)
+    expect(p3.nextPage).toBeUndefined()
+
+    const fav = store.listGroupsPage({ favorited: true, page: 1 })
+    expect(fav.total).toBe(1)
+    expect(fav.items[0]!.favorited).toBe(true)
+
+    // 按成员标题搜
+    const byMember = store.listGroupsPage({ q: "Book 5（2）", page: 1 })
+    expect(byMember.total).toBe(1)
+    expect(byMember.items[0]!.title).toBe("Book 05")
+
+    // 章节数：Book 05/10/15/20/25 各 2 章，其余 1
+    const byCh = store.listGroupsPage({ page: 1, limit: 5, sort: "chapters" })
+    expect(byCh.items.every((g) => g.items.length === 2)).toBe(true)
+
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
