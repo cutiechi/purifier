@@ -121,7 +121,7 @@ describe("archive store", () => {
       "苹果",
       "香蕉",
     ])
-    // sort tid desc
+    // sort tid desc（数值序）
     const byTid = store.listArchivePosts("1", {
       page: 1,
       limit: 10,
@@ -159,6 +159,34 @@ describe("archive store", () => {
       sort: "title",
     })
     expect(qTotal.total).toBe(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("listArchivePosts tid 按数值排序（跨位数）", () => {
+    const { store, dir } = makeStore()
+    store.upsertArchivePosts(
+      "1",
+      [
+        { tid: "99999", title: "五位" },
+        { tid: "100000", title: "六位" },
+        { tid: "9", title: "一位" },
+      ],
+      9_000
+    )
+    const desc = store.listArchivePosts("1", {
+      page: 1,
+      limit: 10,
+      sort: "tid",
+      order: "desc",
+    })
+    expect(desc.items.map((i) => i.tid)).toEqual(["100000", "99999", "9"])
+    const asc = store.listArchivePosts("1", {
+      page: 1,
+      limit: 10,
+      sort: "tid",
+      order: "asc",
+    })
+    expect(asc.items.map((i) => i.tid)).toEqual(["9", "99999", "100000"])
     rmSync(dir, { recursive: true, force: true })
   })
 

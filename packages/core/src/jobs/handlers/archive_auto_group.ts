@@ -44,6 +44,7 @@ export class ArchiveAutoGroupJob implements JobHandler {
       author: string | null
       genre: string | null
       items: Array<{ tid: string; title: string }>
+      seen: Set<string>
     }
     const buckets = new Map<string, Bucket>()
 
@@ -59,6 +60,7 @@ export class ArchiveAutoGroupJob implements JobHandler {
           author: parsed.author,
           genre: parsed.genre,
           items: [],
+          seen: new Set(),
         }
         buckets.set(key, b)
       } else {
@@ -66,7 +68,8 @@ export class ArchiveAutoGroupJob implements JobHandler {
         if (!b.genre && parsed.genre) b.genre = parsed.genre
       }
       // 同 tid 去重（保留先出现的 title）
-      if (!b.items.some((it) => it.tid === p.tid)) {
+      if (!b.seen.has(p.tid)) {
+        b.seen.add(p.tid)
         b.items.push({ tid: p.tid, title: p.title })
       }
     }

@@ -30,8 +30,6 @@ export const SITES: Record<SiteId, { label: string }> = {
 
 export const routes = {
   home: "/",
-  /** 全站目录（原归档） */
-  all: "/archive",
   discover: "/discover",
   me: "/me",
   featured: "/featured",
@@ -45,6 +43,7 @@ export const routes = {
   favorites: "/favorites",
   tags: "/tags",
   groups: "/groups",
+  /** 全站目录（原归档） */
   archive: "/archive",
   jobs: "/jobs",
 } as const

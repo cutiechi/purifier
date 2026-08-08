@@ -127,10 +127,36 @@ interface LoadedContent {
   refreshError?: string
 }
 
+/** 同 key 并发只打一次上游，避免 cache stampede */
+const contentInflight = new Map<string, Promise<string>>()
+
+function contentCacheKey(
+  site: string,
+  kind: ItemKind,
+  id: string,
+  chapter?: string
+): string {
+  return `${site}:${kind}:${id}${chapter ? `:${chapter}` : ""}`
+}
+
+async function fetchContentOnce(
+  key: string,
+  fetchFn: () => Promise<string>
+): Promise<string> {
+  const existing = contentInflight.get(key)
+  if (existing) return existing
+  const p = fetchFn().finally(() => {
+    contentInflight.delete(key)
+  })
+  contentInflight.set(key, p)
+  return p
+}
+
 /**
- * 正文/书库 HTML 加载：
- * - 无 refresh：先读缓存，命中直接返回；未命中抓上游并落盘
- * - 有 refresh：跳过缓存抓上游，成功覆盖缓存；失败回退旧缓存（stale），无旧缓存则抛错
+ * 正文/书库 HTML 加载（**不写盘**）：
+ * - 无 refresh：先读缓存，命中直接返回；未命中抓上游
+ * - 有 refresh：跳过缓存抓上游；失败回退旧缓存（stale），无旧缓存则抛错
+ * - 调用方须在 **解析成功后** 再 `writeContentCache`，避免软 404/验证页把坏 HTML 永久化
  */
 async function loadCachedContent(
   site: string,
@@ -144,9 +170,9 @@ async function loadCachedContent(
     const cached = await readContentCache(DATA_DIR, site, kind, id, chapter)
     if (cached) return { html: cached.data, fromCache: true, refreshed: false }
   }
+  const key = contentCacheKey(site, kind, id, chapter)
   try {
-    const html = await fetchFn()
-    await writeContentCache(DATA_DIR, site, kind, id, html, chapter)
+    const html = await fetchContentOnce(key, fetchFn)
     return { html, fromCache: false, refreshed: refresh }
   } catch (err) {
     if (!refresh) throw err
@@ -161,6 +187,33 @@ async function loadCachedContent(
     }
     throw err
   }
+}
+
+/** 列表接口进程内 TTL 缓存（CDN s-maxage 在自建场景不落地） */
+const LIST_MEM_TTL_MS = 45_000
+const listMemCache = new Map<string, { expires: number; data: unknown }>()
+
+function getListMemCache<T>(key: string): T | null {
+  const e = listMemCache.get(key)
+  if (!e) return null
+  if (Date.now() > e.expires) {
+    listMemCache.delete(key)
+    return null
+  }
+  return e.data as T
+}
+
+function setListMemCache(key: string, data: unknown): void {
+  listMemCache.set(key, { expires: Date.now() + LIST_MEM_TTL_MS, data })
+}
+
+/** 首页游标 mtid：仅非负整数 */
+function parseMtid(raw: string | null): string {
+  const mtid = (raw ?? "0").trim() || "0"
+  if (!/^\d+$/.test(mtid)) {
+    throw new ExtractorError("invalid mtid", 400)
+  }
+  return mtid
 }
 
 /**
@@ -218,9 +271,16 @@ async function handlePosts(url: URL): Promise<Response> {
   }
 
   if (!tid) {
-    const mtid = url.searchParams.get("mtid") || "0"
+    const mtid = parseMtid(url.searchParams.get("mtid"))
+    const cacheKey = `home:${siteId}:${mtid}`
+    const hit = getListMemCache<{ links: unknown; nextMtid: unknown }>(
+      cacheKey
+    )
+    if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
     const { links, nextMtid } = await extractor.fetchHomeLinks(mtid)
-    return jsonOk({ links, nextMtid }, LIST_CACHE_HEADERS)
+    const body = { links, nextMtid }
+    setListMemCache(cacheKey, body)
+    return jsonOk(body, LIST_CACHE_HEADERS)
   }
 
   assertSafeId(tid) // 非法 id → 400
@@ -239,12 +299,16 @@ async function handlePosts(url: URL): Promise<Response> {
     loadCachedReplies(siteId, tid, refresh),
   ])
 
+  // 先解析再写盘：避免软 404 / 验证页把坏 HTML 永久化
   const {
     title,
     content: bodyHtml,
     meta,
     links,
   } = extractor.extractContent(content.html)
+  if (!content.fromCache) {
+    await writeContentCache(DATA_DIR, siteId, "post", tid, content.html)
+  }
 
   // cache hit / 刷新时以回复缓存重算评论数（extractContent 不回填 comments）
   if (repliesResult.replies.length > 0) {
@@ -304,10 +368,21 @@ async function handleBooks(url: URL): Promise<Response> {
     chapter
   )
 
+  // 先解析再写盘
   const result = extractor.extractBookContent(
     content.html,
     chapter ? { chapter } : undefined
   )
+  if (!content.fromCache) {
+    await writeContentCache(
+      DATA_DIR,
+      siteId,
+      "book",
+      cid,
+      content.html,
+      chapter
+    )
+  }
 
   // 书名策略（review I2）：有 bookTitle 用书名；无 bookTitle 时不覆盖已有 title。
   // recordVisit 改造为：title 传 undefined 时 SQL 不动 title 列（见 Task 4 recordVisit）。
@@ -357,21 +432,35 @@ async function handleBrowse(url: URL): Promise<Response> {
   if (!query) return jsonError("missing type or q parameter", 400)
 
   const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const cacheKey = `browse:${siteId}:${type ?? ""}:${q ?? ""}:${page}`
+  const hit = getListMemCache<unknown>(cacheKey)
+  if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
+
   const extractor = resolveSite(site)
   const result = await extractor.fetchCategoryPage(query, page)
+  setListMemCache(cacheKey, result)
   return jsonOk(result, LIST_CACHE_HEADERS)
 }
 
 async function handleHomeExtract(
   url: URL,
-  pick: (extractor: Extractor, html: string) => unknown
+  pick: (extractor: Extractor, html: string) => unknown,
+  cacheTag: string
 ): Promise<Response> {
   const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const cacheKey = `${cacheTag}:${siteId}`
+  const hit = getListMemCache<unknown>(cacheKey)
+  if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
+
   const extractor = resolveSite(site)
   const resp = await fetchUpstream(extractor.homeUrl)
   if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
   const html = await resp.text()
-  return jsonOk(pick(extractor, html), LIST_CACHE_HEADERS)
+  const body = pick(extractor, html)
+  setListMemCache(cacheKey, body)
+  return jsonOk(body, LIST_CACHE_HEADERS)
 }
 
 function handleMeHistory(url: URL): Response {
@@ -831,25 +920,33 @@ function handleGroupFavorite(id: number, favorited: boolean): Response {
 
 async function handleComments(url: URL): Promise<Response> {
   const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const cacheKey = `comments:${siteId}`
+  const hit = getListMemCache<{ posts: unknown }>(cacheKey)
+  if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
+
   const extractor = resolveSite(site)
   const resp = await fetchUpstream(`${extractor.homeUrl}?act=cmtrank&y=1`)
   if (!resp.ok) return jsonError(`upstream error: ${resp.status}`, 502)
   const html = await resp.text()
-  return jsonOk(
-    { posts: extractor.extractCmtRankPosts(html) },
-    LIST_CACHE_HEADERS
-  )
+  const body = { posts: extractor.extractCmtRankPosts(html) }
+  setListMemCache(cacheKey, body)
+  return jsonOk(body, LIST_CACHE_HEADERS)
 }
 
 async function handleTrending(url: URL): Promise<Response> {
   const site = url.searchParams.get("site") ?? undefined
+  const siteId = site ?? DEFAULT_SITE
+  const cacheKey = `trending:${siteId}`
+  const hit = getListMemCache<{ posts: unknown }>(cacheKey)
+  if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
+
   const extractor = resolveSite(site)
   try {
     const html = await extractor.fetchHotHtml()
-    return jsonOk(
-      { posts: extractor.extractHotPosts(html) },
-      LIST_CACHE_HEADERS
-    )
+    const body = { posts: extractor.extractHotPosts(html) }
+    setListMemCache(cacheKey, body)
+    return jsonOk(body, LIST_CACHE_HEADERS)
   } catch (err) {
     if (err instanceof ExtractorError) throw err
     const status = err instanceof UpstreamTimeoutError ? 504 : 502
@@ -858,6 +955,18 @@ async function handleTrending(url: URL): Promise<Response> {
 }
 
 async function route(req: Request): Promise<Response> {
+  const t0 = Date.now()
+  const res = await routeInner(req)
+  const url = new URL(req.url)
+  if (url.pathname.startsWith("/api")) {
+    console.log(
+      `${req.method} ${url.pathname}${url.search} ${res.status} ${Date.now() - t0}ms`
+    )
+  }
+  return res
+}
+
+async function routeInner(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const { pathname } = url
 
@@ -942,19 +1051,25 @@ async function route(req: Request): Promise<Response> {
         return await handleBrowse(url)
       case "/api/categories":
         requireGet(req)
-        return await handleHomeExtract(url, (ex, html) => ({
-          links: ex.extractCategoryLinks(html),
-        }))
+        return await handleHomeExtract(
+          url,
+          (ex, html) => ({ links: ex.extractCategoryLinks(html) }),
+          "categories"
+        )
       case "/api/featured":
         requireGet(req)
-        return await handleHomeExtract(url, (ex, html) => ({
-          links: ex.extractGoldLinks(html),
-        }))
+        return await handleHomeExtract(
+          url,
+          (ex, html) => ({ links: ex.extractGoldLinks(html) }),
+          "featured"
+        )
       case "/api/picks":
         requireGet(req)
-        return await handleHomeExtract(url, (ex, html) => ({
-          sections: ex.extractRecommendSections(html),
-        }))
+        return await handleHomeExtract(
+          url,
+          (ex, html) => ({ sections: ex.extractRecommendSections(html) }),
+          "picks"
+        )
       case "/api/comments":
         requireGet(req)
         return await handleComments(url)
@@ -1015,13 +1130,25 @@ async function serveSpa(pathname: string): Promise<Response | null> {
     safe === "/" ? "index.html" : safe.startsWith("/") ? safe.slice(1) : safe
   const file = Bun.file(join(WEB_DIST, rel))
   if (await file.exists()) {
-    return new Response(file)
+    const headers: Record<string, string> = {}
+    if (rel === "index.html" || rel.endsWith(".html")) {
+      headers["Cache-Control"] = "no-store"
+    } else if (
+      /assets\//.test(rel) ||
+      /\.[a-f0-9]{8,}\.(js|css|woff2?|png|svg|jpg|webp)$/i.test(rel)
+    ) {
+      headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    }
+    return new Response(file, { headers })
   }
   // client-side router fallback
   const index = Bun.file(join(WEB_DIST, "index.html"))
   if (await index.exists()) {
     return new Response(index, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     })
   }
   return null

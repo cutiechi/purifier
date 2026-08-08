@@ -520,6 +520,46 @@ export class Store {
     }))
   }
 
+  /** 单组查询（含成员），避免 upsert 后 listGroups 全表重建 */
+  getGroup(id: number): Group | null {
+    const r = this.db
+      .query(
+        `SELECT id, key, title, author, genre, favorited, favorited_at, created_at, updated_at
+         FROM groups WHERE id = ?1`
+      )
+      .get(id) as
+      | {
+          id: number
+          key: string
+          title: string
+          author: string | null
+          genre: string | null
+          favorited: number
+          favorited_at: number | null
+          created_at: number
+          updated_at: number
+        }
+      | null
+    if (!r) return null
+    const items = this.db
+      .query(
+        "SELECT tid, title FROM group_items WHERE group_id = ?1 ORDER BY added_at, rowid"
+      )
+      .all(id) as { tid: string; title: string }[]
+    return {
+      id: r.id,
+      key: r.key,
+      title: r.title,
+      author: r.author,
+      genre: r.genre,
+      favorited: r.favorited === 1,
+      favorited_at: r.favorited_at,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      items,
+    }
+  }
+
   upsertGroup(input: {
     key: string
     title: string
@@ -560,7 +600,7 @@ export class Store {
       return row.id
     })
     const id = run()
-    return this.listGroups().find((g) => g.id === id)!
+    return this.getGroup(id)!
   }
 
   deleteGroup(id: number): void {
@@ -821,7 +861,8 @@ export class Store {
   ): { items: ArchivePost[]; nextPage?: number; total: number } {
     const SORT_COL: Record<typeof opts.sort, string> = {
       title: "title COLLATE NOCASE",
-      tid: "tid",
+      // tid 为 TEXT；按数值排，避免 5/6 位跨位数字典序颠倒
+      tid: "CAST(tid AS INTEGER)",
       archived_at: "archived_at",
     }
     const sortCol = SORT_COL[opts.sort]
@@ -839,11 +880,12 @@ export class Store {
       .query(`SELECT COUNT(*) AS n FROM archive_posts WHERE ${where}`)
       .get(site, q) as { n: number }
     const total = Number(totalRow.n ?? 0)
+    // 次级排序也用数值 tid，与主排序一致
     const rows = this.db
       .query(
         `SELECT * FROM archive_posts
          WHERE ${where}
-         ORDER BY ${sortCol} ${order.toUpperCase()}, tid ${order.toUpperCase()}
+         ORDER BY ${sortCol} ${order.toUpperCase()}, CAST(tid AS INTEGER) ${order.toUpperCase()}
          LIMIT ?3 OFFSET ?4`
       )
       .all(site, q, opts.limit + 1, (page - 1) * opts.limit) as ArchivePost[]

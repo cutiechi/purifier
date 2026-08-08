@@ -826,8 +826,12 @@ export class Cool18Extractor implements Extractor {
   }
 
   async fetchHomeLinks(mtid: string): Promise<HomePage> {
+    // 仅允许数字游标，防止脏 query 注入
+    if (!/^\d+$/.test(mtid)) {
+      throw new ExtractorError("invalid mtid", 400)
+    }
     const resp = await fetchUpstream(
-      `https://www.cool18.com/bbs4/index.php?app=forum&act=ajax&mtid=${mtid}&aifilter=0`,
+      `https://www.cool18.com/bbs4/index.php?app=forum&act=ajax&mtid=${encodeURIComponent(mtid)}&aifilter=0`,
       {
         headers: {
           Referer: "https://www.cool18.com/bbs4/index.php",

@@ -17,10 +17,19 @@ export const SITES: Record<SiteId, SiteEntry> = {
 
 export const DEFAULT_SITE: SiteId = "1"
 
+/** 无状态 extractor 单例，避免每次请求 new */
+const extractorSingletons = new Map<SiteId, Extractor>()
+
 export function resolveSite(id?: string): Extractor {
-  const entry = SITES[id ?? DEFAULT_SITE]
+  const siteId = id ?? DEFAULT_SITE
+  const entry = SITES[siteId]
   if (!entry) throw new ExtractorError(`unknown site: ${id ?? "(empty)"}`, 400)
-  return entry.getExtractor()
+  let ex = extractorSingletons.get(siteId)
+  if (!ex) {
+    ex = entry.getExtractor()
+    extractorSingletons.set(siteId, ex)
+  }
+  return ex
 }
 
 export function isValidSite(id?: string): boolean {
