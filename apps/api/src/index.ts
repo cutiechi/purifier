@@ -12,6 +12,7 @@ import {
   UpstreamTimeoutError,
   Store,
   ArchiveAutoGroupJob,
+  ArchiveBooksJob,
   ArchivePostsJob,
   JobRunner,
   assertSafeId,
@@ -47,6 +48,7 @@ const store = new Store(openDatabase(DATA_DIR))
 const runner = new JobRunner(store)
 runner.register(new ArchivePostsJob(store))
 runner.register(new ArchiveAutoGroupJob(store))
+runner.register(new ArchiveBooksJob(store))
 runner.recoverOnStartup()
 
 function toErrorResponse(err: unknown): Response {
