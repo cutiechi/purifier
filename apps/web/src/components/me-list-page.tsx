@@ -107,6 +107,19 @@ export function MeListPage({
     void reload()
   }, [reload])
 
+  // 删光本页或筛选后页码越界 → 回退到最后一页
+  useEffect(() => {
+    if (loading || error) return
+    if (total <= 0) return
+    const maxPage = calcTotalPages(total, ME_PAGE_SIZE)
+    if (page > maxPage) {
+      const params = new URLSearchParams(searchParams)
+      if (maxPage > 1) params.set("page", String(maxPage))
+      else params.delete("page")
+      setSearchParams(params, { replace: true })
+    }
+  }, [loading, error, total, page, searchParams, setSearchParams])
+
   useScrollTop([page, kind, q])
 
   const { isExpanded, toggle } = useExpandedBooks(bookGroupScope ?? "__noop__")

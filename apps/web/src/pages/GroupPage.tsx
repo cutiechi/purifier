@@ -388,6 +388,15 @@ export default function GroupPage() {
     setSearchParams(params, { replace: true })
   }
 
+  // 删光当前页 / 筛选后页码越界 → 回到合法最后一页
+  useEffect(() => {
+    if (loading || error) return
+    if (total <= 0) return
+    const maxPage = calcTotalPages(total, ME_PAGE_SIZE)
+    if (page > maxPage) update({ page: maxPage })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on total/page
+  }, [loading, error, total, page])
+
   // 搜索防抖写 URL
   useEffect(() => {
     if (draftQ === q) return
