@@ -785,6 +785,17 @@ export class Store {
     return rows.map((r) => ({ ...r, status: r.status as JobStatus }))
   }
 
+  /** jobs 总数（与 listJobs 同样的 type/status 过滤） */
+  countJobs(opts: { type?: string; status?: string }): number {
+    const row = this.db
+      .query(
+        `SELECT COUNT(*) AS n FROM jobs
+         WHERE (?1 IS NULL OR type = ?1) AND (?2 IS NULL OR status = ?2)`
+      )
+      .get(opts.type ?? null, opts.status ?? null) as { n: number }
+    return Number(row.n ?? 0)
+  }
+
   markRunning(id: number): boolean {
     const res = this.db
       .query(

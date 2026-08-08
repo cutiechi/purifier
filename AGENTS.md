@@ -85,7 +85,7 @@ packages/typescript-config/               # base / react-library 配置
 | `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
 | `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |
 | `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                          | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                            |
-| `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items }` 任务列表                                                                                        |
+| `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items, nextPage?, total }` 任务列表                                                                      |
 | `POST /api/me/jobs`                      | body `{ type, payload? }`                                   | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                               |
 | `DELETE /api/me/jobs`                    | 无                                                           | 清空已结束任务 `{ ok, removed }`                                                                               |
 | `GET /api/me/jobs/:id`                   | 无                                                           | `{ job }`；不存在 404                                                                                       |

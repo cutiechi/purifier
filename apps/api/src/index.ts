@@ -805,8 +805,12 @@ function parseJob(job: Job) {
 }
 
 function handleJobsList(url: URL): Response {
-  const items = store.listJobs(jobsListQuery(url))
-  return jsonOk({ items: items.map(parseJob) }, NO_STORE_HEADERS)
+  const q = jobsListQuery(url)
+  const items = store.listJobs(q)
+  const total = store.countJobs(q)
+  const nextPage =
+    q.offset + q.limit < total ? q.offset / q.limit + 2 : undefined
+  return jsonOk({ items: items.map(parseJob), nextPage, total }, NO_STORE_HEADERS)
 }
 
 async function handleJobStart(req: Request): Promise<Response> {

@@ -83,6 +83,19 @@ describe("jobs store", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  test("countJobs 全量 / type / status 过滤与 listJobs 一致", () => {
+    const { store, dir } = makeStore()
+    const a = store.createJob("archive_posts", null)
+    store.markRunning(a.id) // running
+    store.createJob("other", null) // pending
+    expect(store.countJobs({})).toBe(2)
+    expect(store.countJobs({ type: "archive_posts" })).toBe(1)
+    expect(store.countJobs({ status: "running" })).toBe(1)
+    expect(store.countJobs({ status: "pending" })).toBe(1)
+    expect(store.countJobs({ type: "archive_posts", status: "running" })).toBe(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   test("clearFinishedJobs 只删终态、CASCADE 清日志、保留 running/pending", () => {
     const { store, dir } = makeStore()
     const a = store.createJob("archive_posts", null) // pending

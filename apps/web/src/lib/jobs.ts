@@ -158,15 +158,28 @@ export async function startJob(
 export async function listJobs(opts?: {
   type?: string
   status?: string
-}): Promise<Job[]> {
+  page?: number
+  limit?: number
+}): Promise<{ items: Job[]; nextPage?: number; total: number }> {
   const params = new URLSearchParams()
+  const page = Math.max(1, opts?.page ?? 1)
+  const limit = opts?.limit ?? 20
+  params.set("limit", String(limit))
+  params.set("offset", String((page - 1) * limit))
   if (opts?.type) params.set("type", opts.type)
   if (opts?.status) params.set("status", opts.status)
-  const qs = params.toString()
-  const res = await fetch(`${api.meJobs}${qs ? `?${qs}` : ""}`)
+  const res = await fetch(`${api.meJobs}?${params.toString()}`)
   await throwIfNotOk(res)
-  const json = (await res.json()) as { items: Job[] }
-  return json.items
+  const json = (await res.json()) as {
+    items: Job[]
+    nextPage?: number
+    total?: number
+  }
+  return {
+    items: json.items,
+    nextPage: json.nextPage,
+    total: typeof json.total === "number" ? json.total : 0,
+  }
 }
 
 export async function getJob(id: number): Promise<Job> {

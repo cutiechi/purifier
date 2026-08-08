@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, Navigate } from "react-router-dom"
+import { Link, Navigate, useSearchParams } from "react-router-dom"
 import {
   Download,
   FolderTree,
@@ -9,7 +9,8 @@ import {
   Trash2,
 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
-import { PageShell } from "@/components/page-shell"
+import { PageShell, Pager } from "@/components/page-shell"
+import { useScrollTop } from "@/components/form-controls"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageSiteTabs } from "@/components/page-site-tabs"
@@ -17,6 +18,10 @@ import { SectionTabs } from "@/components/section-tabs"
 import { JobRow } from "@/components/job-row"
 import { useSite } from "@/hooks/use-site"
 import { useAllTabs } from "@/lib/hub-tabs"
+import {
+  ME_PAGE_SIZE,
+  totalPages as calcTotalPages,
+} from "@/lib/list-meta"
 import {
   clearFinishedJobs,
   deleteJob,
@@ -33,7 +38,7 @@ import {
   type ArchiveStatus,
   type Job,
 } from "@/lib/jobs"
-import { routes } from "@/lib/routes"
+import { parsePage, routes } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
 export default function JobsPage() {
@@ -41,7 +46,11 @@ export default function JobsPage() {
   const sectionTabs = useAllTabs(routes.jobs)
   const confirm = useConfirm()
   const archiveSupported = site === "1"
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = parsePage(searchParams)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [nextPage, setNextPage] = useState<number | undefined>(undefined)
+  const [total, setTotal] = useState(0)
   const [status, setStatus] = useState<ArchiveStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -50,32 +59,58 @@ export default function JobsPage() {
   const [toast, setToast] = useState("")
   const prevRunningRef = useRef(false)
 
+  /** 翻页 / 改页：写 page searchParam（page=1 删除参数，保持 URL 干净） */
+  function update(next: { page?: number }) {
+    const params = new URLSearchParams(searchParams)
+    if (next.page != null) {
+      if (next.page > 1) params.set("page", String(next.page))
+      else params.delete("page")
+    }
+    setSearchParams(params, { replace: true })
+  }
+
   useEffect(() => {
     setPollMsState(getPollMs())
   }, [])
 
-  const reload = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) setLoading(true)
-    setError("")
-    try {
-      const [jobList, st] = await Promise.all([
-        listJobs(),
-        archiveSupported
-          ? getArchiveStatus("1")
-          : Promise.resolve<ArchiveStatus | null>(null),
-      ])
-      setJobs(jobList)
-      if (st) setStatus(st)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误")
-    } finally {
-      if (!opts?.silent) setLoading(false)
-    }
-  }, [archiveSupported])
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoading(true)
+      setError("")
+      try {
+        const [data, st] = await Promise.all([
+          listJobs({ page }),
+          archiveSupported
+            ? getArchiveStatus("1")
+            : Promise.resolve<ArchiveStatus | null>(null),
+        ])
+        setJobs(data.items)
+        setNextPage(data.nextPage)
+        setTotal(data.total)
+        if (st) setStatus(st)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "未知错误")
+      } finally {
+        if (!opts?.silent) setLoading(false)
+      }
+    },
+    [archiveSupported, page]
+  )
 
   useEffect(() => {
     void reload()
   }, [reload])
+
+  // 删除/清空后页码越界 → 回退到最后一页
+  useEffect(() => {
+    if (loading || error) return
+    if (total <= 0) return
+    const maxPage = calcTotalPages(total, ME_PAGE_SIZE)
+    if (page > maxPage) update({ page: maxPage })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on total/page
+  }, [loading, error, total, page])
+
+  useScrollTop([page])
 
   // 有 running job 时按 pollMs silent 刷新（用 ref 读 jobs，避免每次 setJobs 重建计时器）
   const jobsRef = useRef(jobs)
@@ -156,7 +191,8 @@ export default function JobsPage() {
     try {
       requestNotify()
       await startJob("archive_posts", { site: "1", mode })
-      await reload({ silent: true })
+      if (page !== 1) update({ page: 1 })
+      else await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
     } finally {
@@ -170,7 +206,8 @@ export default function JobsPage() {
     try {
       requestNotify()
       await startJob("archive_auto_group", { site: "1", minMembers: 2 })
-      await reload({ silent: true })
+      if (page !== 1) update({ page: 1 })
+      else await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
     } finally {
@@ -467,6 +504,19 @@ export default function JobsPage() {
             />
           ))}
         </ul>
+        {(total > ME_PAGE_SIZE || nextPage !== undefined) && (
+          <Pager
+            page={page}
+            hasNext={nextPage !== undefined}
+            totalPages={calcTotalPages(total, ME_PAGE_SIZE)}
+            total={total}
+            onPrev={() => update({ page: Math.max(1, page - 1) })}
+            onNext={() =>
+              nextPage !== undefined && update({ page: nextPage })
+            }
+            disabled={loading}
+          />
+        )}
       </AsyncBody>
     </PageShell>
   )
