@@ -11,6 +11,7 @@ import {
   NO_STORE_HEADERS,
   UpstreamTimeoutError,
   Store,
+  ArchiveAutoGroupJob,
   ArchivePostsJob,
   JobRunner,
   assertSafeId,
@@ -44,6 +45,7 @@ const DATA_DIR = process.env.DATA_DIR || "./data"
 const store = new Store(openDatabase(DATA_DIR))
 const runner = new JobRunner(store)
 runner.register(new ArchivePostsJob(store))
+runner.register(new ArchiveAutoGroupJob(store))
 runner.recoverOnStartup()
 
 function toErrorResponse(err: unknown): Response {

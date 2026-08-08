@@ -856,6 +856,13 @@ export class Store {
     }
   }
 
+  /** 导出/任务用：某站全部归档帖（无分页） */
+  listAllArchivePosts(site: string): ArchivePost[] {
+    return this.db
+      .query("SELECT * FROM archive_posts WHERE site = ?1")
+      .all(site) as ArchivePost[]
+  }
+
   /** 归档库内最大 tid（按数值比较；无数据返回 null） */
   getArchiveMaxTid(site: string): string | null {
     const row = this.db

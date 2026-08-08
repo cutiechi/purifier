@@ -32,6 +32,7 @@ export type ArchiveMode = "full" | "resume" | "incremental"
 
 export const JOB_TYPE_LABEL: Record<string, string> = {
   archive_posts: "全站主帖归档",
+  archive_auto_group: "归档自动分组",
 }
 
 export const ARCHIVE_MODE_LABEL: Record<ArchiveMode, string> = {
@@ -79,10 +80,17 @@ export function formatJobProgress(
   if (typeof result.pages === "number") parts.push(`${result.pages} 页`)
   if (typeof result.inserted === "number") parts.push(`${result.inserted} 新增`)
   if (typeof result.updated === "number") parts.push(`${result.updated} 更新`)
+  if (typeof result.groupsUpserted === "number") {
+    parts.push(`${result.groupsUpserted} 组`)
+  }
+  if (typeof result.membersLinked === "number") {
+    parts.push(`${result.membersLinked} 成员`)
+  }
+  if (typeof result.scanned === "number" && result.groupsUpserted != null) {
+    parts.push(`扫 ${result.scanned}`)
+  }
   if (typeof result.nextMtid === "string" && result.nextMtid) {
     parts.push(`游标 ${result.nextMtid}`)
-  } else if (result.nextMtid === null && result.stopReason) {
-    // done
   }
   return parts.join(" · ")
 }

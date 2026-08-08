@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { Download, Play, RefreshCw, SkipForward, Trash2 } from "lucide-react"
+import {
+  Download,
+  FolderTree,
+  Play,
+  RefreshCw,
+  SkipForward,
+  Trash2,
+} from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
@@ -123,17 +130,35 @@ export default function JobsPage() {
     return () => clearTimeout(t)
   }, [toast])
 
+  const requestNotify = () => {
+    if (
+      typeof Notification !== "undefined" &&
+      Notification.permission === "default"
+    ) {
+      void Notification.requestPermission()
+    }
+  }
+
   const onStart = async (mode: ArchiveMode) => {
     setBusy(true)
     setError("")
     try {
-      if (
-        typeof Notification !== "undefined" &&
-        Notification.permission === "default"
-      ) {
-        void Notification.requestPermission()
-      }
+      requestNotify()
       await startJob("archive_posts", { site: "1", mode })
+      await reload({ silent: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "启动失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onAutoGroup = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      requestNotify()
+      await startJob("archive_auto_group", { site: "1", minMembers: 2 })
       await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
@@ -263,12 +288,28 @@ export default function JobsPage() {
 
       {runningJob && (
         <div className="mb-4 rounded-2xl border border-blue-500/25 bg-blue-500/10 px-3.5 py-3 text-sm text-blue-700 dark:text-blue-300">
-          <div className="font-medium">归档进行中</div>
+          <div className="font-medium">
+            {runningJob.type === "archive_auto_group"
+              ? "自动分组进行中"
+              : "归档进行中"}
+          </div>
           <div className="mt-0.5 text-xs opacity-90">
-            {formatJobProgress(runningJob.result) || "正在抓取首页分页…"}
+            {formatJobProgress(runningJob.result) ||
+              (runningJob.type === "archive_auto_group"
+                ? "正在扫描归档并建组…"
+                : "正在抓取首页分页…")}
             {" · "}
-            <Link to={routes.archive} className="underline underline-offset-2">
-              打开归档目录
+            <Link
+              to={
+                runningJob.type === "archive_auto_group"
+                  ? routes.groups
+                  : routes.archive
+              }
+              className="underline underline-offset-2"
+            >
+              {runningJob.type === "archive_auto_group"
+                ? "打开分组"
+                : "打开归档目录"}
             </Link>
           </div>
         </div>
@@ -325,6 +366,15 @@ export default function JobsPage() {
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
           >
             <RefreshCw size={14} /> 增量更新
+          </button>
+          <button
+            type="button"
+            onClick={() => void onAutoGroup()}
+            disabled={startDisabled}
+            title="按书名把归档里多章帖子自动写入分组（≥2 章）"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <FolderTree size={14} /> 归档自动分组
           </button>
           <button
             type="button"
