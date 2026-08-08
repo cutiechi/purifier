@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react"
+import { useConfirm } from "@/components/confirm-dialog"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { api, meListQuery } from "@/lib/routes"
@@ -10,13 +11,20 @@ function DeleteHistoryButton({
   item: MeListItem
   reload: () => void
 }) {
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
   return (
     <button
       type="button"
       disabled={busy}
       onClick={async () => {
-        if (!window.confirm(`从浏览历史删除「${item.title}」？`)) return
+        const ok = await confirm({
+          title: "删除历史记录？",
+          description: `从浏览历史删除「${item.title}」。`,
+          confirmLabel: "删除",
+          destructive: true,
+        })
+        if (!ok) return
         setBusy(true)
         try {
           const res = await fetch(
@@ -44,17 +52,18 @@ function HistoryToolbar({
   reload: () => void
   loading: boolean
 }) {
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
 
   const clearPage = async () => {
     if (items.length === 0) return
-    if (
-      !window.confirm(
-        `清空本页 ${items.length} 条浏览历史？相关收藏与标签也会一并移除。`
-      )
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: `清空本页 ${items.length} 条？`,
+      description: "相关收藏与标签也会一并移除。",
+      confirmLabel: "清空本页",
+      destructive: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       const res = await fetch(api.meHistory, {
@@ -71,13 +80,13 @@ function HistoryToolbar({
   }
 
   const clearAll = async () => {
-    if (
-      !window.confirm(
-        "清空全部浏览历史？所有历史、收藏与标签都会被移除，且不可恢复。"
-      )
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: "清空全部浏览历史？",
+      description: "所有历史、收藏与标签都会被移除，且不可恢复。",
+      confirmLabel: "全部清空",
+      destructive: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       const res = await fetch(`${api.meHistory}?all=1`, { method: "DELETE" })
@@ -93,7 +102,7 @@ function HistoryToolbar({
         type="button"
         disabled={busy || loading || items.length === 0}
         onClick={() => void clearPage()}
-        className="min-h-9 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
       >
         清空本页
       </button>
@@ -101,7 +110,7 @@ function HistoryToolbar({
         type="button"
         disabled={busy || loading}
         onClick={() => void clearAll()}
-        className="min-h-9 rounded-lg bg-muted/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
       >
         清空全部
       </button>
@@ -130,9 +139,12 @@ export default function HistoryPage() {
       buildUrl={(q, kind, page) =>
         `${api.meHistory}?${meListQuery({ q, kind, page })}`
       }
-      pick={(json) => json as { items: MeListItem[]; nextPage?: number }}
+      pick={(json) =>
+        json as { items: MeListItem[]; nextPage?: number; total?: number }
+      }
       renderTrailing={renderTrailing}
       toolbar={toolbar}
+      emptyText="还没有浏览记录，打开一篇帖子或书库即可"
     />
   )
 }

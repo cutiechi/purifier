@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { ChevronDown, Star, Trash2 } from "lucide-react"
+import { useConfirm } from "@/components/confirm-dialog"
 import { IconBookOpen } from "@/components/icons"
+import { ListMeta } from "@/components/form-controls"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
@@ -24,6 +27,7 @@ function GroupCard({
   onToggle: () => void
   onChanged: () => void
 }) {
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
   const [showSimilar, setShowSimilar] = useState(false)
 
@@ -59,7 +63,13 @@ function GroupCard({
   }
 
   async function deleteGroup() {
-    if (!window.confirm(`删除分组「${group.title}」？`)) return
+    const ok = await confirm({
+      title: `删除分组「${group.title}」？`,
+      description: "分组及其成员关系将被删除（不影响帖子本身）。",
+      confirmLabel: "删除分组",
+      destructive: true,
+    })
+    if (!ok) return
     if (busy) return
     setBusy(true)
     try {
@@ -112,7 +122,7 @@ function GroupCard({
           disabled={busy}
           aria-label={group.favorited ? "取消收藏分组" : "收藏分组"}
           className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50",
+            "flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-50 sm:size-9",
             group.favorited
               ? "bg-amber-400/15 text-amber-600 dark:text-amber-400"
               : "bg-muted/70 text-muted-foreground hover:bg-accent"
@@ -147,9 +157,9 @@ function GroupCard({
               )
               return (
                 <div key={m.tid} className="flex items-center gap-2">
-                  <a
-                    href={readPath(m.tid)}
-                    className="flex min-w-0 flex-1 flex-col rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
+                  <Link
+                    to={readPath(m.tid)}
+                    className="flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-xl bg-muted/40 px-3 py-2 transition-colors hover:bg-accent/60"
                   >
                     <span className="line-clamp-1 text-sm font-medium text-foreground">
                       {parsed.chapters || m.title}
@@ -159,12 +169,12 @@ function GroupCard({
                         {sub}
                       </span>
                     )}
-                  </a>
+                  </Link>
                   <button
                     type="button"
                     onClick={() => void removeMember(m.tid)}
                     disabled={busy}
-                    className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                    className="inline-flex min-h-10 shrink-0 items-center rounded-xl px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                   >
                     移除
                   </button>
@@ -184,7 +194,7 @@ function GroupCard({
             type="button"
             onClick={() => void deleteGroup()}
             disabled={busy}
-            className="mt-1 flex items-center justify-center gap-1.5 self-end rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            className="mt-1 inline-flex min-h-10 items-center justify-center gap-1.5 self-end rounded-xl px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
           >
             <Trash2 size={13} />
             删除分组
@@ -199,6 +209,7 @@ export default function GroupPage() {
   const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [q, setQ] = useState("")
   const { isExpanded, toggle } = useExpandedBooks("groups")
 
   // silent：增删/收藏后局部刷新，不闪整页 Spinner；onRetry 用全量 loading
@@ -224,21 +235,57 @@ export default function GroupPage() {
     void reload()
   }, [reload])
 
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return groups
+    return groups.filter((g) => {
+      const hay = [g.title, g.author, g.genre, ...g.items.map((i) => i.title)]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+      return hay.includes(needle)
+    })
+  }, [groups, q])
+
   return (
     <PageShell>
       <PageHeader
         title="分组"
-        description="手动维护的收藏分组，可用「搜索相似」补全书目"
+        description={
+          !loading && groups.length > 0
+            ? `共 ${groups.length} 组 · 可用「搜索相似」补全书目`
+            : "手动维护的收藏分组，可用「搜索相似」补全书目"
+        }
       />
+      {!loading && groups.length > 0 && (
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          type="search"
+          placeholder="筛选分组标题、作者、成员…"
+          className="mb-4 h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+        />
+      )}
+      {!loading && !error && filtered.length > 0 && (
+        <ListMeta>
+          {q.trim()
+            ? `匹配 ${filtered.length} / ${groups.length} 组`
+            : `共 ${groups.length} 组`}
+        </ListMeta>
+      )}
       <AsyncBody
         loading={loading}
         error={error}
-        empty={groups.length === 0}
+        empty={filtered.length === 0}
         onRetry={() => void reload()}
-        emptyText="还没有分组，去列表页点「搜索相似」创建"
+        emptyText={
+          q.trim()
+            ? "没有匹配的分组"
+            : "还没有分组，去列表页点「搜索相似」创建"
+        }
       >
         <PostList>
-          {groups.map((g) => (
+          {filtered.map((g) => (
             <GroupCard
               key={g.id}
               group={g}

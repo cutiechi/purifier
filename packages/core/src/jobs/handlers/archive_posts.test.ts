@@ -29,17 +29,20 @@ function makeJob() {
 function makeCtx(payload: Record<string, unknown> = {}): {
   ctx: JobContext
   logs: Array<{ level: string; message: string }>
+  progress: Array<Record<string, unknown>>
   controller: AbortController
 } {
   const controller = new AbortController()
   const logs: Array<{ level: string; message: string }> = []
+  const progress: Array<Record<string, unknown>> = []
   const ctx: JobContext = {
     jobId: 1,
     log: (level, message) => logs.push({ level, message }),
+    reportProgress: (p) => progress.push(p),
     signal: controller.signal,
     payload,
   }
-  return { ctx, logs, controller }
+  return { ctx, logs, controller, progress }
 }
 
 describe("ArchivePostsJob", () => {

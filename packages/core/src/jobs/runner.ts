@@ -61,6 +61,7 @@ export class JobRunner {
       payload,
       signal,
       log: (level, message) => this.store.appendJobLog(jobId, level, message),
+      reportProgress: (progress) => this.store.setJobResult(jobId, progress),
     }
     let status: "succeeded" | "failed" | "aborted" = "succeeded"
     let result: JobResult | null = null

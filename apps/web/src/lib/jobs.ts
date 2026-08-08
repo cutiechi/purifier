@@ -28,6 +28,51 @@ export interface JobLog {
   created_at: number
 }
 
+export const JOB_TYPE_LABEL: Record<string, string> = {
+  archive_posts: "全站主帖归档",
+}
+
+export function jobTypeLabel(type: string): string {
+  return JOB_TYPE_LABEL[type] ?? type
+}
+
+export const STATUS_LABEL: Record<JobStatus, string> = {
+  pending: "等待",
+  running: "运行中",
+  succeeded: "成功",
+  failed: "失败",
+  interrupted: "中断",
+  aborted: "已停止",
+}
+
+/** 从 result 拼可读进度/结果摘要 */
+export function formatJobProgress(
+  result: Record<string, unknown> | null | undefined
+): string {
+  if (!result) return ""
+  const parts: string[] = []
+  if (typeof result.pages === "number") parts.push(`${result.pages} 页`)
+  if (typeof result.inserted === "number") parts.push(`${result.inserted} 新增`)
+  if (typeof result.updated === "number") parts.push(`${result.updated} 更新`)
+  return parts.join(" · ")
+}
+
+export function formatJobDuration(job: Job): string {
+  if (job.started_at == null) return "-"
+  const end = job.finished_at ?? Date.now()
+  const sec = Math.max(0, Math.round((end - job.started_at) / 1000))
+  if (job.finished_at == null) {
+    if (sec < 60) return `${sec}s`
+    const m = Math.floor(sec / 60)
+    const s = sec % 60
+    return `${m}m${s > 0 ? `${s}s` : ""}`
+  }
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return s > 0 ? `${m}m${s}s` : `${m}m`
+}
+
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
     let msg = `请求失败 (${res.status})`

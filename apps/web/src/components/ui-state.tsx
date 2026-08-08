@@ -28,7 +28,7 @@ export function ErrorBox({
         <button
           type="button"
           onClick={onRetry}
-          className="mt-3 rounded-lg bg-destructive/12 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-destructive/20"
+          className="mt-3 inline-flex min-h-10 items-center rounded-xl bg-destructive/12 px-3.5 py-2 text-sm font-medium transition-colors hover:bg-destructive/20"
         >
           重试
         </button>
@@ -37,9 +37,20 @@ export function ErrorBox({
   )
 }
 
-export function EmptyState({ children }: { children: ReactNode }) {
+export function EmptyState({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-sm text-muted-foreground">
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border/80 bg-muted/20 px-6 py-16 text-center text-sm text-muted-foreground",
+        className
+      )}
+    >
       {children}
     </div>
   )

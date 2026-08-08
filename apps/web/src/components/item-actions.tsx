@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Settings2, Star, Tag } from "lucide-react"
+import { useConfirm } from "@/components/confirm-dialog"
 import { IconRefreshCw, IconStar } from "@/components/icons"
 import { Popover } from "@/components/ui/popover"
 import { ReadingSettingsPanel } from "@/components/reading-settings-panel"
@@ -62,13 +63,19 @@ export function ItemActions({
   refreshing: boolean
 }) {
   const site = useSite()
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
 
   const toggleFavorite = async () => {
     if (state?.favorited) {
       const title = state.title?.trim() || "该条目"
-      if (!window.confirm(`取消收藏「${title}」？`)) return
-      // confirm 期间不关 Popover：confirm 是系统模态，返回后浮层保持 open
+      const ok = await confirm({
+        title: "取消收藏？",
+        description: `将从收藏中移除「${title}」。`,
+        confirmLabel: "取消收藏",
+        destructive: true,
+      })
+      if (!ok) return
     }
     setBusy(true)
     try {
@@ -123,22 +130,22 @@ export function ItemActions({
       trigger={
         <span
           className={cn(
-            "relative inline-flex size-8 items-center justify-center rounded-lg transition-colors",
+            "relative inline-flex size-11 items-center justify-center rounded-2xl border border-border/80 bg-card/95 shadow-md backdrop-blur transition-colors sm:size-10",
             favorited
-              ? "bg-amber-400/15 text-amber-600 dark:text-amber-400"
-              : "bg-muted/70 text-muted-foreground hover:bg-accent hover:text-foreground"
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground"
           )}
         >
-          <Settings2 className="size-4" />
+          <Settings2 className="size-5 sm:size-4" />
           {favorited && (
             <Star
-              className="absolute -right-0.5 -top-0.5 size-2.5 fill-current"
+              className="absolute top-1 right-1 size-2.5 fill-current"
               aria-hidden
             />
           )}
           {hasTags && (
             <Tag
-              className="absolute -bottom-0.5 -right-0.5 size-2.5"
+              className="absolute right-1 bottom-1 size-2.5"
               aria-hidden
             />
           )}

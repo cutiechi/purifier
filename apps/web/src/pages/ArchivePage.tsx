@@ -1,9 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Link } from "react-router-dom"
-import { PageShell } from "@/components/page-shell"
-import { AsyncBody } from "@/components/ui-state"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link, useSearchParams } from "react-router-dom"
+import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
-import { api, readPath, routes } from "@/lib/routes"
+import {
+  FilterTabs,
+  ListMeta,
+  SearchForm,
+  useScrollTop,
+} from "@/components/form-controls"
+import { GenrePill, ListPostCard } from "@/components/list-post-card"
+import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import { PostList } from "@/components/post-card"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { groupBooks } from "@/lib/book-groups"
+import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
+import {
+  ARCHIVE_PAGE_SIZE,
+  formatListPagination,
+  totalPages as calcTotalPages,
+} from "@/lib/list-meta"
+import { api, parsePage, parseQuery, readPath, routes } from "@/lib/routes"
 
 interface ArchivePost {
   site: string
@@ -15,21 +31,35 @@ interface ArchivePost {
 
 type SortKey = "title" | "tid" | "archived_at"
 
-const SORT_LABEL: Record<SortKey, string> = {
-  title: "标题",
-  tid: "最新",
-  archived_at: "最近更新",
+const SORT_OPTIONS: { value: SortKey; label: string; title: string }[] = [
+  { value: "tid", label: "按 tid", title: "帖子编号新→旧" },
+  { value: "title", label: "按标题", title: "标题字母序" },
+  { value: "archived_at", label: "按归档时间", title: "最近入库/更新" },
+]
+
+function parseSort(raw: string | null): SortKey {
+  if (raw === "title" || raw === "tid" || raw === "archived_at") return raw
+  return "tid"
 }
 
 export default function ArchivePage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const q = parseQuery(searchParams)
+  const sort = parseSort(searchParams.get("sort"))
+  const page = parsePage(searchParams)
+
   const [items, setItems] = useState<ArchivePost[]>([])
   const [nextPage, setNextPage] = useState<number | undefined>(undefined)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [q, setQ] = useState("")
-  const [sort, setSort] = useState<SortKey>("title")
-  const [page, setPage] = useState(1)
+  const [draftQ, setDraftQ] = useState(q)
   const seqRef = useRef(0)
+
+  // URL q 变化时同步输入框（浏览器前进/后退）
+  useEffect(() => {
+    setDraftQ(q)
+  }, [q])
 
   const reload = useCallback(async () => {
     const seq = ++seqRef.current
@@ -44,6 +74,7 @@ export default function ArchivePage() {
       const json = (await res.json()) as {
         items: ArchivePost[]
         nextPage?: number
+        total?: number
         error?: string
       }
       if (seq !== seqRef.current) return
@@ -53,6 +84,7 @@ export default function ArchivePage() {
       }
       setItems(json.items ?? [])
       setNextPage(json.nextPage)
+      setTotal(typeof json.total === "number" ? json.total : 0)
     } catch (e) {
       if (seq === seqRef.current) {
         setError(e instanceof Error ? e.message : "未知错误")
@@ -63,43 +95,92 @@ export default function ArchivePage() {
   }, [sort, page, q])
 
   useEffect(() => {
-    const t = setTimeout(() => void reload(), 300) // debounce q
-    return () => clearTimeout(t)
+    void reload()
   }, [reload])
+
+  useScrollTop([page, sort, q])
+
+  function update(next: { q?: string; sort?: SortKey; page?: number }) {
+    const params = new URLSearchParams(searchParams)
+    if (next.q !== undefined) {
+      if (next.q) params.set("q", next.q)
+      else params.delete("q")
+    }
+    if (next.sort !== undefined) {
+      if (next.sort === "tid") params.delete("sort")
+      else params.set("sort", next.sort)
+    }
+    const pageChanged = next.page !== undefined
+    const resetPage =
+      next.q !== undefined || next.sort !== undefined || next.page === 1
+    if (pageChanged && next.page! > 1) {
+      params.set("page", String(next.page))
+    } else if (resetPage || (pageChanged && next.page === 1)) {
+      params.delete("page")
+    }
+    setSearchParams(params, { replace: true })
+  }
+
+  // 搜索防抖写 URL
+  useEffect(() => {
+    if (draftQ === q) return
+    const t = setTimeout(() => update({ q: draftQ.trim(), page: 1 }), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only draftQ
+  }, [draftQ])
+
+  const { isExpanded, toggle } = useExpandedBooks("archive")
+  const grouped = useMemo(
+    () =>
+      groupBooks(
+        items,
+        (it) => it.title,
+        (it) => it.tid
+      ),
+    [items]
+  )
 
   return (
     <PageShell>
-      <PageHeader title="归档" description="全站主帖目录（tid + 标题）" />
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <input
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value)
-            setPage(1)
-          }}
-          placeholder="搜索标题"
-          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
-        />
-        <div className="ml-auto flex gap-1">
-          {(Object.keys(SORT_LABEL) as SortKey[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => {
-                setSort(key)
-                setPage(1)
-              }}
-              className={`rounded-lg px-2.5 py-1 text-sm transition-colors ${
-                sort === key
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-              }`}
-            >
-              {SORT_LABEL[key]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="归档"
+        description="全站主帖目录（本地库）"
+        action={
+          <Link
+            to={routes.jobs}
+            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            去任务页
+          </Link>
+        }
+      />
+
+      <SearchForm
+        value={draftQ}
+        onChange={setDraftQ}
+        placeholder="搜索标题…"
+        onSubmit={(next) => update({ q: next, page: 1 })}
+      />
+
+      <FilterTabs
+        options={SORT_OPTIONS}
+        value={sort}
+        onChange={(v) => update({ sort: v, page: 1 })}
+        variant="primary"
+      />
+
+      {!loading && !error && items.length > 0 && (
+        <ListMeta>
+          {formatListPagination({
+            page,
+            pageCount: items.length,
+            pageSize: ARCHIVE_PAGE_SIZE,
+            total,
+            hasNext: nextPage !== undefined,
+          })}
+        </ListMeta>
+      )}
+
       <AsyncBody
         loading={loading}
         error={error}
@@ -107,56 +188,87 @@ export default function ArchivePage() {
         onRetry={() => void reload()}
         emptyText={
           <>
-            还没有归档，去
-            <Link
-              to={routes.jobs}
-              className="text-foreground underline underline-offset-2"
-            >
-              任务
-            </Link>
-            开始一次归档
+            {q ? (
+              "没有匹配的归档"
+            ) : (
+              <>
+                还没有归档，去
+                <Link
+                  to={routes.jobs}
+                  className="text-foreground underline underline-offset-2"
+                >
+                  任务
+                </Link>
+                开始一次全站主帖归档
+              </>
+            )}
           </>
         }
       >
-        <ul className="space-y-1.5">
-          {items.map((it) => (
-            <li
-              key={`${it.site}:${it.tid}`}
-              className="flex items-baseline gap-2"
-            >
-              <a
-                href={readPath(it.tid, it.site)}
-                className="text-sm text-foreground hover:underline"
+        <PostList>
+          {grouped.map((g) =>
+            g.type === "single" ? (
+              <ListPostCard
+                key={`${g.item.site}:${g.item.tid}`}
+                href={readPath(g.item.tid, g.item.site)}
+                rawTitle={g.item.title}
+                trailing={
+                  <span className="text-xs text-muted-foreground/70 tabular-nums">
+                    #{g.item.tid}
+                  </span>
+                }
+              />
+            ) : (
+              <CollapsibleBookGroup
+                key={`group:${g.key}`}
+                title={g.title}
+                summary={
+                  [g.author, g.genre].filter(Boolean).join(" · ") || undefined
+                }
+                count={g.items.length}
+                bookKey={g.key}
+                isExpanded={isExpanded(g.key)}
+                onToggle={() => toggle(g.key)}
+                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
               >
-                {it.title}
-              </a>
-              <span className="text-xs text-muted-foreground/70 tabular-nums">
-                #{it.tid}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-5 flex items-center gap-2">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-lg border border-border px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-          >
-            上一页
-          </button>
-          <span className="px-2 py-1 text-sm text-muted-foreground tabular-nums">
-            第 {page} 页
-          </span>
-          <button
-            type="button"
-            disabled={!nextPage}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-lg border border-border px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-          >
-            下一页
-          </button>
-        </div>
+                {g.items.map((it) => {
+                  const parsed = parseListTitle(it.title)
+                  const sub = formatTitleMeta(
+                    parsed.chapters ? { ...parsed, chapters: null } : parsed
+                  )
+                  return (
+                    <Link
+                      key={`${it.site}:${it.tid}`}
+                      to={readPath(it.tid, it.site)}
+                      className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
+                    >
+                      <span className="min-w-0 flex-1 line-clamp-2 font-medium text-foreground">
+                        {parsed.chapters || parsed.title}
+                      </span>
+                      {sub && (
+                        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                          {sub}
+                        </span>
+                      )}
+                      <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                        #{it.tid}
+                      </span>
+                    </Link>
+                  )
+                })}
+              </CollapsibleBookGroup>
+            )
+          )}
+        </PostList>
+        <Pager
+          page={page}
+          hasNext={nextPage !== undefined}
+          total={total}
+          totalPages={calcTotalPages(total, ARCHIVE_PAGE_SIZE)}
+          onPrev={() => update({ page: page - 1 })}
+          onNext={() => nextPage !== undefined && update({ page: nextPage })}
+          disabled={loading}
+        />
       </AsyncBody>
     </PageShell>
   )

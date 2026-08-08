@@ -1,6 +1,7 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
+import { ConfirmProvider } from "@/components/confirm-dialog"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ReadingSettingsProvider } from "@/components/reading-settings"
 import { App } from "./App"
@@ -11,7 +12,9 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <ReadingSettingsProvider>
         <BrowserRouter>
-          <App />
+          <ConfirmProvider>
+            <App />
+          </ConfirmProvider>
         </BrowserRouter>
       </ReadingSettingsProvider>
     </ThemeProvider>

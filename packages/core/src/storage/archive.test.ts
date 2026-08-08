@@ -143,7 +143,7 @@ describe("archive store", () => {
       sort: "title",
     })
     expect(q.items.map((i) => i.title)).toEqual(["Apple"])
-    // 分页 nextPage
+    // 分页 nextPage + total
     const page1 = store.listArchivePosts("1", {
       page: 1,
       limit: 2,
@@ -151,6 +151,14 @@ describe("archive store", () => {
     })
     expect(page1.items).toHaveLength(2)
     expect(page1.nextPage).toBe(2)
+    expect(page1.total).toBe(3)
+    const qTotal = store.listArchivePosts("1", {
+      q: "app",
+      page: 1,
+      limit: 10,
+      sort: "title",
+    })
+    expect(qTotal.total).toBe(1)
     rmSync(dir, { recursive: true, force: true })
   })
 

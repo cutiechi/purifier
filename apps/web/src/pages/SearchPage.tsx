@@ -18,7 +18,8 @@ import { GenrePill } from "@/components/list-post-card"
 import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
-import { IconSearch } from "@/components/icons"
+import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
+import { formatListPagination } from "@/lib/list-meta"
 import { useSite } from "@/hooks/use-site"
 import {
   api,
@@ -69,6 +70,8 @@ function SearchContent() {
   useEffect(() => {
     setInput(q)
   }, [q])
+
+  useScrollTop([q, pageParam])
 
   const loadPage = useCallback(
     async (keyword: string, p: number) => {
@@ -125,37 +128,19 @@ function SearchContent() {
         }
       />
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          const next = input.trim()
+      <SearchForm
+        value={input}
+        onChange={setInput}
+        placeholder="输入关键词"
+        maxLength={40}
+        showIcon
+        buttonLabel="搜索"
+        className="mb-6 sm:mb-8"
+        onSubmit={(next) => {
           if (!next) return
           goTo(next, 1)
         }}
-        className="mb-6 flex gap-2 sm:mb-8 sm:gap-3"
-      >
-        <div className="relative min-w-0 flex-1">
-          <IconSearch
-            size={16}
-            className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            type="search"
-            name="q"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="输入关键词"
-            maxLength={40}
-            className="h-11 w-full rounded-2xl border border-border bg-card pr-4 pl-10 text-sm text-foreground shadow-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
-          />
-        </div>
-        <button
-          type="submit"
-          className="h-11 shrink-0 rounded-2xl bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          查询
-        </button>
-      </form>
+      />
 
       {!q && !loading ? (
         <AsyncBody
@@ -174,6 +159,14 @@ function SearchContent() {
           onRetry={() => q && loadPage(q, pageParam)}
           emptyText={q ? `没有找到「${q}」相关内容` : "输入关键词开始搜索"}
         >
+          <ListMeta>
+            {formatListPagination({
+              page: pageParam,
+              pageCount: links.length,
+              pageSize: Math.max(links.length, 1),
+              hasNext: nextPage !== null,
+            })}
+          </ListMeta>
           <PostList>
             {grouped.map((g) =>
               g.type === "single" ? (

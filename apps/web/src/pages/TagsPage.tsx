@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
+import { useConfirm } from "@/components/confirm-dialog"
 import { IconClose } from "@/components/icons"
+import { SoftButton } from "@/components/form-controls"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { AsyncBody } from "@/components/ui-state"
 import { api, meListQuery, tagsPath } from "@/lib/routes"
 
 interface TagCount {
@@ -13,6 +16,7 @@ interface TagCount {
 }
 
 function TagListView() {
+  const confirm = useConfirm()
   const [tags, setTags] = useState<TagCount[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -48,11 +52,13 @@ function TagListView() {
   }, [tags, q])
 
   const deleteTag = async (tag: string) => {
-    if (
-      !window.confirm(`删除标签「${tag}」？将从所有贴子/书库上移除该标签。`)
-    ) {
-      return
-    }
+    const ok = await confirm({
+      title: `删除标签「${tag}」？`,
+      description: "将从所有贴子与书库上移除该标签。",
+      confirmLabel: "删除",
+      destructive: true,
+    })
+    if (!ok) return
     setRemoving(tag)
     try {
       const res = await fetch(`${api.meTags}?tag=${encodeURIComponent(tag)}`, {
@@ -72,59 +78,61 @@ function TagListView() {
 
   return (
     <PageShell>
-      <PageHeader title="标签" description="点击标签筛选贴子与书库" />
+      <PageHeader
+        title="标签"
+        description={
+          !loading && tags.length > 0
+            ? `共 ${tags.length} 个标签 · 点击筛选贴子与书库`
+            : "点击标签筛选贴子与书库"
+        }
+      />
 
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="筛选标签…"
+        type="search"
         className="mb-4 h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
       />
 
-      {loading && (
-        <p className="py-10 text-center text-sm text-muted-foreground">
-          加载中…
-        </p>
-      )}
-      {error && (
-        <p className="py-10 text-center text-sm text-destructive">{error}</p>
-      )}
-      {!loading && !error && filtered.length === 0 && (
-        <p className="py-10 text-center text-sm text-muted-foreground">
-          暂无标签
-        </p>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        {filtered.map((t) => (
-          <span
-            key={t.tag}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/80 bg-card/80 py-1 pr-1 pl-3 text-sm shadow-sm transition-colors hover:border-border hover:bg-accent/40"
-          >
-            <Link
-              to={tagsPath({ tag: t.tag })}
-              className="inline-flex max-w-[10rem] min-w-0 items-center gap-1.5 truncate font-medium text-foreground"
-              title={t.tag}
+      <AsyncBody
+        loading={loading}
+        error={error}
+        empty={filtered.length === 0}
+        onRetry={() => void reload()}
+        emptyText={q.trim() ? "没有匹配的标签" : "暂无标签"}
+      >
+        <div className="flex flex-wrap gap-2">
+          {filtered.map((t) => (
+            <span
+              key={t.tag}
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/80 bg-card/80 py-1 pr-1 pl-3 text-sm shadow-sm transition-colors hover:border-border hover:bg-accent/40"
             >
-              <span className="truncate">#{t.tag}</span>
-              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground tabular-nums">
-                {t.count}
-              </span>
-            </Link>
-            <button
-              type="button"
-              disabled={removing === t.tag}
-              onClick={() => void deleteTag(t.tag)}
-              aria-label={`删除标签 ${t.tag}`}
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
-            >
-              <IconClose size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
+              <Link
+                to={tagsPath({ tag: t.tag })}
+                className="inline-flex max-w-[12rem] min-h-9 min-w-0 items-center gap-1.5 truncate font-medium text-foreground sm:min-h-0"
+                title={t.tag}
+              >
+                <span className="truncate">#{t.tag}</span>
+                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground tabular-nums">
+                  {t.count}
+                </span>
+              </Link>
+              <button
+                type="button"
+                disabled={removing === t.tag}
+                onClick={() => void deleteTag(t.tag)}
+                aria-label={`删除标签 ${t.tag}`}
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50 sm:size-7"
+              >
+                <IconClose size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      </AsyncBody>
 
-      {/* 有意为之：清空入口只出现在标签列表页底部（规格「标签页底部」语义）；?tag= 筛选页（TagItemsView）不渲染 */}
+      {/* 有意为之：清空入口只出现在标签列表页底部 */}
       <DataManagement />
     </PageShell>
   )
@@ -143,7 +151,10 @@ function TagItemsView() {
         const query = params ? `&${params}` : ""
         return `${api.meItems}?tag=${encodeURIComponent(tag)}${query}`
       }}
-      pick={(json) => json as { items: MeListItem[]; nextPage?: number }}
+      pick={(json) =>
+        json as { items: MeListItem[]; nextPage?: number; total?: number }
+      }
+      emptyText="该标签下暂无内容"
     />
   )
 }
@@ -169,38 +180,27 @@ function DataManagement() {
   }
 
   return (
-    <section className="mt-12 rounded-2xl border border-border p-4 sm:p-5">
+    <section className="mt-12 rounded-2xl border border-border bg-card/50 p-4 sm:p-5">
       <h2 className="mb-1 text-sm font-semibold text-foreground">数据管理</h2>
       <p className="mb-3 text-xs text-muted-foreground">
         清空正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。
       </p>
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void clearCache()}
+          <SoftButton
+            destructive
             disabled={busy}
-            className="min-h-10 rounded-lg bg-destructive px-3.5 py-2 text-sm font-medium text-white disabled:opacity-50 sm:min-h-0 sm:px-3 sm:py-1.5 sm:text-xs"
+            onClick={() => void clearCache()}
+            className="border-destructive/40 bg-destructive text-white hover:bg-destructive/90 hover:text-white"
           >
             确认清空
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            disabled={busy}
-            className="min-h-10 rounded-lg bg-muted px-3.5 py-2 text-sm font-medium text-muted-foreground sm:min-h-0 sm:px-3 sm:py-1.5 sm:text-xs"
-          >
+          </SoftButton>
+          <SoftButton disabled={busy} onClick={() => setConfirming(false)}>
             取消
-          </button>
+          </SoftButton>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="min-h-10 rounded-lg bg-muted/70 px-3.5 py-2 text-sm font-medium text-muted-foreground hover:bg-muted sm:min-h-0 sm:px-3 sm:py-1.5 sm:text-xs"
-        >
-          清空缓存
-        </button>
+        <SoftButton onClick={() => setConfirming(true)}>清空缓存</SoftButton>
       )}
       {result && <p className="mt-2 text-xs text-muted-foreground">{result}</p>}
     </section>

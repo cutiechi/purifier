@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useConfirm } from "@/components/confirm-dialog"
 import { FavoritedGroupCard } from "@/components/favorited-group-card"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
@@ -14,13 +15,20 @@ function UnfavoriteButton({
   item: MeListItem
   reload: () => void
 }) {
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
   return (
     <button
       type="button"
       disabled={busy}
       onClick={async () => {
-        if (!window.confirm(`取消收藏「${item.title}」？`)) return
+        const ok = await confirm({
+          title: "取消收藏？",
+          description: `将从收藏中移除「${item.title}」。`,
+          confirmLabel: "取消收藏",
+          destructive: true,
+        })
+        if (!ok) return
         setBusy(true)
         try {
           const res = await fetch(
@@ -114,9 +122,12 @@ export default function FavoritesPage() {
       buildUrl={(q2, kind2, page2) =>
         `${api.meFavorites}?${meListQuery({ q: q2, kind: kind2, page: page2 })}`
       }
-      pick={(json) => json as { items: MeListItem[]; nextPage?: number }}
+      pick={(json) =>
+        json as { items: MeListItem[]; nextPage?: number; total?: number }
+      }
       renderTrailing={renderTrailing}
       toolbar={toolbar}
+      emptyText="还没有收藏，阅读时点星标即可加入"
     />
   )
 }

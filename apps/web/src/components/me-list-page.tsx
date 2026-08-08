@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
+import {
+  FilterTabs,
+  ListMeta,
+  SearchForm,
+  useScrollTop,
+} from "@/components/form-controls"
 import { GenrePill } from "@/components/list-post-card"
 import { MeItemCard, type MeListItem } from "@/components/me-item-card"
 import { SimilarMeItemCard } from "@/components/similar-me-item-card"
@@ -10,13 +16,18 @@ import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { groupMeListItems } from "@/lib/book-groups"
+import {
+  formatListPagination,
+  ME_PAGE_SIZE,
+  totalPages as calcTotalPages,
+} from "@/lib/list-meta"
 import { parsePage, parseQuery } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
-import { cn } from "@workspace/ui/lib/utils"
 
 export type MeListPick = (json: Record<string, unknown>) => {
   items: MeListItem[]
   nextPage?: number
+  total?: number
 }
 
 export function MeListPage({
@@ -56,6 +67,7 @@ export function MeListPage({
 
   const [items, setItems] = useState<MeListItem[]>([])
   const [nextPage, setNextPage] = useState<number | undefined>(undefined)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const seqRef = useRef(0)
@@ -75,6 +87,7 @@ export function MeListPage({
       const data = pickRef.current(json)
       setItems(data.items)
       setNextPage(data.nextPage)
+      setTotal(typeof data.total === "number" ? data.total : 0)
     } catch (e) {
       if (seq === seqRef.current) {
         setError(e instanceof Error ? e.message : "未知错误")
@@ -87,6 +100,8 @@ export function MeListPage({
   useEffect(() => {
     void reload()
   }, [reload])
+
+  useScrollTop([page, kind, q])
 
   const { isExpanded, toggle } = useExpandedBooks(bookGroupScope ?? "__noop__")
   const grouped = useMemo(() => {
@@ -118,7 +133,7 @@ export function MeListPage({
     { value: "", label: "全部" },
     { value: "post", label: "贴子" },
     { value: "book", label: "书库" },
-  ]
+  ] as const
 
   return (
     <PageShell>
@@ -127,54 +142,45 @@ export function MeListPage({
         description={description ?? "最近访问的贴子与书库"}
       />
 
-      <form
-        className="mb-3 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const input = new FormData(e.currentTarget).get("q")
-          update({ q: typeof input === "string" ? input.trim() : "" })
-        }}
-      >
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="搜索标题或标签…"
-          className="h-11 min-w-0 flex-1 rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
-        />
-        <button
-          type="submit"
-          className="h-11 shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-foreground"
-        >
-          搜索
-        </button>
-      </form>
+      <SearchForm
+        key={q}
+        defaultValue={q}
+        placeholder="搜索标题或标签…"
+        onSubmit={(next) => update({ q: next, page: 1 })}
+      />
 
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        {KIND_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => update({ kind: tab.value })}
-            className={cn(
-              "min-h-9 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors sm:min-h-0 sm:px-3",
-              kind === tab.value
-                ? "bg-accent text-foreground"
-                : "bg-muted/50 text-muted-foreground hover:bg-accent/70"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <FilterTabs
+        options={KIND_TABS.map((t) => ({
+          value: t.value as string,
+          label: t.label,
+        }))}
+        value={kind}
+        onChange={(v) => update({ kind: v, page: 1 })}
+      />
 
       {toolbar?.({ items, reload, loading })}
+
+      {!loading && !error && items.length > 0 && (
+        <ListMeta>
+          {formatListPagination({
+            page,
+            pageCount: items.length,
+            pageSize: ME_PAGE_SIZE,
+            total,
+            hasNext: nextPage !== undefined,
+          })}
+        </ListMeta>
+      )}
 
       <AsyncBody
         loading={loading}
         error={error}
         empty={items.length === 0}
         onRetry={() => void reload()}
-        emptyText={emptyText ?? "暂无内容"}
+        emptyText={
+          emptyText ??
+          (q || kind ? "没有匹配的内容" : "暂无内容")
+        }
       >
         <PostList>
           {(
@@ -235,6 +241,8 @@ export function MeListPage({
         <Pager
           page={page}
           hasNext={nextPage !== undefined}
+          total={total}
+          totalPages={calcTotalPages(total, ME_PAGE_SIZE)}
           onPrev={() => update({ page: page - 1 })}
           onNext={() => nextPage !== undefined && update({ page: nextPage })}
           disabled={loading}

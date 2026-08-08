@@ -293,21 +293,24 @@ export class Store {
     const kind = query.kind || null
     const site = query.site ?? null
     const page = Math.max(1, query.page ?? 1)
+    const where = `WHERE (?1 = '' OR i.title LIKE '%' || ?1 || '%' COLLATE NOCASE
+              OR EXISTS(SELECT 1 FROM tags t
+                        WHERE t.site = i.site AND t.kind = i.kind AND t.id = i.id AND t.tag = ?1))
+         AND (?2 IS NULL OR i.kind = ?2)
+         AND (?3 IS NULL OR i.site = ?3)`
     return this.runList(
       `SELECT i.site, i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
               i.read_progress, i.last_chapter,
               (EXISTS(SELECT 1 FROM favorites f
                       WHERE f.site = i.site AND f.kind = i.kind AND f.id = i.id)) AS favorited
        FROM items i
-       WHERE (?1 = '' OR i.title LIKE '%' || ?1 || '%' COLLATE NOCASE
-              OR EXISTS(SELECT 1 FROM tags t
-                        WHERE t.site = i.site AND t.kind = i.kind AND t.id = i.id AND t.tag = ?1))
-         AND (?2 IS NULL OR i.kind = ?2)
-         AND (?5 IS NULL OR i.site = ?5)
+       ${where}
        ORDER BY i.last_visited_at DESC, i.rowid DESC
-       LIMIT ?3 OFFSET ?4`,
-      [q, kind, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE, site],
-      page
+       LIMIT ?4 OFFSET ?5`,
+      [q, kind, site, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE],
+      page,
+      `SELECT COUNT(*) AS n FROM items i ${where}`,
+      [q, kind, site]
     )
   }
 
@@ -318,20 +321,25 @@ export class Store {
     const kind = query.kind || null
     const site = query.site ?? null
     const page = Math.max(1, query.page ?? 1)
+    const where = `WHERE (?1 = '' OR i.title LIKE '%' || ?1 || '%' COLLATE NOCASE
+              OR EXISTS(SELECT 1 FROM tags t
+                        WHERE t.site = i.site AND t.kind = i.kind AND t.id = i.id AND t.tag = ?1))
+         AND (?2 IS NULL OR i.kind = ?2)
+         AND (?3 IS NULL OR i.site = ?3)`
     return this.runList(
       `SELECT i.site, i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
               i.read_progress, i.last_chapter, f.favorited_at, 1 AS favorited
        FROM favorites f
        JOIN items i ON i.site = f.site AND i.kind = f.kind AND i.id = f.id
-       WHERE (?1 = '' OR i.title LIKE '%' || ?1 || '%' COLLATE NOCASE
-              OR EXISTS(SELECT 1 FROM tags t
-                        WHERE t.site = i.site AND t.kind = i.kind AND t.id = i.id AND t.tag = ?1))
-         AND (?2 IS NULL OR i.kind = ?2)
-         AND (?5 IS NULL OR i.site = ?5)
+       ${where}
        ORDER BY f.favorited_at DESC, f.rowid DESC
-       LIMIT ?3 OFFSET ?4`,
-      [q, kind, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE, site],
-      page
+       LIMIT ?4 OFFSET ?5`,
+      [q, kind, site, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE],
+      page,
+      `SELECT COUNT(*) AS n FROM favorites f
+       JOIN items i ON i.site = f.site AND i.kind = f.kind AND i.id = f.id
+       ${where}`,
+      [q, kind, site]
     )
   }
 
@@ -361,6 +369,10 @@ export class Store {
     const kind = query.kind || null
     const site = query.site ?? null
     const page = Math.max(1, query.page ?? 1)
+    const where = `WHERE t.tag = ?1
+         AND (?2 = '' OR i.title LIKE '%' || ?2 || '%' COLLATE NOCASE)
+         AND (?3 IS NULL OR i.kind = ?3)
+         AND (?4 IS NULL OR i.site = ?4)`
     return this.runList(
       `SELECT i.site, i.kind, i.id, i.title, i.url, i.last_visited_at, i.visit_count,
               i.read_progress, i.last_chapter,
@@ -368,23 +380,34 @@ export class Store {
                       WHERE f.site = i.site AND f.kind = i.kind AND f.id = i.id)) AS favorited
        FROM tags t
        JOIN items i ON i.site = t.site AND i.kind = t.kind AND i.id = t.id
-       WHERE t.tag = ?1
-         AND (?2 = '' OR i.title LIKE '%' || ?2 || '%' COLLATE NOCASE)
-         AND (?3 IS NULL OR i.kind = ?3)
-         AND (?6 IS NULL OR i.site = ?6)
+       ${where}
        GROUP BY i.site, i.kind, i.id
        ORDER BY i.last_visited_at DESC, i.rowid DESC
-       LIMIT ?4 OFFSET ?5`,
-      [tag, q, kind, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE, site],
-      page
+       LIMIT ?5 OFFSET ?6`,
+      [tag, q, kind, site, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE],
+      page,
+      `SELECT COUNT(*) AS n FROM (
+         SELECT i.site, i.kind, i.id
+         FROM tags t
+         JOIN items i ON i.site = t.site AND i.kind = t.kind AND i.id = t.id
+         ${where}
+         GROUP BY i.site, i.kind, i.id
+       )`,
+      [tag, q, kind, site]
     )
   }
 
   private runList(
     sql: string,
     params: SQLQueryBindings[],
-    page: number
+    page: number,
+    countSql: string,
+    countParams: SQLQueryBindings[]
   ): ListResult {
+    const totalRow = this.db.query(countSql).get(...countParams) as {
+      n: number
+    }
+    const total = Number(totalRow?.n ?? 0)
     const rows = this.db.query(sql).all(...params) as RawItemRow[]
     const items: ListItem[] = rows.map((r) => {
       const item: ListItem = {
@@ -413,6 +436,7 @@ export class Store {
     return {
       items: hasMore ? items.slice(0, PAGE_SIZE) : items,
       nextPage: hasMore ? page + 1 : undefined,
+      total,
     }
   }
 
@@ -671,6 +695,15 @@ export class Store {
       )
   }
 
+  /** 运行中更新中间进度（仅 running 行） */
+  setJobResult(id: number, result: Record<string, unknown>): void {
+    this.db
+      .query(
+        `UPDATE jobs SET result=?2 WHERE id=?1 AND status='running'`
+      )
+      .run(id, JSON.stringify(result))
+  }
+
   hasRunningOfType(type: string): boolean {
     const row = this.db
       .query("SELECT 1 FROM jobs WHERE type=?1 AND status='running' LIMIT 1")
@@ -783,7 +816,7 @@ export class Store {
       sort: "title" | "tid" | "archived_at"
       order?: "asc" | "desc"
     }
-  ): { items: ArchivePost[]; nextPage?: number } {
+  ): { items: ArchivePost[]; nextPage?: number; total: number } {
     const SORT_COL: Record<typeof opts.sort, string> = {
       title: "title COLLATE NOCASE",
       tid: "tid",
@@ -799,11 +832,15 @@ export class Store {
     }
     const page = Math.max(1, opts.page)
     const q = opts.q?.trim() ?? ""
+    const where = `site=?1 AND (?2 = '' OR title LIKE '%' || ?2 || '%' COLLATE NOCASE)`
+    const totalRow = this.db
+      .query(`SELECT COUNT(*) AS n FROM archive_posts WHERE ${where}`)
+      .get(site, q) as { n: number }
+    const total = Number(totalRow.n ?? 0)
     const rows = this.db
       .query(
         `SELECT * FROM archive_posts
-         WHERE site=?1
-           AND (?2 = '' OR title LIKE '%' || ?2 || '%' COLLATE NOCASE)
+         WHERE ${where}
          ORDER BY ${sortCol} ${order.toUpperCase()}, tid ${order.toUpperCase()}
          LIMIT ?3 OFFSET ?4`
       )
@@ -813,6 +850,7 @@ export class Store {
     return {
       items,
       nextPage: hasMore ? page + 1 : undefined,
+      total,
     }
   }
 

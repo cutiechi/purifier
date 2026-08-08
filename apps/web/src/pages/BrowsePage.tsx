@@ -10,7 +10,9 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { AsyncBody, ErrorBox, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { ListMeta, useScrollTop } from "@/components/form-controls"
 import { Pager } from "@/components/pager"
+import { formatListPagination } from "@/lib/list-meta"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
@@ -113,6 +115,8 @@ function BrowseContent() {
     loadPage(pageParam)
   }, [queryString, pageParam, loadPage])
 
+  useScrollTop([queryString, pageParam])
+
   function goToPage(p: number) {
     navigate(browsePath({ type, q, page: p, site }))
   }
@@ -140,6 +144,14 @@ function BrowseContent() {
           onRetry={() => loadPage(pageParam)}
           emptyText="暂无内容"
         >
+          <ListMeta>
+            {formatListPagination({
+              page: pageParam,
+              pageCount: links.length,
+              pageSize: Math.max(links.length, 1),
+              hasNext: nextPage !== null,
+            })}
+          </ListMeta>
           <PostList>
             {grouped.map((g) =>
               g.type === "single" ? (

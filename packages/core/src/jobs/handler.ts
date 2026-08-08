@@ -1,6 +1,8 @@
 export interface JobContext {
   jobId: number
   log(level: "info" | "warn" | "error", message: string): void
+  /** 运行中写入中间进度到 jobs.result，供列表轮询展示 */
+  reportProgress(progress: JobResult): void
   signal: AbortSignal
   payload: Record<string, unknown>
 }

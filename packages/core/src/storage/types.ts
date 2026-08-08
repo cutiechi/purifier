@@ -21,6 +21,8 @@ export interface ListItem {
 export interface ListResult {
   items: ListItem[]
   nextPage?: number
+  /** 满足当前筛选的总条数（用于页码/总数展示） */
+  total: number
 }
 
 /** 单对象状态（/api/me/state 返回） */

@@ -243,7 +243,7 @@ describe("listHistory", () => {
     expect(posts.items.find((i) => i.id === "1")?.tags).toEqual(["科幻"])
   })
 
-  test("paginates 20 per page", () => {
+  test("paginates 20 per page and returns total", () => {
     const { store } = makeStore()
     for (let i = 0; i < 25; i++) {
       store.recordVisit("1", "post", String(i), `T${i}`, "u")
@@ -251,9 +251,11 @@ describe("listHistory", () => {
     const p1 = store.listHistory({ page: 1 })
     expect(p1.items).toHaveLength(20)
     expect(p1.nextPage).toBe(2)
+    expect(p1.total).toBe(25)
     const p2 = store.listHistory({ page: 2 })
     expect(p2.items).toHaveLength(5)
     expect(p2.nextPage).toBeUndefined()
+    expect(p2.total).toBe(25)
   })
 })
 

@@ -471,11 +471,11 @@ function handleMeArchive(url: URL): Response {
     100,
     Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10) || 50)
   )
-  const sortRaw = url.searchParams.get("sort") ?? "title"
+  const sortRaw = url.searchParams.get("sort") ?? "tid"
   const sort =
     sortRaw === "title" || sortRaw === "tid" || sortRaw === "archived_at"
       ? sortRaw
-      : "title"
+      : "tid"
   const orderRaw = url.searchParams.get("order")
   const order =
     orderRaw === "asc" || orderRaw === "desc" ? orderRaw : undefined

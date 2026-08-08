@@ -65,6 +65,7 @@ export class ArchivePostsJob implements JobHandler {
         "info",
         `page ${pages}: +${page.links.length} fetched (${res.inserted} new, ${res.updated} updated${dropped ? `, ${dropped} empty dropped` : ""}), nextMtid=${page.nextMtid}`
       )
+      ctx.reportProgress({ pages, inserted, updated, site })
 
       if (!page.nextMtid) {
         ctx.log("info", `reached end (no nextMtid)`)
