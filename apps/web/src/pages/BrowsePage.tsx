@@ -11,6 +11,7 @@ import { AsyncBody, ErrorBox, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { ListMeta, useScrollTop } from "@/components/form-controls"
+import { PageSiteTabs } from "@/components/page-site-tabs"
 import { Pager } from "@/components/pager"
 import { formatListPagination } from "@/lib/list-meta"
 import { PostList } from "@/components/post-card"
@@ -133,6 +134,7 @@ function BrowseContent() {
             : "请从分类目录选择"
         }
       />
+      <PageSiteTabs />
 
       {!queryString && <ErrorBox message="缺少分类参数，请从分类目录选择" />}
 

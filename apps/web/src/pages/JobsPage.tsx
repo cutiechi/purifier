@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, Navigate } from "react-router-dom"
 import {
   Download,
   FolderTree,
@@ -12,8 +12,11 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { JobRow } from "@/components/job-row"
 import { useSite } from "@/hooks/use-site"
+import { useAllTabs } from "@/lib/hub-tabs"
 import {
   clearFinishedJobs,
   deleteJob,
@@ -35,6 +38,7 @@ import { cn } from "@workspace/ui/lib/utils"
 
 export default function JobsPage() {
   const site = useSite()
+  const sectionTabs = useAllTabs(routes.jobs)
   const confirm = useConfirm()
   const archiveSupported = site === "1"
   const [jobs, setJobs] = useState<Job[]>([])
@@ -253,11 +257,16 @@ export default function JobsPage() {
         .join(" · ")
     : null
 
+  // 任务仅论坛目录相关；带 ?site=2 时清回默认站
+  if (site !== "1") {
+    return <Navigate to={routes.jobs} replace />
+  }
+
   return (
     <PageShell>
       <PageHeader
-        title="任务"
-        description="后台长跑任务（全站主帖归档等）"
+        title="全部"
+        description="同步目录、自动分组与备份"
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -271,11 +280,13 @@ export default function JobsPage() {
               to={routes.archive}
               className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              查看归档
+              返回目录
             </Link>
           </div>
         }
       />
+      <PageSiteTabs sites={["1"]} />
+      <SectionTabs items={sectionTabs} />
 
       {toast && (
         <div

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
@@ -134,13 +135,16 @@ export default function HomePage() {
   return (
     <PageShell>
       <PageHeader
-        title="时间线"
+        title="首页"
         description={
           !initialLoading && links.length > 0
-            ? `已载入 ${links.length} 条 · 最新主帖`
-            : "最新主帖更新"
+            ? `已载入 ${links.length} 条 · ${site === "2" ? "书库更新" : "最新主帖"}`
+            : site === "2"
+              ? "书库首页"
+              : "最新主帖更新"
         }
       />
+      <PageSiteTabs />
 
       <AsyncBody
         loading={initialLoading}

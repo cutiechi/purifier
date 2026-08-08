@@ -30,6 +30,10 @@ export const SITES: Record<SiteId, { label: string }> = {
 
 export const routes = {
   home: "/",
+  /** 全站目录（原归档） */
+  all: "/archive",
+  discover: "/discover",
+  me: "/me",
   featured: "/featured",
   picks: "/picks",
   trending: "/trending",
@@ -44,6 +48,40 @@ export const routes = {
   archive: "/archive",
   jobs: "/jobs",
 } as const
+
+/** 发现页栏目（按站过滤） */
+export const DISCOVER_TABS: {
+  href: string
+  label: string
+  sites: readonly SiteId[]
+}[] = [
+  { href: routes.featured, label: "精华", sites: ["1"] },
+  { href: routes.picks, label: "扫文", sites: ["1"] },
+  { href: routes.comments, label: "评论", sites: ["1"] },
+  { href: routes.trending, label: "人气", sites: ["1", "2"] },
+]
+
+/** 我的页栏目 */
+export const ME_TABS: {
+  href: string
+  label: string
+  sites: readonly SiteId[]
+}[] = [
+  { href: routes.history, label: "历史", sites: ["1", "2"] },
+  { href: routes.favorites, label: "收藏", sites: ["1", "2"] },
+  { href: routes.tags, label: "标签", sites: ["1", "2"] },
+  { href: routes.groups, label: "分组", sites: ["1"] },
+]
+
+/** 全部页栏目（本地目录，仅论坛站） */
+export const ALL_TABS: {
+  href: string
+  label: string
+  sites: readonly SiteId[]
+}[] = [
+  { href: routes.archive, label: "目录", sites: ["1"] },
+  { href: routes.jobs, label: "任务", sites: ["1"] },
+]
 
 export const api = {
   posts: "/api/posts",
@@ -160,84 +198,47 @@ export function parseQuery(
   return (searchParams.get("q") ?? "").trim()
 }
 
+/** 一级导航：站点切换改页内 Tab，顶栏只保留这些 */
 export const NAV_ITEMS = [
   {
     href: routes.home,
     label: "首页",
-    sites: ["1", "2"],
     match: (p: string) => p === routes.home,
+  },
+  {
+    href: routes.archive,
+    label: "全部",
+    match: (p: string) => p === routes.archive || p === routes.jobs,
   },
   {
     href: routes.categories,
     label: "分类",
-    sites: ["1", "2"],
     match: (p: string) =>
       p === routes.categories || p === routes.browse || p.startsWith("/browse"),
   },
   {
-    href: routes.featured,
-    label: "精华",
-    sites: ["1"],
-    match: (p: string) => p === routes.featured,
-  },
-  {
-    href: routes.picks,
-    label: "扫文",
-    sites: ["1"],
-    match: (p: string) => p === routes.picks,
-  },
-  {
-    href: routes.comments,
-    label: "评论",
-    sites: ["1"],
-    match: (p: string) => p === routes.comments,
-  },
-  {
-    href: routes.trending,
-    label: "人气",
-    sites: ["1", "2"],
-    match: (p: string) => p === routes.trending,
+    href: routes.discover,
+    label: "发现",
+    match: (p: string) =>
+      p === routes.discover ||
+      p === routes.featured ||
+      p === routes.picks ||
+      p === routes.comments ||
+      p === routes.trending,
   },
   {
     href: routes.search,
     label: "搜索",
-    sites: ["1", "2"],
     match: (p: string) => p === routes.search,
   },
   {
-    href: routes.groups,
-    label: "分组",
-    sites: ["1"],
-    match: (p: string) => p === routes.groups,
-  },
-  {
-    href: routes.archive,
-    label: "归档",
-    sites: ["1"],
-    match: (p: string) => p === routes.archive,
-  },
-  {
-    href: routes.jobs,
-    label: "任务",
-    sites: ["1", "2"],
-    match: (p: string) => p === routes.jobs,
-  },
-  {
-    href: routes.history,
-    label: "历史",
-    sites: ["1", "2"],
-    match: (p: string) => p === routes.history,
-  },
-  {
-    href: routes.favorites,
-    label: "收藏",
-    sites: ["1", "2"],
-    match: (p: string) => p === routes.favorites,
-  },
-  {
-    href: routes.tags,
-    label: "标签",
-    sites: ["1", "2"],
-    match: (p: string) => p === routes.tags,
+    href: routes.me,
+    label: "我的",
+    match: (p: string) =>
+      p === routes.me ||
+      p === routes.history ||
+      p === routes.favorites ||
+      p === routes.tags ||
+      p === routes.groups,
   },
 ] as const

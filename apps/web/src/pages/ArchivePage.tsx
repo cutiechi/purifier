@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, Navigate, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import {
   FilterTabs,
   ListMeta,
@@ -12,7 +14,9 @@ import { GenrePill, ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { PostList } from "@/components/post-card"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { useSite } from "@/hooks/use-site"
 import { groupBooks } from "@/lib/book-groups"
+import { useAllTabs } from "@/lib/hub-tabs"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
@@ -43,6 +47,8 @@ function parseSort(raw: string | null): SortKey {
 }
 
 export default function ArchivePage() {
+  const site = useSite()
+  const sectionTabs = useAllTabs(routes.archive)
   const [searchParams, setSearchParams] = useSearchParams()
   const q = parseQuery(searchParams)
   const sort = parseSort(searchParams.get("sort"))
@@ -140,20 +146,27 @@ export default function ArchivePage() {
     [items]
   )
 
+  // 全站目录仅论坛；带 ?site=2 时清回默认站
+  if (site !== "1") {
+    return <Navigate to={routes.archive} replace />
+  }
+
   return (
     <PageShell>
       <PageHeader
-        title="归档"
-        description="全站主帖目录（本地库）"
+        title="全部"
+        description="本地全站主帖目录（由任务同步）"
         action={
           <Link
             to={routes.jobs}
             className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            去任务页
+            更新目录
           </Link>
         }
       />
+      <PageSiteTabs sites={["1"]} />
+      <SectionTabs items={sectionTabs} />
 
       <SearchForm
         value={draftQ}

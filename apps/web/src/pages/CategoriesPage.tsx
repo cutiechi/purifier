@@ -1,6 +1,7 @@
 import { CategoryGrid, type CategoryItem } from "@/components/category-grid"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
@@ -39,6 +40,7 @@ export default function CategoriesPage() {
             : "书屋栏目与题材"
         }
       />
+      <PageSiteTabs />
 
       <AsyncBody
         loading={loading}

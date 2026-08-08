@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconClose } from "@/components/icons"
 import { SoftButton } from "@/components/form-controls"
@@ -7,9 +7,12 @@ import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { AsyncBody } from "@/components/ui-state"
+import { useMeTabs } from "@/lib/hub-tabs"
 import { downloadBackup } from "@/lib/jobs"
-import { api, meListQuery, tagsPath } from "@/lib/routes"
+import { api, meListQuery, routes, tagsPath } from "@/lib/routes"
 
 interface TagCount {
   tag: string
@@ -77,16 +80,21 @@ function TagListView() {
     }
   }
 
+  const { pathname } = useLocation()
+  const sectionTabs = useMeTabs(pathname)
+
   return (
     <PageShell>
       <PageHeader
-        title="标签"
+        title="我的"
         description={
           !loading && tags.length > 0
-            ? `共 ${tags.length} 个标签 · 点击筛选贴子与书库`
-            : "点击标签筛选贴子与书库"
+            ? `标签 · 共 ${tags.length} 个 · 点击筛选`
+            : "标签 · 点击筛选贴子与书库"
         }
       />
+      <PageSiteTabs />
+      <SectionTabs items={sectionTabs} />
 
       <input
         value={q}

@@ -1,6 +1,8 @@
 import { useMemo } from "react"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
@@ -12,7 +14,8 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { formatCount } from "@/lib/format"
 import { groupBooks } from "@/lib/book-groups"
-import { api, bookPath, readPath } from "@/lib/routes"
+import { useDiscoverTabs } from "@/lib/hub-tabs"
+import { api, bookPath, readPath, routes } from "@/lib/routes"
 
 interface TrendingPost {
   rank: number
@@ -23,6 +26,7 @@ interface TrendingPost {
 
 export default function TrendingPage() {
   const site = useSite()
+  const sectionTabs = useDiscoverTabs(routes.trending)
   const { items, loading, error, reload } = useAsyncList(
     `${api.trending}?site=${site}`,
     (json) => (json.posts as TrendingPost[]) ?? []
@@ -43,13 +47,15 @@ export default function TrendingPage() {
   return (
     <PageShell>
       <PageHeader
-        title="人气"
+        title="发现"
         description={
           items.length
-            ? pageCountLabel(items.length, "帖", "按阅读排序")
-            : "按阅读排序"
+            ? pageCountLabel(items.length, "帖", "人气 · 按阅读排序")
+            : "在线榜单与栏目"
         }
       />
+      <PageSiteTabs />
+      <SectionTabs items={sectionTabs} />
 
       <AsyncBody
         loading={loading}

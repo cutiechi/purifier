@@ -19,6 +19,7 @@ import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
+import { PageSiteTabs } from "@/components/page-site-tabs"
 import { formatListPagination } from "@/lib/list-meta"
 import { useSite } from "@/hooks/use-site"
 import {
@@ -127,6 +128,7 @@ function SearchContent() {
             : "按关键词检索帖子"
         }
       />
+      <PageSiteTabs />
 
       <SearchForm
         value={input}

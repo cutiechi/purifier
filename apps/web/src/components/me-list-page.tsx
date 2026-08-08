@@ -13,9 +13,13 @@ import { MeItemCard, type MeListItem } from "@/components/me-item-card"
 import { SimilarMeItemCard } from "@/components/similar-me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { groupMeListItems } from "@/lib/book-groups"
+import { useMeTabs } from "@/lib/hub-tabs"
+import { useLocation } from "react-router-dom"
 import {
   formatListPagination,
   ME_PAGE_SIZE,
@@ -57,6 +61,8 @@ export function MeListPage({
   bookGroupScope?: string
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { pathname } = useLocation()
+  const sectionTabs = useMeTabs(pathname)
   const q = parseQuery(searchParams)
   const kind = searchParams.get("kind") ?? ""
   const page = parsePage(searchParams)
@@ -138,9 +144,11 @@ export function MeListPage({
   return (
     <PageShell>
       <PageHeader
-        title={title}
-        description={description ?? "最近访问的贴子与书库"}
+        title="我的"
+        description={description ?? title}
       />
+      <PageSiteTabs />
+      <SectionTabs items={sectionTabs} />
 
       <SearchForm
         key={q}

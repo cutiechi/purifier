@@ -1,6 +1,9 @@
 import { useMemo } from "react"
+import { Navigate } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { AsyncBody } from "@/components/ui-state"
@@ -10,7 +13,9 @@ import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupBooks } from "@/lib/book-groups"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useAsyncList } from "@/hooks/use-async-list"
-import { api, readPath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { useDiscoverTabs } from "@/lib/hub-tabs"
+import { api, readPath, routes } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -19,6 +24,8 @@ interface ChapterLink {
 }
 
 export default function FeaturedPage() {
+  const site = useSite()
+  const sectionTabs = useDiscoverTabs(routes.featured)
   const { items, loading, error, reload } = useAsyncList(
     api.featured,
     (json) => (json.links as ChapterLink[]) ?? []
@@ -41,16 +48,22 @@ export default function FeaturedPage() {
     return m
   }, [items])
 
+  if (site !== "1") {
+    return <Navigate to={`${routes.trending}?site=${site}`} replace />
+  }
+
   return (
     <PageShell>
       <PageHeader
-        title="精华"
+        title="发现"
         description={
           items.length
-            ? pageCountLabel(items.length, "篇", "首页精华热贴")
-            : "首页精华热贴"
+            ? pageCountLabel(items.length, "篇", "精华热贴")
+            : "在线榜单与栏目"
         }
       />
+      <PageSiteTabs />
+      <SectionTabs items={sectionTabs} />
 
       <AsyncBody
         loading={loading}

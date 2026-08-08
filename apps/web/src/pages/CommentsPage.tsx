@@ -1,6 +1,9 @@
 import { useMemo } from "react"
+import { Navigate } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
@@ -12,7 +15,8 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { formatCount } from "@/lib/format"
 import { groupBooks } from "@/lib/book-groups"
-import { api, readPath } from "@/lib/routes"
+import { useDiscoverTabs } from "@/lib/hub-tabs"
+import { api, readPath, routes } from "@/lib/routes"
 
 interface CommentRankPost {
   rank: number
@@ -23,6 +27,7 @@ interface CommentRankPost {
 
 export default function CommentsPage() {
   const site = useSite()
+  const sectionTabs = useDiscoverTabs(routes.comments)
   const { items, loading, error, reload } = useAsyncList(
     api.comments,
     (json) => (json.posts as CommentRankPost[]) ?? []
@@ -40,16 +45,22 @@ export default function CommentsPage() {
     )
   }, [items, site])
 
+  if (site !== "1") {
+    return <Navigate to={`${routes.trending}?site=${site}`} replace />
+  }
+
   return (
     <PageShell>
       <PageHeader
-        title="评论榜"
+        title="发现"
         description={
           items.length
-            ? pageCountLabel(items.length, "帖", "按评论数排序")
-            : "按评论数排序"
+            ? pageCountLabel(items.length, "帖", "评论榜")
+            : "在线榜单与栏目"
         }
       />
+      <PageSiteTabs />
+      <SectionTabs items={sectionTabs} />
 
       <AsyncBody
         loading={loading}

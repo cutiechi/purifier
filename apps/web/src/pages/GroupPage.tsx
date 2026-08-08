@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, Navigate, useLocation } from "react-router-dom"
 import { ChevronDown, Star, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FilterTabs, ListMeta } from "@/components/form-controls"
@@ -7,11 +7,15 @@ import { IconBookOpen } from "@/components/icons"
 import { GenrePill } from "@/components/list-post-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { PageSiteTabs } from "@/components/page-site-tabs"
+import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
 import { SimilarTrigger } from "@/components/similar-trigger"
 import { AsyncBody } from "@/components/ui-state"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { useSite } from "@/hooks/use-site"
+import { useMeTabs } from "@/lib/hub-tabs"
 import { compareTid, type Group } from "@/lib/groups"
 import { api, readPath, routes } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
@@ -284,6 +288,9 @@ function GroupCard({
 }
 
 export default function GroupPage() {
+  const site = useSite()
+  const { pathname } = useLocation()
+  const sectionTabs = useMeTabs(pathname)
   const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -311,8 +318,8 @@ export default function GroupPage() {
   }, [])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    if (site === "1") void reload()
+  }, [reload, site])
 
   const favCount = useMemo(
     () => groups.filter((g) => g.favorited).length,
@@ -357,34 +364,32 @@ export default function GroupPage() {
     return sorted
   }, [groups, q, filter, sort])
 
+  if (site !== "1") {
+    return <Navigate to={`${routes.history}?site=${site}`} replace />
+  }
+
   return (
     <PageShell>
       <PageHeader
-        title="分组"
+        title="我的"
         description={
           !loading && groups.length > 0
-            ? `共 ${groups.length} 组 · ${chapterTotal} 章${
+            ? `分组 · 共 ${groups.length} 组 · ${chapterTotal} 章${
                 favCount ? ` · ${favCount} 已收藏` : ""
               }`
-            : "同书多章合集；可用任务页「归档自动分组」批量创建"
+            : "分组 · 同书多章合集"
         }
         action={
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to={routes.jobs}
-              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              自动分组
-            </Link>
-            <Link
-              to={routes.archive}
-              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              归档
-            </Link>
-          </div>
+          <Link
+            to={routes.jobs}
+            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            自动分组
+          </Link>
         }
       />
+      <PageSiteTabs sites={["1"]} />
+      <SectionTabs items={sectionTabs} />
 
       {!loading && groups.length > 0 && (
         <>

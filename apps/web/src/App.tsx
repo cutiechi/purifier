@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom"
 import HomePage from "@/pages/HomePage"
 import CategoriesPage from "@/pages/CategoriesPage"
+import DiscoverPage from "@/pages/DiscoverPage"
 import FeaturedPage from "@/pages/FeaturedPage"
 import PicksPage from "@/pages/PicksPage"
 import CommentsPage from "@/pages/CommentsPage"
@@ -9,6 +10,7 @@ import BrowsePage from "@/pages/BrowsePage"
 import SearchPage from "@/pages/SearchPage"
 import ReadPage from "@/pages/ReadPage"
 import BookPage from "@/pages/BookPage"
+import MePage from "@/pages/MePage"
 import HistoryPage from "@/pages/HistoryPage"
 import FavoritesPage from "@/pages/FavoritesPage"
 import TagsPage from "@/pages/TagsPage"
@@ -21,6 +23,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/categories" element={<CategoriesPage />} />
+      <Route path="/discover" element={<DiscoverPage />} />
       <Route path="/featured" element={<FeaturedPage />} />
       <Route path="/picks" element={<PicksPage />} />
       <Route path="/comments" element={<CommentsPage />} />
@@ -29,6 +32,7 @@ export function App() {
       <Route path="/search" element={<SearchPage />} />
       <Route path="/read/:tid" element={<ReadPage />} />
       <Route path="/book/:cid" element={<BookPage />} />
+      <Route path="/me" element={<MePage />} />
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/favorites" element={<FavoritesPage />} />
       <Route path="/tags" element={<TagsPage />} />
