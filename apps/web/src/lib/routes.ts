@@ -60,7 +60,7 @@ export const DISCOVER_TABS: {
   { href: routes.trending, label: "人气", sites: ["1", "2"] },
 ]
 
-/** 我的页栏目 */
+/** 我的页栏目（个人阅读数据） */
 export const ME_TABS: {
   href: string
   label: string
@@ -69,17 +69,16 @@ export const ME_TABS: {
   { href: routes.history, label: "历史", sites: ["1", "2"] },
   { href: routes.favorites, label: "收藏", sites: ["1", "2"] },
   { href: routes.tags, label: "标签", sites: ["1", "2"] },
-  { href: routes.groups, label: "分组", sites: ["1"] },
 ]
 
-/** 全部页栏目（本地目录，仅论坛站） */
+/** 目录页栏目（归档整理视图，仅论坛站） */
 export const ALL_TABS: {
   href: string
   label: string
   sites: readonly SiteId[]
 }[] = [
   { href: routes.archive, label: "目录", sites: ["1"] },
-  { href: routes.jobs, label: "任务", sites: ["1"] },
+  { href: routes.groups, label: "分组", sites: ["1"] },
 ]
 
 export const api = {
@@ -206,8 +205,9 @@ export const NAV_ITEMS = [
   },
   {
     href: routes.archive,
-    label: "全部",
-    match: (p: string) => p === routes.archive || p === routes.jobs,
+    label: "目录",
+    match: (p: string) =>
+      p === routes.archive || p === routes.groups,
   },
   {
     href: routes.categories,
@@ -237,7 +237,11 @@ export const NAV_ITEMS = [
       p === routes.me ||
       p === routes.history ||
       p === routes.favorites ||
-      p === routes.tags ||
-      p === routes.groups,
+      p === routes.tags,
+  },
+  {
+    href: routes.jobs,
+    label: "任务",
+    match: (p: string) => p === routes.jobs,
   },
 ] as const

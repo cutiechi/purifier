@@ -45,7 +45,7 @@ export function useMeTabs(activePath: string): SectionTab[] {
   }, [site, activePath])
 }
 
-/** 全部（本地目录/任务），固定论坛站 */
+/** 目录（归档/分组），固定论坛站 */
 export function useAllTabs(activePath: string): SectionTab[] {
   return useMemo(
     () =>

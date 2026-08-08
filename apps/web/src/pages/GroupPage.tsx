@@ -25,7 +25,7 @@ import { SimilarTrigger } from "@/components/similar-trigger"
 import { AsyncBody } from "@/components/ui-state"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
-import { useMeTabs } from "@/lib/hub-tabs"
+import { useAllTabs } from "@/lib/hub-tabs"
 import { compareTid, type Group } from "@/lib/groups"
 import {
   formatListPagination,
@@ -292,7 +292,7 @@ function groupsListUrl(opts: {
 export default function GroupPage() {
   const site = useSite()
   const { pathname } = useLocation()
-  const sectionTabs = useMeTabs(pathname)
+  const sectionTabs = useAllTabs(pathname)
   const [searchParams, setSearchParams] = useSearchParams()
   const q = parseQuery(searchParams)
   const filter: FilterKey =
@@ -416,7 +416,7 @@ export default function GroupPage() {
   return (
     <PageShell>
       <PageHeader
-        title="我的"
+        title="分组"
         description={
           !loading && total > 0
             ? `分组 · 共 ${total} 组`

@@ -154,7 +154,7 @@ export default function ArchivePage() {
   return (
     <PageShell>
       <PageHeader
-        title="全部"
+        title="目录"
         description="本地全站主帖目录（由任务同步）"
         action={
           <Link

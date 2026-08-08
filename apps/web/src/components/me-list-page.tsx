@@ -3,7 +3,6 @@ import { type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import {
-  FilterTabs,
   ListMeta,
   SearchForm,
   useScrollTop,
@@ -13,7 +12,6 @@ import { MeItemCard, type MeListItem } from "@/components/me-item-card"
 import { SimilarMeItemCard } from "@/components/similar-me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
@@ -148,19 +146,9 @@ export function MeListPage({
     setSearchParams(params, { replace: true })
   }
 
-  const KIND_TABS = [
-    { value: "", label: "全部" },
-    { value: "post", label: "贴子" },
-    { value: "book", label: "书库" },
-  ] as const
-
   return (
     <PageShell>
-      <PageHeader
-        title="我的"
-        description={description ?? title}
-      />
-      <PageSiteTabs />
+      <PageHeader title={title} description={description} />
       <SectionTabs items={sectionTabs} />
 
       <SearchForm
@@ -168,15 +156,6 @@ export function MeListPage({
         defaultValue={q}
         placeholder="搜索标题或标签…"
         onSubmit={(next) => update({ q: next, page: 1 })}
-      />
-
-      <FilterTabs
-        options={KIND_TABS.map((t) => ({
-          value: t.value as string,
-          label: t.label,
-        }))}
-        value={kind}
-        onChange={(v) => update({ kind: v, page: 1 })}
       />
 
       {toolbar?.({ items, reload, loading })}

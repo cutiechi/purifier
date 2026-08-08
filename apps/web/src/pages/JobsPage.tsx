@@ -14,10 +14,8 @@ import { useScrollTop } from "@/components/form-controls"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageSiteTabs } from "@/components/page-site-tabs"
-import { SectionTabs } from "@/components/section-tabs"
 import { JobRow } from "@/components/job-row"
 import { useSite } from "@/hooks/use-site"
-import { useAllTabs } from "@/lib/hub-tabs"
 import {
   ME_PAGE_SIZE,
   totalPages as calcTotalPages,
@@ -38,12 +36,11 @@ import {
   type ArchiveStatus,
   type Job,
 } from "@/lib/jobs"
-import { parsePage, routes } from "@/lib/routes"
+import { api, parsePage, routes } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
 export default function JobsPage() {
   const site = useSite()
-  const sectionTabs = useAllTabs(routes.jobs)
   const confirm = useConfirm()
   const archiveSupported = site === "1"
   const [searchParams, setSearchParams] = useSearchParams()
@@ -256,6 +253,24 @@ export default function JobsPage() {
     }
   }
 
+  const onClearCache = async () => {
+    const ok = await confirm({
+      title: "清空内容缓存？",
+      description: "将删除所有正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。",
+      confirmLabel: "清空",
+      destructive: true,
+    })
+    if (!ok) return
+    try {
+      const res = await fetch(api.meCache, { method: "DELETE" })
+      const json = (await res.json()) as { cleared?: number; error?: string }
+      if (!res.ok) throw new Error(json.error || "清空失败")
+      setToast(`已清除 ${json.cleared ?? 0} 个缓存文件`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "清空失败")
+    }
+  }
+
   const onChangePoll = (ms: number) => {
     setPollMs(ms)
     setPollMsState(ms)
@@ -309,7 +324,7 @@ export default function JobsPage() {
   return (
     <PageShell>
       <PageHeader
-        title="全部"
+        title="任务"
         description="同步目录、自动分组与备份"
         action={
           <div className="flex flex-wrap gap-2">
@@ -319,6 +334,13 @@ export default function JobsPage() {
               className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <Download size={14} /> 导出备份
+            </button>
+            <button
+              type="button"
+              onClick={() => void onClearCache()}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Trash2 size={14} /> 清空缓存
             </button>
             <Link
               to={routes.archive}
@@ -330,7 +352,6 @@ export default function JobsPage() {
         }
       />
       <PageSiteTabs sites={["1"]} />
-      <SectionTabs items={sectionTabs} />
 
       {toast && (
         <div

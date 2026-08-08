@@ -2,16 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconClose } from "@/components/icons"
-import { SoftButton } from "@/components/form-controls"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { AsyncBody } from "@/components/ui-state"
 import { useMeTabs } from "@/lib/hub-tabs"
-import { downloadBackup } from "@/lib/jobs"
 import { api, meListQuery, routes, tagsPath } from "@/lib/routes"
 
 interface TagCount {
@@ -86,14 +83,13 @@ function TagListView() {
   return (
     <PageShell>
       <PageHeader
-        title="我的"
+        title="标签"
         description={
           !loading && tags.length > 0
             ? `标签 · 共 ${tags.length} 个 · 点击筛选`
             : "标签 · 点击筛选贴子与书库"
         }
       />
-      <PageSiteTabs />
       <SectionTabs items={sectionTabs} />
 
       <input
@@ -140,9 +136,6 @@ function TagListView() {
           ))}
         </div>
       </AsyncBody>
-
-      {/* 有意为之：清空入口只出现在标签列表页底部 */}
-      <DataManagement />
     </PageShell>
   )
 }
@@ -165,60 +158,6 @@ function TagItemsView() {
       }
       emptyText="该标签下暂无内容"
     />
-  )
-}
-
-function DataManagement() {
-  const [confirming, setConfirming] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState("")
-
-  const clearCache = async () => {
-    setBusy(true)
-    try {
-      const res = await fetch(api.meCache, { method: "DELETE" })
-      const json = (await res.json()) as { cleared?: number; error?: string }
-      if (!res.ok) throw new Error(json.error || "清空失败")
-      setResult(`已清除 ${json.cleared ?? 0} 个缓存文件`)
-      setConfirming(false)
-    } catch (e) {
-      setResult(e instanceof Error ? e.message : "清空失败")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section className="mt-12 rounded-2xl border border-border bg-card/50 p-4 sm:p-5">
-      <h2 className="mb-1 text-sm font-semibold text-foreground">数据管理</h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        清空正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。
-      </p>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <SoftButton onClick={() => downloadBackup()}>导出备份</SoftButton>
-        {confirming ? (
-          <>
-            <SoftButton
-              destructive
-              disabled={busy}
-              onClick={() => void clearCache()}
-              className="border-destructive/40 bg-destructive text-white hover:bg-destructive/90 hover:text-white"
-            >
-              确认清空
-            </SoftButton>
-            <SoftButton disabled={busy} onClick={() => setConfirming(false)}>
-              取消
-            </SoftButton>
-          </>
-        ) : (
-          <SoftButton onClick={() => setConfirming(true)}>清空缓存</SoftButton>
-        )}
-      </div>
-      <p className="mb-1 text-xs text-muted-foreground">
-        导出备份含历史、收藏、标签、分组与归档目录（JSON）。
-      </p>
-      {result && <p className="mt-2 text-xs text-muted-foreground">{result}</p>}
-    </section>
   )
 }
 
