@@ -40,7 +40,11 @@ export function JobRow({
     job.type === "archive_posts" || job.type === "archive_books"
   // 链接按任务 payload 的 site 落站（书库任务看书库归档）
   const archiveSite =
-    typeof job.payload?.site === "string" ? job.payload.site : "1"
+    typeof job.payload?.site === "string"
+      ? job.payload.site
+      : job.type === "archive_books"
+        ? "2"
+        : "1"
   const showArchiveLink =
     isArchive && (job.status === "succeeded" || job.status === "running")
 
