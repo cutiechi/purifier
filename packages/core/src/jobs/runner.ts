@@ -2,6 +2,7 @@ import { ExtractorError } from "../extractor"
 import type { Store } from "../storage/store"
 import type { Job } from "../storage/types"
 import type { JobHandler, JobContext, JobResult } from "./handler"
+import { sleep } from "./sleep"
 
 export class JobRunner {
   private running = new Map<number, AbortController>()
@@ -32,12 +33,18 @@ export class JobRunner {
     }
     const controller = new AbortController()
     this.running.set(job.id, controller)
-    // 不 await：后台跑，立即返回 running job；挂 catch 防未处理 rejection
-    void this.runJob(job.id, handler, payload ?? {}, controller.signal).catch(
-      (err) => {
-        console.error(`[jobs] runJob ${job.id} unhandled:`, err)
-      }
-    )
+    // 推迟到下一个 macrotask 再跑：
+    // 1) start() 的 HTTP 响应能先写出
+    // 2) 全同步 handler（如 auto_group）不会在 start 调用栈里堵死事件循环
+    const jobId = job.id
+    const payloadCopy = payload ?? {}
+    setTimeout(() => {
+      void this.runJob(jobId, handler, payloadCopy, controller.signal).catch(
+        (err) => {
+          console.error(`[jobs] runJob ${jobId} unhandled:`, err)
+        }
+      )
+    }, 0)
     return this.store.getJob(job.id)!
   }
 
@@ -71,6 +78,12 @@ export class JobRunner {
     let result: JobResult | null = null
     let error: string | null = null
     try {
+      // 再让出一拍，给并发 HTTP 请求机会
+      await sleep(0)
+      if (signal.aborted) {
+        status = "aborted"
+        return
+      }
       result = await handler.run(ctx)
       if (signal.aborted) status = "aborted"
     } catch (err) {

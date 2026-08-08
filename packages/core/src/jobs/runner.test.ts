@@ -39,6 +39,20 @@ class FailingHandler implements JobHandler {
   }
 }
 
+/** 全同步重活：若 runner 不 defer，会堵死 start() 与事件循环 */
+class SyncHeavyHandler implements JobHandler {
+  type = "sync_heavy"
+  entered = false
+  async run(ctx: JobContext): Promise<JobResult> {
+    this.entered = true
+    // 故意不 await：模拟 auto_group 类同步扫库
+    let n = 0
+    for (let i = 0; i < 200_000; i++) n += i
+    ctx.log("info", `sum=${n}`)
+    return { n }
+  }
+}
+
 describe("JobRunner", () => {
   test("正常完成 → succeeded，result 写入，logs 齐全", async () => {
     const { runner, store, dir } = makeRunner()
@@ -106,6 +120,24 @@ describe("JobRunner", () => {
     runner.recoverOnStartup()
     expect(store.getJob(a.id)?.status).toBe("interrupted")
     expect(store.getJob(b.id)?.status).toBe("interrupted")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("全同步 handler 不阻塞 start 返回", async () => {
+    const { runner, store, dir } = makeRunner()
+    const handler = new SyncHeavyHandler()
+    runner.register(handler)
+    const t0 = Date.now()
+    const job = await runner.start("sync_heavy")
+    const startMs = Date.now() - t0
+    // start 应立即返回 running，且重活尚未进入（setTimeout 0 推迟）
+    expect(job.status).toBe("running")
+    expect(handler.entered).toBe(false)
+    expect(startMs).toBeLessThan(50)
+    await sleep(100)
+    const done = store.getJob(job.id)!
+    expect(done.status).toBe("succeeded")
+    expect(handler.entered).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 

@@ -1,6 +1,7 @@
 import type { Store } from "../../storage/store"
 import { parseListTitle } from "../../title-parse"
 import type { JobContext, JobHandler, JobResult } from "../handler"
+import { sleep } from "../sleep"
 
 /** 与 web book-groups 同源：剥尾随章节标记后再做 key */
 function stripTrailingChapterMarker(title: string): string {
@@ -51,10 +52,13 @@ export class ArchiveAutoGroupJob implements JobHandler {
     let scanned = 0
     for (const p of posts) {
       scanned++
-      // 分桶阶段也可中止，避免大库扫完才响应 stop
-      if (scanned % 500 === 0 && ctx.signal.aborted) {
-        ctx.log("warn", "aborted during bucket scan")
-        break
+      // 每 100 条让出事件循环，避免同步扫库卡住整站 HTTP
+      if (scanned % 100 === 0) {
+        await sleep(0, ctx.signal)
+        if (ctx.signal.aborted) {
+          ctx.log("warn", "aborted during bucket scan")
+          break
+        }
       }
       const parsed = parseListTitle(p.title)
       const key = normalizeTitleKey(parsed.title)
@@ -106,6 +110,10 @@ export class ArchiveAutoGroupJob implements JobHandler {
       groupsUpserted++
       membersLinked += b.items.length
       i++
+      // 每组 upsert 后让出，SQLite 写密集时仍可响应其它 API
+      if (i % 3 === 0) {
+        await sleep(0, ctx.signal)
+      }
       if (i % 25 === 0 || i === eligible.length) {
         ctx.log(
           "info",
