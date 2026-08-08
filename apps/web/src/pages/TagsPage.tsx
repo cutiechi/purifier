@@ -8,6 +8,7 @@ import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
+import { downloadBackup } from "@/lib/jobs"
 import { api, meListQuery, tagsPath } from "@/lib/routes"
 
 interface TagCount {
@@ -185,23 +186,29 @@ function DataManagement() {
       <p className="mb-3 text-xs text-muted-foreground">
         清空正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。
       </p>
-      {confirming ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <SoftButton
-            destructive
-            disabled={busy}
-            onClick={() => void clearCache()}
-            className="border-destructive/40 bg-destructive text-white hover:bg-destructive/90 hover:text-white"
-          >
-            确认清空
-          </SoftButton>
-          <SoftButton disabled={busy} onClick={() => setConfirming(false)}>
-            取消
-          </SoftButton>
-        </div>
-      ) : (
-        <SoftButton onClick={() => setConfirming(true)}>清空缓存</SoftButton>
-      )}
+      <div className="mb-3 flex flex-wrap gap-2">
+        <SoftButton onClick={() => downloadBackup()}>导出备份</SoftButton>
+        {confirming ? (
+          <>
+            <SoftButton
+              destructive
+              disabled={busy}
+              onClick={() => void clearCache()}
+              className="border-destructive/40 bg-destructive text-white hover:bg-destructive/90 hover:text-white"
+            >
+              确认清空
+            </SoftButton>
+            <SoftButton disabled={busy} onClick={() => setConfirming(false)}>
+              取消
+            </SoftButton>
+          </>
+        ) : (
+          <SoftButton onClick={() => setConfirming(true)}>清空缓存</SoftButton>
+        )}
+      </div>
+      <p className="mb-1 text-xs text-muted-foreground">
+        导出备份含历史、收藏、标签、分组与归档目录（JSON）。
+      </p>
       {result && <p className="mt-2 text-xs text-muted-foreground">{result}</p>}
     </section>
   )

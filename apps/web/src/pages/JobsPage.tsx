@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { Play, Trash2 } from "lucide-react"
+import { Download, Play, RefreshCw, SkipForward, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
@@ -10,13 +10,17 @@ import { useSite } from "@/hooks/use-site"
 import {
   clearFinishedJobs,
   deleteJob,
+  downloadBackup,
   formatJobProgress,
+  getArchiveStatus,
   getPollMs,
   listJobs,
   setPollMs,
   startJob,
   stopJob,
   POLL_OPTIONS,
+  type ArchiveMode,
+  type ArchiveStatus,
   type Job,
 } from "@/lib/jobs"
 import { routes } from "@/lib/routes"
@@ -27,34 +31,42 @@ export default function JobsPage() {
   const confirm = useConfirm()
   const archiveSupported = site === "1"
   const [jobs, setJobs] = useState<Job[]>([])
+  const [status, setStatus] = useState<ArchiveStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [pollMs, setPollMsState] = useState<number>(1500)
+  const [toast, setToast] = useState("")
+  const prevRunningRef = useRef(false)
 
   useEffect(() => {
     setPollMsState(getPollMs())
   }, [])
 
-  // silent：轮询/操作后局部刷新，不闪 loading；首屏 loading 由调用方控制
   const reload = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
     setError("")
     try {
-      setJobs(await listJobs())
+      const [jobList, st] = await Promise.all([
+        listJobs(),
+        archiveSupported
+          ? getArchiveStatus("1")
+          : Promise.resolve<ArchiveStatus | null>(null),
+      ])
+      setJobs(jobList)
+      if (st) setStatus(st)
     } catch (e) {
       setError(e instanceof Error ? e.message : "未知错误")
     } finally {
       if (!opts?.silent) setLoading(false)
     }
-  }, [])
+  }, [archiveSupported])
 
   useEffect(() => {
     void reload()
   }, [reload])
 
-  // 有 running job 时按 pollMs silent 刷新列表；每次轮询完成后无条件续期，
-  // 静默失败（jobs 未变化）也不会中断轮询链
+  // 有 running job 时按 pollMs silent 刷新
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === "running")
     if (!hasRunning) return
@@ -74,11 +86,54 @@ export default function JobsPage() {
     }
   }, [jobs, pollMs, reload])
 
-  const onStart = async () => {
+  // 运行中 → 结束：完成提示 + 可选系统通知
+  useEffect(() => {
+    const hasRunning = jobs.some((j) => j.status === "running")
+    if (prevRunningRef.current && !hasRunning) {
+      const last = jobs[0]
+      if (last && last.status !== "running" && last.status !== "pending") {
+        const title =
+          last.status === "succeeded"
+            ? "归档任务已完成"
+            : last.status === "aborted"
+              ? "归档任务已停止"
+              : last.status === "failed"
+                ? "归档任务失败"
+                : "归档任务已结束"
+        const detail = formatJobProgress(last.result) || last.error || ""
+        setToast(detail ? `${title}：${detail}` : title)
+        if (
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted"
+        ) {
+          try {
+            new Notification(title, { body: detail || undefined })
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+    prevRunningRef.current = hasRunning
+  }, [jobs])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(""), 8000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const onStart = async (mode: ArchiveMode) => {
     setBusy(true)
     setError("")
     try {
-      await startJob("archive_posts", { site: "1" })
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "default"
+      ) {
+        void Notification.requestPermission()
+      }
+      await startJob("archive_posts", { site: "1", mode })
       await reload({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
@@ -137,6 +192,16 @@ export default function JobsPage() {
   const hasRunning = !!runningJob
   const lastSuccess = jobs.find((j) => j.status === "succeeded")
   const startDisabled = busy || hasRunning || !archiveSupported
+  const canResume =
+    archiveSupported &&
+    !!status?.cursor?.next_mtid &&
+    (status.cursor.status === "interrupted" ||
+      status.cursor.status === "running")
+  // running cursor during another machine? local only — allow resume when interrupted/done-with-cursor
+  const resumeEnabled =
+    !startDisabled &&
+    !!status?.cursor?.next_mtid &&
+    status.cursor.status !== "done"
   const startHint = !archiveSupported
     ? "当前站点不支持归档（仅论坛站）"
     : hasRunning
@@ -145,20 +210,56 @@ export default function JobsPage() {
         ? "启动中…"
         : undefined
 
+  const cursorHint = status
+    ? [
+        `库内 ${status.total} 条`,
+        status.maxTid ? `最新 tid ${status.maxTid}` : null,
+        status.cursor
+          ? `游标 ${status.cursor.status}${
+              status.cursor.next_mtid
+                ? ` @ ${status.cursor.next_mtid}`
+                : status.cursor.status === "done"
+                  ? "（已完成）"
+                  : ""
+            } · 已记 ${status.cursor.pages} 页`
+          : "尚无续跑游标",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null
+
   return (
     <PageShell>
       <PageHeader
         title="任务"
         description="后台长跑任务（全站主帖归档等）"
         action={
-          <Link
-            to={routes.archive}
-            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            查看归档
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => downloadBackup()}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Download size={14} /> 导出备份
+            </button>
+            <Link
+              to={routes.archive}
+              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              查看归档
+            </Link>
+          </div>
         }
       />
+
+      {toast && (
+        <div
+          role="status"
+          className="mb-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-800 dark:text-emerald-300"
+        >
+          {toast}
+        </div>
+      )}
 
       {runningJob && (
         <div className="mb-4 rounded-2xl border border-blue-500/25 bg-blue-500/10 px-3.5 py-3 text-sm text-blue-700 dark:text-blue-300">
@@ -186,16 +287,44 @@ export default function JobsPage() {
         </div>
       )}
 
+      {cursorHint && archiveSupported && (
+        <p className="mb-3 text-xs text-muted-foreground tabular-nums">
+          {cursorHint}
+        </p>
+      )}
+
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={onStart}
+            onClick={() => void onStart("full")}
             disabled={startDisabled}
-            title={startHint}
+            title={startHint ?? "从最新帖往回全量扫描"}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            <Play size={14} /> 开始归档
+            <Play size={14} /> 全量归档
+          </button>
+          <button
+            type="button"
+            onClick={() => void onStart("resume")}
+            disabled={!resumeEnabled}
+            title={
+              resumeEnabled
+                ? `从游标 ${status?.cursor?.next_mtid} 继续`
+                : "没有可续跑的游标（先跑全量或中断后再试）"
+            }
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <SkipForward size={14} /> 继续归档
+          </button>
+          <button
+            type="button"
+            onClick={() => void onStart("incremental")}
+            disabled={startDisabled}
+            title="只扫比库内最新 tid 还新的帖子"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <RefreshCw size={14} /> 增量更新
           </button>
           <button
             type="button"
@@ -231,6 +360,11 @@ export default function JobsPage() {
       {startHint && archiveSupported && hasRunning && (
         <p className="mb-4 text-xs text-muted-foreground">{startHint}</p>
       )}
+      {canResume && !hasRunning && (
+        <p className="mb-4 text-xs text-muted-foreground">
+          检测到未完成游标，可点「继续归档」从中断处接着扫，无需从头开始。
+        </p>
+      )}
 
       <AsyncBody
         loading={loading}
@@ -240,14 +374,14 @@ export default function JobsPage() {
         emptyText={
           archiveSupported ? (
             <>
-              暂无任务。点「开始归档」抓取全站主帖目录，完成后可在
+              暂无任务。可用「全量归档」扫全站，「增量更新」只补新帖；中断后用「继续归档」。完成后可在
               <Link
                 to={routes.archive}
                 className="text-foreground underline underline-offset-2"
               >
                 归档
               </Link>
-              浏览。
+              浏览，或点「导出备份」下载本地数据。
             </>
           ) : (
             "暂无任务"

@@ -93,6 +93,15 @@ CREATE INDEX IF NOT EXISTS archive_posts_site_title_idx
   ON archive_posts(site, title COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS archive_posts_site_archived_idx
   ON archive_posts(site, archived_at DESC);
+
+CREATE TABLE IF NOT EXISTS archive_cursors (
+  site       TEXT PRIMARY KEY,
+  next_mtid  TEXT,
+  mode       TEXT NOT NULL DEFAULT 'full',
+  status     TEXT NOT NULL DEFAULT 'idle',
+  pages      INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */

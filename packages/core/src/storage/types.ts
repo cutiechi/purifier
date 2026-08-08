@@ -105,3 +105,16 @@ export interface ArchivePost {
   first_seen_at: number
   archived_at: number
 }
+
+/** 全站归档游标：续跑 / 状态展示 */
+export type ArchiveCursorStatus = "idle" | "running" | "interrupted" | "done"
+
+export interface ArchiveCursor {
+  site: string
+  /** 下一页抓取游标；done 时为 null */
+  next_mtid: string | null
+  mode: string
+  status: ArchiveCursorStatus
+  pages: number
+  updated_at: number
+}

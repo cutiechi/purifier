@@ -57,9 +57,15 @@ describe("ArchivePostsJob", () => {
     job.fetchPage = async () => pages[i++] ?? page([], null)
     const { ctx } = makeCtx({ delayMs: 200 }) // 合法下界，避免回落 800 拖慢
     const result = await job.run(ctx)
-    expect(result).toEqual({ pages: 3, inserted: 4, updated: 0, site: "1" })
+    expect(result.pages).toBe(3)
+    expect(result.inserted).toBe(4)
+    expect(result.updated).toBe(0)
+    expect(result.site).toBe("1")
+    expect(result.mode).toBe("full")
+    expect(result.stopReason).toBe("end")
     const list = store.listArchivePosts("1", { page: 1, limit: 10, sort: "tid" })
     expect(list.items.map((x) => x.tid)).toEqual(["300", "200", "150", "100"])
+    expect(store.getArchiveCursor("1")?.status).toBe("done")
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -71,7 +77,68 @@ describe("ArchivePostsJob", () => {
     // 第二次：标题变了
     p.links[0]!.title = "A 改"
     const result = await job.run(makeCtx({ delayMs: 200 }).ctx)
-    expect(result).toEqual({ pages: 1, inserted: 0, updated: 1, site: "1" })
+    expect(result.pages).toBe(1)
+    expect(result.inserted).toBe(0)
+    expect(result.updated).toBe(1)
+    expect(result.site).toBe("1")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("resume 从保存的 next_mtid 继续", async () => {
+    const { job, store, dir } = makeJob()
+    const pages: HomePage[] = [
+      page([link("300", "C")], "200"),
+      page([link("200", "B")], "100"),
+      page([link("100", "A")], null),
+    ]
+    job.fetchPage = async (mtid) => {
+      if (mtid === "0") return pages[0]!
+      if (mtid === "200") return pages[1]!
+      if (mtid === "100") return pages[2]!
+      return page([], null)
+    }
+    // 先跑满 maxPages=1，留下续跑点
+    await job.run(makeCtx({ delayMs: 200, maxPages: 1 }).ctx)
+    const cur = store.getArchiveCursor("1")
+    expect(cur?.status).toBe("interrupted")
+    expect(cur?.next_mtid).toBe("200")
+    // resume
+    const result = await job.run(makeCtx({ delayMs: 200, mode: "resume" }).ctx)
+    expect(result.pages).toBe(2) // 200 页 + 100 页
+    expect(store.listArchivePosts("1", { page: 1, limit: 10, sort: "tid" }).items.map((x) => x.tid)).toEqual([
+      "300",
+      "200",
+      "100",
+    ])
+    expect(store.getArchiveCursor("1")?.status).toBe("done")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("incremental：全页 tid ≤ max 则停", async () => {
+    const { job, store, dir } = makeJob()
+    store.upsertArchivePosts(
+      "1",
+      [
+        { tid: "200", title: "old-b" },
+        { tid: "100", title: "old-a" },
+      ],
+      1_000
+    )
+    const pages: HomePage[] = [
+      page([link("400", "new"), link("300", "new2")], "200"),
+      page([link("200", "old-b"), link("100", "old-a")], "50"),
+      page([link("50", "older")], null),
+    ]
+    let i = 0
+    job.fetchPage = async () => pages[i++] ?? page([], null)
+    const result = await job.run(
+      makeCtx({ delayMs: 200, mode: "incremental" }).ctx
+    )
+    // 第 1 页新帖；第 2 页全 ≤ 200 → 停，不扫第 3 页
+    expect(result.pages).toBe(2)
+    expect(result.stopReason).toBe("incremental_caught_up")
+    expect(result.inserted).toBe(2) // 400, 300
+    expect(i).toBe(2) // 只请求了两页
     rmSync(dir, { recursive: true, force: true })
   })
 

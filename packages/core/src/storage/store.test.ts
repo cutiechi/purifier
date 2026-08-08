@@ -20,6 +20,7 @@ describe("openDatabase", () => {
       )
       .all() as { name: string }[]
     expect(rows.map((r) => r.name)).toEqual([
+      "archive_cursors",
       "archive_posts",
       "favorites",
       "group_items",

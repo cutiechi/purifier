@@ -1,6 +1,8 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import type { SiteId } from "../extractor"
 import {
+  ArchiveCursor,
+  ArchiveCursorStatus,
   ArchivePost,
   Group,
   GroupMember,
@@ -851,6 +853,137 @@ export class Store {
       items,
       nextPage: hasMore ? page + 1 : undefined,
       total,
+    }
+  }
+
+  /** 归档库内最大 tid（按数值比较；无数据返回 null） */
+  getArchiveMaxTid(site: string): string | null {
+    const row = this.db
+      .query(
+        `SELECT tid FROM archive_posts
+         WHERE site = ?1
+         ORDER BY CAST(tid AS INTEGER) DESC
+         LIMIT 1`
+      )
+      .get(site) as { tid: string } | null
+    return row?.tid ?? null
+  }
+
+  getArchiveCursor(site: string): ArchiveCursor | null {
+    const row = this.db
+      .query("SELECT * FROM archive_cursors WHERE site = ?1")
+      .get(site) as
+      | {
+          site: string
+          next_mtid: string | null
+          mode: string
+          status: string
+          pages: number
+          updated_at: number
+        }
+      | null
+    if (!row) return null
+    return {
+      site: row.site,
+      next_mtid: row.next_mtid,
+      mode: row.mode,
+      status: row.status as ArchiveCursorStatus,
+      pages: row.pages,
+      updated_at: row.updated_at,
+    }
+  }
+
+  setArchiveCursor(
+    site: string,
+    patch: {
+      next_mtid: string | null
+      mode: string
+      status: ArchiveCursorStatus
+      pages: number
+    }
+  ): void {
+    this.db
+      .query(
+        `INSERT INTO archive_cursors (site, next_mtid, mode, status, pages, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(site) DO UPDATE SET
+           next_mtid = excluded.next_mtid,
+           mode = excluded.mode,
+           status = excluded.status,
+           pages = excluded.pages,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        site,
+        patch.next_mtid,
+        patch.mode,
+        patch.status,
+        patch.pages,
+        this.now()
+      )
+  }
+
+  getArchiveStatus(site: string): {
+    total: number
+    maxTid: string | null
+    cursor: ArchiveCursor | null
+  } {
+    const totalRow = this.db
+      .query("SELECT COUNT(*) AS n FROM archive_posts WHERE site = ?1")
+      .get(site) as { n: number }
+    return {
+      total: Number(totalRow.n ?? 0),
+      maxTid: this.getArchiveMaxTid(site),
+      cursor: this.getArchiveCursor(site),
+    }
+  }
+
+  /**
+   * 导出本地数据快照（备份用）。archive 可能较大，一次 JSON 足够个人库量级。
+   */
+  exportBackup(): {
+    version: 1
+    exportedAt: number
+    items: unknown[]
+    favorites: unknown[]
+    tags: unknown[]
+    groups: Group[]
+    archive_posts: ArchivePost[]
+    archive_cursors: ArchiveCursor[]
+  } {
+    const items = this.db.query("SELECT * FROM items").all()
+    const favorites = this.db.query("SELECT * FROM favorites").all()
+    const tags = this.db.query("SELECT * FROM tags").all()
+    const groups = this.listGroups()
+    const archive_posts = this.db
+      .query("SELECT * FROM archive_posts ORDER BY site, tid")
+      .all() as ArchivePost[]
+    const cursors = this.db
+      .query("SELECT * FROM archive_cursors")
+      .all() as Array<{
+      site: string
+      next_mtid: string | null
+      mode: string
+      status: string
+      pages: number
+      updated_at: number
+    }>
+    return {
+      version: 1,
+      exportedAt: this.now(),
+      items,
+      favorites,
+      tags,
+      groups,
+      archive_posts,
+      archive_cursors: cursors.map((r) => ({
+        site: r.site,
+        next_mtid: r.next_mtid,
+        mode: r.mode,
+        status: r.status as ArchiveCursorStatus,
+        pages: r.pages,
+        updated_at: r.updated_at,
+      })),
     }
   }
 

@@ -483,6 +483,25 @@ function handleMeArchive(url: URL): Response {
   return jsonOk(result, NO_STORE_HEADERS)
 }
 
+function handleMeArchiveStatus(url: URL): Response {
+  const site = url.searchParams.get("site") ?? DEFAULT_SITE
+  return jsonOk(store.getArchiveStatus(site), NO_STORE_HEADERS)
+}
+
+function handleMeExport(): Response {
+  const backup = store.exportBackup()
+  const body = JSON.stringify(backup, null, 2)
+  const day = new Date().toISOString().slice(0, 10)
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": `attachment; filename="purifier-backup-${day}.json"`,
+      "cache-control": "no-store",
+    },
+  })
+}
+
 async function handleFavoriteWrite(
   req: Request,
   favorite: boolean
@@ -971,6 +990,12 @@ async function route(req: Request): Promise<Response> {
       case "/api/me/archive":
         requireGet(req)
         return handleMeArchive(url)
+      case "/api/me/archive/status":
+        requireGet(req)
+        return handleMeArchiveStatus(url)
+      case "/api/me/export":
+        requireGet(req)
+        return handleMeExport()
       case "/api/me/progress":
         if (req.method === "PUT") return await handleProgressWrite(req)
         throw new ExtractorError("method not allowed", 405)

@@ -92,7 +92,9 @@ packages/typescript-config/               # base / react-library 配置
 | `DELETE /api/me/jobs/:id`                | 无                                                           | `{ ok }`；不存在 404、运行中 409                                                                                |
 | `GET /api/me/jobs/:id/logs`              | `limit`（默认 200 上限 1000）、`offset`、`level`、`order`            | `{ items }` 日志                                                                                          |
 | `POST /api/me/jobs/:id/stop`             | 无                                                           | `{ ok }`；不存在 404、非运行中 409                                                                               |
-| `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 title）、`order` | `{ items, nextPage? }` 归档目录                                                                             |
+| `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 tid）、`order` | `{ items, nextPage?, total }` 归档目录                                                                      |
+| `GET /api/me/archive/status`             | `site`（默认 1）                                            | `{ total, maxTid, cursor }` 归档库规模与续跑游标                                                            |
+| `GET /api/me/export`                     | 无                                                          | 下载 JSON 备份（items/favorites/tags/groups/archive_posts/cursors）                                         |
 
 错误处理：
 

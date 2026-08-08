@@ -28,8 +28,16 @@ export interface JobLog {
   created_at: number
 }
 
+export type ArchiveMode = "full" | "resume" | "incremental"
+
 export const JOB_TYPE_LABEL: Record<string, string> = {
   archive_posts: "全站主帖归档",
+}
+
+export const ARCHIVE_MODE_LABEL: Record<ArchiveMode, string> = {
+  full: "全量",
+  resume: "续跑",
+  incremental: "增量",
 }
 
 export function jobTypeLabel(type: string): string {
@@ -45,16 +53,55 @@ export const STATUS_LABEL: Record<JobStatus, string> = {
   aborted: "已停止",
 }
 
+export interface ArchiveStatus {
+  total: number
+  maxTid: string | null
+  cursor: {
+    site: string
+    next_mtid: string | null
+    mode: string
+    status: "idle" | "running" | "interrupted" | "done"
+    pages: number
+    updated_at: number
+  } | null
+}
+
 /** 从 result 拼可读进度/结果摘要 */
 export function formatJobProgress(
   result: Record<string, unknown> | null | undefined
 ): string {
   if (!result) return ""
   const parts: string[] = []
+  const mode = result.mode
+  if (mode === "full" || mode === "resume" || mode === "incremental") {
+    parts.push(ARCHIVE_MODE_LABEL[mode])
+  }
   if (typeof result.pages === "number") parts.push(`${result.pages} 页`)
   if (typeof result.inserted === "number") parts.push(`${result.inserted} 新增`)
   if (typeof result.updated === "number") parts.push(`${result.updated} 更新`)
+  if (typeof result.nextMtid === "string" && result.nextMtid) {
+    parts.push(`游标 ${result.nextMtid}`)
+  } else if (result.nextMtid === null && result.stopReason) {
+    // done
+  }
   return parts.join(" · ")
+}
+
+export async function getArchiveStatus(site = "1"): Promise<ArchiveStatus> {
+  const res = await fetch(`${api.meArchiveStatus}?site=${site}`)
+  await throwIfNotOk(res)
+  return (await res.json()) as ArchiveStatus
+}
+
+export function downloadBackup(): void {
+  // 用 a[download] 触发浏览器保存，走同源 cookie/鉴权
+  const a = document.createElement("a")
+  a.href = api.meExport
+  a.download = ""
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 export function formatJobDuration(job: Job): string {
