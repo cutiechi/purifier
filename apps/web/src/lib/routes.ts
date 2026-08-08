@@ -109,6 +109,12 @@ function withSite(params: URLSearchParams, site?: string) {
   if (site && site !== DEFAULT_SITE) params.set("site", site)
 }
 
+/** 站点参数拼接到路径（默认站不加参数） */
+export function siteUrl(path: string, site?: SiteId): string {
+  if (!site || site === DEFAULT_SITE) return path
+  return `${path}?site=${site}`
+}
+
 export function readPath(tid: string, site?: SiteId): string {
   const p = new URLSearchParams()
   withSite(p, site)

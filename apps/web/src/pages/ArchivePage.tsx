@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, Navigate, useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { PageSiteTabs } from "@/components/page-site-tabs"
@@ -23,7 +23,16 @@ import {
   formatListPagination,
   totalPages as calcTotalPages,
 } from "@/lib/list-meta"
-import { api, parsePage, parseQuery, readPath, routes } from "@/lib/routes"
+import {
+  api,
+  bookPath,
+  parsePage,
+  parseQuery,
+  readPath,
+  routes,
+  siteUrl,
+  type SiteId,
+} from "@/lib/routes"
 
 interface ArchivePost {
   site: string
@@ -41,17 +50,28 @@ const SORT_OPTIONS: { value: SortKey; label: string; title: string }[] = [
   { value: "archived_at", label: "按归档时间", title: "最近入库/更新" },
 ]
 
-function parseSort(raw: string | null): SortKey {
-  if (raw === "title" || raw === "tid" || raw === "archived_at") return raw
-  return "tid"
+function parseSort(raw: string | null, site: SiteId): SortKey {
+  if (raw === "title" || raw === "archived_at") return raw
+  // 书库 tid 是 base64 cid（CAST(tid AS INTEGER) 恒 0），按 tid 排序无意义
+  return site === "2" ? "archived_at" : "tid"
 }
 
 export default function ArchivePage() {
   const site = useSite()
-  const sectionTabs = useAllTabs(routes.archive)
   const [searchParams, setSearchParams] = useSearchParams()
+  const isBooks = site === "2"
+  const defaultSort: SortKey = isBooks ? "archived_at" : "tid"
+  const sort = parseSort(searchParams.get("sort"), site)
+  const sortOptions = useMemo(() => {
+    if (!isBooks) return SORT_OPTIONS
+    return SORT_OPTIONS.filter((o) => o.value !== "tid").map((o) =>
+      o.value === "archived_at"
+        ? { ...o, title: "最新收录在前（第 1 页先入库）" }
+        : o
+    )
+  }, [isBooks])
+  const sectionTabs = useAllTabs(routes.archive)
   const q = parseQuery(searchParams)
-  const sort = parseSort(searchParams.get("sort"))
   const page = parsePage(searchParams)
 
   const [items, setItems] = useState<ArchivePost[]>([])
@@ -75,7 +95,11 @@ export default function ArchivePage() {
       const params = new URLSearchParams()
       params.set("sort", sort)
       params.set("page", String(page))
+      // 评审问题 2：不带 site 会拉到默认站（1）的数据
+      params.set("site", site)
       if (q) params.set("q", q)
+      // 评审问题 4：书库 archived_at 默认 desc（最旧在前），要最新收录在前必须显式 asc
+      if (isBooks && sort === "archived_at") params.set("order", "asc")
       const res = await fetch(`${api.meArchive}?${params.toString()}`)
       const json = (await res.json()) as {
         items: ArchivePost[]
@@ -98,7 +122,7 @@ export default function ArchivePage() {
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [sort, page, q])
+  }, [sort, page, q, site, isBooks])
 
   useEffect(() => {
     void reload()
@@ -113,7 +137,7 @@ export default function ArchivePage() {
       else params.delete("q")
     }
     if (next.sort !== undefined) {
-      if (next.sort === "tid") params.delete("sort")
+      if (next.sort === defaultSort) params.delete("sort")
       else params.set("sort", next.sort)
     }
     const pageChanged = next.page !== undefined
@@ -136,36 +160,38 @@ export default function ArchivePage() {
   }, [draftQ])
 
   const { isExpanded, toggle } = useExpandedBooks("archive")
-  const grouped = useMemo(
-    () =>
-      groupBooks(
-        items,
-        (it) => it.title,
-        (it) => it.tid
-      ),
-    [items]
-  )
+  const grouped = useMemo(() => {
+    if (isBooks) return null
+    return groupBooks(
+      items,
+      (it) => it.title,
+      (it) => it.tid
+    )
+  }, [items, isBooks])
 
-  // 全站目录仅论坛；带 ?site=2 时清回默认站
-  if (site !== "1") {
-    return <Navigate to={routes.archive} replace />
+  function itemHref(it: ArchivePost): string {
+    return it.site === "2"
+      ? bookPath(it.tid, { site: it.site })
+      : readPath(it.tid, it.site)
   }
 
   return (
     <PageShell>
       <PageHeader
         title="目录"
-        description="本地全站主帖目录（由任务同步）"
+        description={
+          isBooks ? "本地全站书库目录（由任务同步）" : "本地全站主帖目录（由任务同步）"
+        }
         action={
           <Link
-            to={routes.jobs}
+            to={siteUrl(routes.jobs, site)}
             className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             更新目录
           </Link>
         }
       />
-      <PageSiteTabs sites={["1"]} />
+      <PageSiteTabs sites={["1", "2"]} />
       <SectionTabs items={sectionTabs} />
 
       <SearchForm
@@ -176,7 +202,7 @@ export default function ArchivePage() {
       />
 
       <FilterTabs
-        options={SORT_OPTIONS}
+        options={sortOptions}
         value={sort}
         onChange={(v) => update({ sort: v, page: 1 })}
         variant="primary"
@@ -207,71 +233,79 @@ export default function ArchivePage() {
               <>
                 还没有归档，去
                 <Link
-                  to={routes.jobs}
+                  to={siteUrl(routes.jobs, site)}
                   className="text-foreground underline underline-offset-2"
                 >
                   任务
                 </Link>
-                开始一次全站主帖归档
+                {isBooks ? "开始一次全站书库归档" : "开始一次全站主帖归档"}
               </>
             )}
           </>
         }
       >
         <PostList>
-          {grouped.map((g) =>
-            g.type === "single" ? (
-              <ListPostCard
-                key={`${g.item.site}:${g.item.tid}`}
-                href={readPath(g.item.tid, g.item.site)}
-                rawTitle={g.item.title}
-                trailing={
-                  <span className="text-xs text-muted-foreground/70 tabular-nums">
-                    #{g.item.tid}
-                  </span>
-                }
-              />
-            ) : (
-              <CollapsibleBookGroup
-                key={`group:${g.key}`}
-                title={g.title}
-                summary={
-                  [g.author, g.genre].filter(Boolean).join(" · ") || undefined
-                }
-                count={g.items.length}
-                bookKey={g.key}
-                isExpanded={isExpanded(g.key)}
-                onToggle={() => toggle(g.key)}
-                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
-              >
-                {g.items.map((it) => {
-                  const parsed = parseListTitle(it.title)
-                  const sub = formatTitleMeta(
-                    parsed.chapters ? { ...parsed, chapters: null } : parsed
-                  )
-                  return (
-                    <Link
-                      key={`${it.site}:${it.tid}`}
-                      to={readPath(it.tid, it.site)}
-                      className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
-                    >
-                      <span className="min-w-0 flex-1 line-clamp-2 font-medium text-foreground">
-                        {parsed.chapters || parsed.title}
+          {grouped
+            ? grouped.map((g) =>
+                g.type === "single" ? (
+                  <ListPostCard
+                    key={`${g.item.site}:${g.item.tid}`}
+                    href={itemHref(g.item)}
+                    rawTitle={g.item.title}
+                    trailing={
+                      <span className="text-xs text-muted-foreground/70 tabular-nums">
+                        #{g.item.tid}
                       </span>
-                      {sub && (
-                        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                          {sub}
-                        </span>
-                      )}
-                      <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                        #{it.tid}
-                      </span>
-                    </Link>
-                  )
-                })}
-              </CollapsibleBookGroup>
-            )
-          )}
+                    }
+                  />
+                ) : (
+                  <CollapsibleBookGroup
+                    key={`group:${g.key}`}
+                    title={g.title}
+                    summary={
+                      [g.author, g.genre].filter(Boolean).join(" · ") || undefined
+                    }
+                    count={g.items.length}
+                    bookKey={g.key}
+                    isExpanded={isExpanded(g.key)}
+                    onToggle={() => toggle(g.key)}
+                    trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
+                  >
+                    {g.items.map((it) => {
+                      const parsed = parseListTitle(it.title)
+                      const sub = formatTitleMeta(
+                        parsed.chapters ? { ...parsed, chapters: null } : parsed
+                      )
+                      return (
+                        <Link
+                          key={`${it.site}:${it.tid}`}
+                          to={itemHref(it)}
+                          className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
+                        >
+                          <span className="min-w-0 flex-1 line-clamp-2 font-medium text-foreground">
+                            {parsed.chapters || parsed.title}
+                          </span>
+                          {sub && (
+                            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                              {sub}
+                            </span>
+                          )}
+                          <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                            #{it.tid}
+                          </span>
+                        </Link>
+                      )
+                    })}
+                  </CollapsibleBookGroup>
+                )
+              )
+            : items.map((it) => (
+                <ListPostCard
+                  key={`${it.site}:${it.tid}`}
+                  href={itemHref(it)}
+                  rawTitle={it.title}
+                />
+              ))}
         </PostList>
         <Pager
           page={page}
