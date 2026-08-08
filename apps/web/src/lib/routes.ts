@@ -71,13 +71,13 @@ export const ME_TABS: {
   { href: routes.tags, label: "标签", sites: ["1", "2"] },
 ]
 
-/** 目录页栏目（归档整理视图，仅论坛站） */
+/** 目录页栏目（归档整理视图；书库站无分组） */
 export const ALL_TABS: {
   href: string
   label: string
   sites: readonly SiteId[]
 }[] = [
-  { href: routes.archive, label: "目录", sites: ["1"] },
+  { href: routes.archive, label: "目录", sites: ["1", "2"] },
   { href: routes.groups, label: "分组", sites: ["1"] },
 ]
 

@@ -3,19 +3,12 @@ import { useLocation } from "react-router-dom"
 import { useSite } from "@/hooks/use-site"
 import {
   ALL_TABS,
-  DEFAULT_SITE,
   DISCOVER_TABS,
   ME_TABS,
+  siteUrl,
   type SiteId,
 } from "@/lib/routes"
 import type { SectionTab } from "@/components/section-tabs"
-
-function withSite(href: string, site: SiteId): string {
-  if (site === DEFAULT_SITE) return href
-  const p = new URLSearchParams()
-  p.set("site", site)
-  return `${href}?${p.toString()}`
-}
 
 export function useDiscoverTabs(activePath: string): SectionTab[] {
   const site = useSite()
@@ -23,7 +16,7 @@ export function useDiscoverTabs(activePath: string): SectionTab[] {
     return DISCOVER_TABS.filter((t) =>
       (t.sites as readonly SiteId[]).includes(site)
     ).map((t) => ({
-      to: withSite(t.href, site),
+      to: siteUrl(t.href, site),
       label: t.label,
       active: activePath === t.href,
     }))
@@ -36,7 +29,7 @@ export function useMeTabs(activePath: string): SectionTab[] {
     return ME_TABS.filter((t) =>
       (t.sites as readonly SiteId[]).includes(site)
     ).map((t) => ({
-      to: withSite(t.href, site),
+      to: siteUrl(t.href, site),
       label: t.label,
       active:
         activePath === t.href ||
@@ -45,16 +38,20 @@ export function useMeTabs(activePath: string): SectionTab[] {
   }, [site, activePath])
 }
 
-/** 目录（归档/分组），固定论坛站 */
+/** 目录（归档/分组）：按站过滤；书库站无分组，只显示「目录」 */
 export function useAllTabs(activePath: string): SectionTab[] {
+  const site = useSite()
   return useMemo(
     () =>
-      ALL_TABS.map((t) => ({
-        to: t.href,
+      ALL_TABS.filter((t) =>
+        (t.sites as readonly SiteId[]).includes(site)
+      ).map((t) => ({
+        // 评审问题 5：不带 site 时书库站点 Tab 会丢参数
+        to: siteUrl(t.href, site),
         label: t.label,
         active: activePath === t.href,
       })),
-    [activePath]
+    [site, activePath]
   )
 }
 
