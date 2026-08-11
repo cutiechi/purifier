@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
 import { ItemActions, useItemState } from "@/components/item-actions"
@@ -34,18 +34,25 @@ export default function ReadPage() {
     restore: state?.id === tid ? state.read_progress : undefined,
   })
 
+  // 抓取序号：换帖时递增，过期响应（成功/错误）一律丢弃，
+  // 避免 /read/A → /read/B 快速切换时旧帖覆盖新帖、loadedTid 挂错文章
+  const seqRef = useRef(0)
+
   const fetchContent = useCallback(
-    async (opts?: { refresh?: boolean }) => {
+    async (opts?: { refresh?: boolean; signal?: AbortSignal }) => {
       if (!tid) return
+      const seq = ++seqRef.current
       const refresh = opts?.refresh
       if (refresh) setRefreshing(true)
       else setLoading(true)
       setError("")
       try {
         const res = await fetch(
-          `${api.posts}?tid=${encodeURIComponent(tid)}${refresh ? "&refresh=1" : ""}`
+          `${api.posts}?tid=${encodeURIComponent(tid)}${refresh ? "&refresh=1" : ""}`,
+          { signal: opts?.signal }
         )
         const json = await res.json()
+        if (seq !== seqRef.current) return
         if (!res.ok) {
           setError(json.error || "请求失败")
           return
@@ -54,17 +61,25 @@ export default function ReadPage() {
         setLoadedTid(tid)
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
+        if (seq !== seqRef.current) return
+        // 组件卸载触发的取消不算错误
+        if (e instanceof Error && e.name === "AbortError") return
         setError(e instanceof Error ? e.message : "未知错误")
       } finally {
-        if (refresh) setRefreshing(false)
-        else setLoading(false)
+        if (seq === seqRef.current) {
+          if (refresh) setRefreshing(false)
+          else setLoading(false)
+        }
       }
     },
     [tid]
   )
 
   useEffect(() => {
-    fetchContent()
+    // 卸载/换帖时取消飞行中请求（seq 守卫防错序，取消省带宽）
+    const controller = new AbortController()
+    fetchContent({ signal: controller.signal })
+    return () => controller.abort()
   }, [fetchContent])
 
   return (

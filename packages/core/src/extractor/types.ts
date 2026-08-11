@@ -120,6 +120,8 @@ export interface RecommendSection {
 export interface Extractor {
   name: string
   homeUrl: string
+  /** 能力位：是否支持帖子（tid）模型；API 层据此拒 /api/posts，而非硬编码站点号 */
+  supportsPosts: boolean
   buildUrl(tid: string): string
   buildBookUrl(cid: string): string
   /** 解析正文并复用同一次 DOM 解析产出站外链接 */

@@ -100,6 +100,24 @@ describe("JobRunner", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  test("waitForIdle：任务未收尾返回 false，收尾后返回 true", async () => {
+    const { runner, dir } = makeRunner()
+    class SlowHandler implements JobHandler {
+      type = "slow"
+      async run(): Promise<JobResult> {
+        await sleep(120)
+        return { ok: true }
+      }
+    }
+    runner.register(new SlowHandler())
+    await runner.start("slow")
+    // 还在跑：超时窗口内未 idle
+    expect(await runner.waitForIdle(50)).toBe(false)
+    // 收尾后：idle
+    expect(await runner.waitForIdle(2000)).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   test("handler 抛错 → failed + error 写入", async () => {
     const { runner, store, dir } = makeRunner()
     runner.register(new FailingHandler())

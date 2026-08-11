@@ -10,8 +10,10 @@ describe("stripTags", () => {
 })
 
 describe("escapeHtml", () => {
-  test("escapes & < > \"", () => {
-    expect(escapeHtml(`a & <b> "q"`)).toBe(`a &amp; &lt;b&gt; &quot;q&quot;`)
+  test("escapes & < > \" '", () => {
+    expect(escapeHtml(`a & <b> "q" 'r'`)).toBe(
+      `a &amp; &lt;b&gt; &quot;q&quot; &#39;r&#39;`
+    )
   })
 })
 

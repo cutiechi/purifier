@@ -3,13 +3,15 @@ import { Component, type ErrorInfo, type ReactNode } from "react"
 type Props = {
   children: ReactNode
   fallbackTitle?: string
+  /** 变化时自动清除错误（路由级边界用 pathname：导航即自愈，不重挂 children） */
+  resetKey?: string
 }
 
 type State = {
   error: Error | null
 }
 
-/** 顶层错误边界：渲染期抛错时不白屏 */
+/** 错误边界：渲染期抛错时不白屏；resetKey 变化时自动复位 */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
@@ -19,6 +21,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[ErrorBoundary]", error, info.componentStack)
+  }
+
+  componentDidUpdate(prevProps: Props): void {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null })
+    }
   }
 
   private reset = () => {

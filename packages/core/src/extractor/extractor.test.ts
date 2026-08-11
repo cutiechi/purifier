@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Cool18Extractor } from "./extractor"
+import { Cool18Extractor, MAX_REPLY_DEPTH } from "./extractor"
 import { ExtractorError } from "./types"
 
 const ex = new Cool18Extractor()
@@ -11,8 +11,8 @@ describe("extractContent", () => {
 <head><title>测试标题 - 论坛</title></head>
 <body>
 <div id="content-section">
-  <pre>第一段
-第二段</pre>
+  <pre>这里是第一段足够长的正文内容，用于测试链接抽取
+第二段正文也写得比较长，避免触发软 404 的最小长度检查</pre>
   <a href="https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=999">下一章</a>
 </div>
 </body>
@@ -29,7 +29,7 @@ describe("extractContent", () => {
 <head><title>正文页</title></head>
 <body>
 <div id="content-section">
-  <pre>正文 <a href="https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=777">内链</a> 结尾</pre>
+  <pre>这里是正文的开头部分，包含一个 <a href="https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=777">内链</a> 的测试内容，结尾处还有不少文字</pre>
 </div>
 </body>
 </html>`
@@ -57,6 +57,23 @@ describe("parseReplies tree scale", () => {
     expect(depth).toBe(n)
   })
 
+  test("深度超过 MAX_REPLY_DEPTH → 截断，不递归爆栈", () => {
+    const n = 600
+    const items = []
+    for (let i = 1; i <= n; i++) {
+      items.push({ tid: String(i + 1), uptid: String(i), username: `u${i}` })
+    }
+    const tree = ex.parseReplies(JSON.stringify(items), "1")
+    expect(tree).toHaveLength(1)
+    let depth = 1
+    let node = tree[0]
+    while (node !== undefined && node.children.length > 0) {
+      node = node.children[0]
+      depth++
+    }
+    expect(depth).toBe(MAX_REPLY_DEPTH)
+  })
+
   test("keeps sibling order for a wide reply list (500 replies)", () => {
     const items = Array.from({ length: 500 }, (_, i) => ({
       tid: String(i + 2),
@@ -76,5 +93,113 @@ describe("extractPreHtml", () => {
     expect(() => ex.extractContent("<html><body>nothing</body></html>")).toThrow(
       ExtractorError
     )
+  })
+})
+
+/** 构造带 #content-section pre 的正文页 */
+function postHtml(preInner: string, title = "测试标题"): string {
+  return `<!DOCTYPE html>
+<html>
+<head><title>${title} - 论坛</title></head>
+<body>
+<div id="content-section">
+  <pre>${preInner}</pre>
+</div>
+</body>
+</html>`
+}
+
+describe("extractPreHtml 清洗加固", () => {
+  test("javascript: 外链只留文字，不产出 <a>", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，见 <a href="javascript:alert(1)">这里</a> 结尾`
+      )
+    )
+    expect(res.content).toContain("这里")
+    expect(res.content).not.toContain("javascript")
+    expect(res.content).not.toContain("<a")
+  })
+
+  test("属性值内的 > 不把内容当正文吐出（stripTags 错位回归）", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容 ok <a href="https://evil.example/?a=1>2" title=">LEAK<">link</a> end`
+      )
+    )
+    expect(res.content).not.toContain("LEAK")
+    expect(res.content).toContain("link")
+  })
+
+  test("未闭合的 <a> 不产生残留链接", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容 text <a href="javascript:alert(1)">click 没闭合`
+      )
+    )
+    expect(res.content).toContain("click 没闭合")
+    expect(res.content).not.toContain("<a")
+    expect(res.content).not.toContain("javascript")
+  })
+
+  test("嵌套 <a> 以最外层为准，内层不注入", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，用来验证嵌套链接场景，<a href="https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=1">外层 <a href="javascript:alert(2)">内层</a></a>`
+      )
+    )
+    expect(res.content).toContain("/read/1")
+    expect(res.content).not.toContain("javascript")
+  })
+
+  test("E6E6DD 水印字体整块删除", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是正文的开头部分，包含一些实际内容，正文<font color=#E6E6DD>水印</font>结尾`
+      )
+    )
+    expect(res.content).toContain("这是正文的开头部分")
+    expect(res.content).not.toContain("水印")
+  })
+
+  test("br 与空 p 转换行", () => {
+    const res = ex.extractContent(
+      postHtml(`这是正文的第一行文字，我们来看换行效果：a<br>b<p></p>c`)
+    )
+    expect(res.content).toContain("a\nb\nc")
+  })
+
+  test("外站链接带 tid= 参数不当站内链接（同站校验）", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，包含外站链接：外站 <a href="https://evil.example/?tid=999">点我</a> 结尾`
+      )
+    )
+    expect(res.content).not.toContain("/read/999")
+    expect(res.content).toContain("点我")
+  })
+
+  test("协议相对外链（//host/）带 tid= 不当站内链接", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，含协议相对外链 <a href="//evil.example/foo?tid=999">点我</a> 结尾`
+      )
+    )
+    expect(res.content).not.toContain("/read/999")
+    expect(res.content).toContain("点我")
+  })
+})
+
+describe("软 404 检测", () => {
+  test("含验证码墙文本的短 pre → 404", () => {
+    expect(() =>
+      ex.extractContent(
+        postHtml("请稍候，正在验证您不是机器人，验证码加载中…")
+      )
+    ).toThrow(ExtractorError)
+  })
+
+  test("过短的 pre（疑似错误页）→ 404", () => {
+    expect(() => ex.extractContent(postHtml("短"))).toThrow(ExtractorError)
   })
 })

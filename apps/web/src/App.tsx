@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react"
-import { Route, Routes } from "react-router-dom"
+import { lazy, Suspense, type ReactNode } from "react"
+import { Route, Routes, useLocation } from "react-router-dom"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 const HomePage = lazy(() => import("@/pages/HomePage"))
@@ -29,30 +29,175 @@ function PageFallback() {
   )
 }
 
+/**
+ * 每路由错误边界：key=pathname，导航即自愈。
+ * 单页渲染 bug 只进本路由兜底屏，不炸整个应用（含顶栏）。
+ */
+function RouteBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  // 只用 resetKey：导航清错误状态但不重挂 children（key 会连页面一起 remount，丢失状态）
+  return (
+    <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
+  )
+}
+
 export function App() {
   return (
     <ErrorBoundary>
       <Suspense fallback={<PageFallback />}>
         <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/categories" element={<CategoriesPage />} />
-          <Route path="/discover" element={<DiscoverPage />} />
-          <Route path="/featured" element={<FeaturedPage />} />
-          <Route path="/picks" element={<PicksPage />} />
-          <Route path="/comments" element={<CommentsPage />} />
-          <Route path="/trending" element={<TrendingPage />} />
-          <Route path="/browse" element={<BrowsePage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/read/:tid" element={<ReadPage />} />
-          <Route path="/book/:cid" element={<BookPage />} />
-          <Route path="/me" element={<MePage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/favorites" element={<FavoritesPage />} />
-          <Route path="/tags" element={<TagsPage />} />
-          <Route path="/groups" element={<GroupPage />} />
-          <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/archive" element={<ArchivePage />} />
-          <Route path="*" element={<HomePage />} />
+          <Route
+            path="/"
+            element={
+              <RouteBoundary>
+                <HomePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/categories"
+            element={
+              <RouteBoundary>
+                <CategoriesPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/discover"
+            element={
+              <RouteBoundary>
+                <DiscoverPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/featured"
+            element={
+              <RouteBoundary>
+                <FeaturedPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/picks"
+            element={
+              <RouteBoundary>
+                <PicksPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/comments"
+            element={
+              <RouteBoundary>
+                <CommentsPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/trending"
+            element={
+              <RouteBoundary>
+                <TrendingPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/browse"
+            element={
+              <RouteBoundary>
+                <BrowsePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/search"
+            element={
+              <RouteBoundary>
+                <SearchPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/read/:tid"
+            element={
+              <RouteBoundary>
+                <ReadPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/book/:cid"
+            element={
+              <RouteBoundary>
+                <BookPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/me"
+            element={
+              <RouteBoundary>
+                <MePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <RouteBoundary>
+                <HistoryPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/favorites"
+            element={
+              <RouteBoundary>
+                <FavoritesPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/tags"
+            element={
+              <RouteBoundary>
+                <TagsPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/groups"
+            element={
+              <RouteBoundary>
+                <GroupPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/jobs"
+            element={
+              <RouteBoundary>
+                <JobsPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/archive"
+            element={
+              <RouteBoundary>
+                <ArchivePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <RouteBoundary>
+                <HomePage />
+              </RouteBoundary>
+            }
+          />
         </Routes>
       </Suspense>
     </ErrorBoundary>

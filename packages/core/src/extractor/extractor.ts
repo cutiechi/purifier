@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio"
 import { fetchUpstream } from "../upstream"
-import { decodeHtmlEntities, escapeHtml, stripTags } from "./utils"
+import { sanitizeContentHtml } from "./sanitize"
 import {
   Extractor,
   ChapterLink,
@@ -20,9 +20,20 @@ import {
   ExtractorError,
 } from "./types"
 
+/** 回复树最大深度：线性深链也截断，防递归爆栈 */
+export const MAX_REPLY_DEPTH = 512
+
+/** 正文最小文本长度：低于此值视为软 404（错误页/验证页残留片段） */
+const MIN_PRE_TEXT_LEN = 20
+/** 墙页判定：短文本（<此长度）含墙标记才判墙，避免长正文误伤 */
+const WALL_PAGE_MAX_LEN = 200
+const WALL_PAGE_RE =
+  /验证码|cloudflare|captcha|安全检查|cf[-_ ]?challenge|blocked/i
+
 export class Cool18Extractor implements Extractor {
   name = "cool18"
   homeUrl = "https://www.cool18.com/bbs4/index.php"
+  supportsPosts = true
 
   buildUrl(tid: string): string {
     return `https://www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=${tid}`
@@ -53,6 +64,17 @@ export class Cool18Extractor implements Extractor {
     }
     if (!preHtml) {
       throw new ExtractorError("content pre not found", 404)
+    }
+
+    // 软 404 / 验证码墙：正文过短，或短文本含墙标记 → 不当正文，
+    // 避免验证页/拦截页被清洗后写入磁盘缓存永久返回
+    const preText = pre.text() || ""
+    const t = preText.trim()
+    if (
+      t.length < MIN_PRE_TEXT_LEN ||
+      (t.length < WALL_PAGE_MAX_LEN && WALL_PAGE_RE.test(t))
+    ) {
+      throw new ExtractorError("content not found", 404)
     }
 
     const content = this.extractPreHtml(preHtml)
@@ -673,18 +695,20 @@ export class Cool18Extractor implements Extractor {
     }
     // 路径环检测：互引 uptid 时不再递归，避免栈溢出
     const visiting = new Set<string>()
-    const build = (id: string): ReplyNode[] => {
+    const build = (id: string, depth: number): ReplyNode[] => {
       if (visiting.has(id)) return []
+      // 线性深链也截断：防几千层回复递归几万帧爆栈
+      if (depth >= MAX_REPLY_DEPTH) return []
       visiting.add(id)
       const children = byUptid.get(String(id)) ?? []
       const nodes = children.map((item) => ({
         ...item,
-        children: build(item.tid),
+        children: build(item.tid, depth + 1),
       }))
       visiting.delete(id)
       return nodes
     }
-    return build(parentId)
+    return build(parentId, 0)
   }
 
   async fetchCategoryPage(
@@ -759,72 +783,14 @@ export class Cool18Extractor implements Extractor {
    * - 其余标签剥离，文本 HTML 转义
    */
   private extractPreHtml(html: string): string {
-    let inner = html
-    // 去掉外层 <pre> 若存在
-    const firstGt = inner.indexOf(">")
-    if (inner.trimStart().toLowerCase().startsWith("<pre") && firstGt !== -1) {
-      inner = inner.slice(firstGt + 1)
-    }
-    const lastPre = inner.toLowerCase().lastIndexOf("</pre>")
-    if (lastPre !== -1) {
-      inner = inner.slice(0, lastPre)
-    }
-
-    // 水印字体等噪音
-    inner = inner.replace(
-      /<font[^>]*color\s*=\s*[#]?E6E6DD[^>]*>[\s\S]*?<\/font>/gi,
-      ""
-    )
-
-    inner = inner.replace(/<p><\/p>/gi, "\n").replace(/<br\s*\/?>/gi, "\n")
-
-    const placeholders: string[] = []
-    // 抽出可识别链接为占位符（支持有/无引号 href）
-    inner = inner.replace(
-      /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
-      (_match, attrs: string, labelHtml: string) => {
-        const hrefMatch = attrs.match(
-          /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
-        )
-        const href = hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? ""
-        const decodedHref = decodeHtmlEntities(href)
-        const labelText = decodeHtmlEntities(
-          stripTags(labelHtml)
-        ).trim()
-
-        const tid = this.extractTid(decodedHref)
-        const cid = this.extractCid(decodedHref)
-
-        let internal: string | null = null
-        if (tid) {
-          internal = `/read/${tid}`
-        } else if (cid) {
-          internal = `/book/${cid}`
-        }
-
-        if (!internal) {
-          // 无法映射的链接：只保留文字
-          return labelText
-        }
-
-        const label = escapeHtml(labelText || tid || cid || "链接")
-        const idx = placeholders.length
-        placeholders.push(`<a href="${escapeHtml(internal)}">${label}</a>`)
-        return `\u0000L${idx}\u0000`
-      }
-    )
-
-    // 去掉剩余 HTML 标签，解码实体，再转义
-    let text = stripTags(inner)
-    text = decodeHtmlEntities(text)
-    text = escapeHtml(text)
-
-    // 还原内部阅读链接
-    text = text.replace(/\u0000L(\d+)\u0000/g, (_m, n) => {
-      return placeholders[parseInt(n, 10)] ?? ""
+    // DOM 遍历清洗：标签解析交给 cheerio，不再用正则猜结构
+    return sanitizeContentHtml(html, (href, label) => {
+      const tid = this.extractTid(href)
+      if (tid) return { href: `/read/${tid}`, label: label || tid }
+      const cid = this.extractCid(href)
+      if (cid) return { href: `/book/${cid}`, label: label || cid }
+      return null
     })
-
-    return text.trim()
   }
 
   async fetchHomeLinks(
@@ -913,22 +879,27 @@ export class Cool18Extractor implements Extractor {
       .trim()
   }
 
+  /**
+   * 仅同站（站内相对路径或 cool18.com）URL 才抽取站内 id，
+   * 防外站 tid=/cid= 参数误判为站内链。
+   * //host/... 是协议相对外链，不能因 startsWith("/") 误判为站内。
+   */
+  private static isSameSiteHref(href: string): boolean {
+    return (
+      (href.startsWith("/") && !href.startsWith("//")) ||
+      /cool18\.com/i.test(href)
+    )
+  }
+
   private extractTid(href: string): string | null {
-    const m = href.match(/[?&#]tid=(\d+)/i)
-    if (m?.[1]) return m[1]
-    const bare = href.match(/(?:^|[?&])tid=(\d+)/i)
-    return bare?.[1] ?? null
+    if (!Cool18Extractor.isSameSiteHref(href)) return null
+    return href.match(/[?&#]tid=(\d+)/i)?.[1] ?? null
   }
 
   private extractCid(href: string): string | null {
     // cool18 book cid 与 xbook 不同；此处仅 cool18，限制安全 id 字符
-    const m = href.match(/[?&#]cid=([A-Za-z0-9]+)/i)
-    if (m?.[1]) return m[1]
-    if (/bookview/i.test(href)) {
-      const bare = href.match(/(?:^|[?&])cid=([A-Za-z0-9]+)/i)
-      return bare?.[1] ?? null
-    }
-    return null
+    if (!Cool18Extractor.isSameSiteHref(href)) return null
+    return href.match(/[?&#]cid=([A-Za-z0-9]+)/i)?.[1] ?? null
   }
 }
 

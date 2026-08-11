@@ -232,10 +232,11 @@ export class Store {
 
   /** 清空历史（items + favorites + tags）；site 省略跨站全清；返回删除的 items 数 */
   clearHistory(site?: SiteId): number {
-    const row = this.db
-      .query("SELECT COUNT(*) AS n FROM items WHERE ?1 IS NULL OR site = ?1")
-      .get(site ?? null) as { n: number }
-    const run = this.db.transaction(() => {
+    // 计数与删除同事务：避免 count-then-delete 之间并发写入导致返回值失真
+    return this.db.transaction(() => {
+      const row = this.db
+        .query("SELECT COUNT(*) AS n FROM items WHERE ?1 IS NULL OR site = ?1")
+        .get(site ?? null) as { n: number }
       this.db
         .query("DELETE FROM tags WHERE ?1 IS NULL OR site = ?1")
         .run(site ?? null)
@@ -245,9 +246,8 @@ export class Store {
       this.db
         .query("DELETE FROM items WHERE ?1 IS NULL OR site = ?1")
         .run(site ?? null)
-    })
-    run()
-    return Number(row.n ?? 0)
+      return Number(row.n ?? 0)
+    })()
   }
 
   /** 整体替换标签；对象不存在返回 null（API 层映射 404）；返回实际落库的标签 */
@@ -862,20 +862,24 @@ export class Store {
 
   markStaleJobsInterrupted(): number {
     const now = this.now()
-    const res = this.db
-      .query(
-        `UPDATE jobs SET status='interrupted', finished_at=?1
-         WHERE status IN ('running','pending')`
-      )
-      .run(now)
-    // 崩溃后归档游标可能残留 running，一并标 interrupted（续跑仍靠 next_mtid）
-    this.db
-      .query(
-        `UPDATE archive_cursors SET status='interrupted', updated_at=?1
-         WHERE status='running'`
-      )
-      .run(now)
-    return Number(res.changes ?? 0)
+    // 两条 UPDATE 同事务：jobs 与 archive_cursors 状态一致（都标 interrupted），
+    // 避免崩溃在两条之间时一边 interrupted、一边残留 running
+    return this.db.transaction(() => {
+      const res = this.db
+        .query(
+          `UPDATE jobs SET status='interrupted', finished_at=?1
+           WHERE status IN ('running','pending')`
+        )
+        .run(now)
+      // 崩溃后归档游标可能残留 running，一并标 interrupted（续跑仍靠 next_mtid）
+      this.db
+        .query(
+          `UPDATE archive_cursors SET status='interrupted', updated_at=?1
+           WHERE status='running'`
+        )
+        .run(now)
+      return Number(res.changes ?? 0)
+    })()
   }
 
   appendJobLog(jobId: number, level: JobLogLevel, message: string): void {

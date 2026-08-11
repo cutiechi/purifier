@@ -155,18 +155,47 @@ describe("ArchivePostsJob", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("单页抛错 → 抛错（Runner 标 failed），不重试不跳过", async () => {
+  test("单页网络抖动 → 重试后成功，整轮不失败", async () => {
+    const { job, store, dir } = makeJob()
+    const pages: HomePage[] = [
+      page([link("10", "A")], "10"),
+      page([link("5", "B")], null),
+    ]
+    let call = 0
+    job.fetchPage = async () => {
+      call++
+      // 第 2 页前两次请求失败（网络抖动），第三次成功
+      if (call === 2 || call === 3) throw new Error("upstream 502")
+      return pages.shift() ?? page([], null)
+    }
+    const { ctx, logs } = makeCtx({ delayMs: 200 })
+    const result = await job.run(ctx)
+    expect(result.pages).toBe(2)
+    expect(result.stopReason).toBe("end")
+    expect(call).toBe(4) // 第 1 页 + 第 2 页三次尝试
+    expect(
+      logs.some((l) => l.level === "warn" && /attempt 1 failed.*retrying/.test(l.message))
+    ).toBe(true)
+    const list = store.listArchivePosts("1", { page: 1, limit: 10, sort: "tid" })
+    expect(list.items.map((x) => x.tid)).toEqual(["10", "5"])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("持续失败 → 重试 3 次后抛错（不再一抖即停）", async () => {
     const { job, dir } = makeJob()
     let call = 0
     job.fetchPage = async () => {
       call++
-      if (call === 2) throw new Error("upstream 502")
-      return page([link("10", "A")], "10")
+      throw new Error("upstream 502")
     }
     const { ctx, logs } = makeCtx({ delayMs: 200 })
     await expect(job.run(ctx)).rejects.toThrow(/upstream 502/)
+    expect(call).toBe(3) // 原始 + 2 次重试
     expect(
-      logs.some((l) => l.level === "warn" && /page 2 failed/.test(l.message))
+      logs.some((l) => l.level === "warn" && /attempt 1 failed.*retrying/.test(l.message))
+    ).toBe(true)
+    expect(
+      logs.some((l) => l.level === "warn" && /page 1 failed: upstream 502; stopping/.test(l.message))
     ).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })

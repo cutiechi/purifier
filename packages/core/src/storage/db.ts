@@ -117,7 +117,10 @@ export function openDatabase(dataDir: string): Database {
     name: string
   }[]
   if (!colsRp.some((c) => c.name === "read_progress")) {
-    db.exec("ALTER TABLE items ADD COLUMN read_progress REAL")
+    // 单语句也走事务：DDL 与后续语句的可见性一致，避免半迁移状态
+    db.transaction(() => {
+      db.exec("ALTER TABLE items ADD COLUMN read_progress REAL")
+    })()
   }
 
   // 2. 检测是否需要重建：site 列缺失，或 PK 不含 site
@@ -138,6 +141,9 @@ export function openDatabase(dataDir: string): Database {
   })()
 
   if (needRebuild) {
+    // 重建整库包在一个事务里：任一步失败整体回滚，
+    // 避免 DROP 旧表后、RENAME 前崩溃导致数据永久丢失
+    db.transaction(() => {
     for (const { table, newSql, migrate } of [
       {
         table: "items",
@@ -197,6 +203,7 @@ export function openDatabase(dataDir: string): Database {
     db.exec(
       "CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC)"
     )
+    })()
   }
   return db
 }

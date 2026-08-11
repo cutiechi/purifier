@@ -72,7 +72,7 @@ export default function JobsPage() {
   }, [])
 
   const reload = useCallback(
-    async (opts?: { silent?: boolean }) => {
+    async (opts?: { silent?: boolean }): Promise<boolean> => {
       if (!opts?.silent) setLoading(true)
       setError("")
       try {
@@ -84,8 +84,11 @@ export default function JobsPage() {
         setNextPage(data.nextPage)
         setTotal(data.total)
         if (st) setStatus(st)
+        // 返回「本次结果是否还有 running」，供轮询决定是否继续
+        return data.items.some((j) => j.status === "running")
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
+        return false
       } finally {
         if (!opts?.silent) setLoading(false)
       }
@@ -117,12 +120,11 @@ export default function JobsPage() {
     const tick = async () => {
       const hasRunning = jobsRef.current.some((j) => j.status === "running")
       if (!hasRunning || cancelled) return
-      try {
-        await reload({ silent: true })
-      } finally {
-        if (!cancelled && jobsRef.current.some((j) => j.status === "running")) {
-          t = setTimeout(tick, pollMs)
-        }
+      // 用 reload 本次结果决定是否继续轮询：
+      // finally 里读 jobsRef 是 React 提交前的旧值，会多排一次冗余 tick
+      const stillRunning = await reload({ silent: true })
+      if (!cancelled && stillRunning) {
+        t = setTimeout(tick, pollMs)
       }
     }
     // 仅当当前已有 running 时启动轮询

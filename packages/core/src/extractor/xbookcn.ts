@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio"
 import { fetchUpstream } from "../upstream"
-import { decodeHtmlEntities, escapeHtml, stripTags } from "./utils"
+import { sanitizeContentHtml } from "./sanitize"
 import {
   type BookContentResponse,
   type CategoryLink,
@@ -53,6 +53,8 @@ export function parseChapterTitle(text: string): string {
 export class XbookcnExtractor implements Extractor {
   name = "xbookcn"
   homeUrl = "https://www.xbookcn.org"
+  /** 书站无帖子模型（API 层按能力位拒 /api/posts，而非硬编码 siteId） */
+  supportsPosts = false
 
   buildUrl(_tid: string): string {
     // 无帖子模型；若被误调，由 extractContent 抛 404
@@ -200,50 +202,27 @@ export class XbookcnExtractor implements Extractor {
   }
 
   /**
-   * 正文清洗（占位法，对齐 Cool18 extractPreHtml）：
+   * 正文清洗（共享 sanitizeContentHtml，DOM 遍历）：
    * - /novel/{cid}/{n} 站内章链 → <a href="/book/{cid}?site=2&chapter={n}">
    * - 其余 <a>（推广外链等）剥离标签只留文字
-   * - 整体 stripTags + decodeEntities + escapeHtml 后还原占位
+   * - </p> 后换行（pBreak: "closing"）
    */
   private sanitizeChapterHtml(rawHtml: string, cid: string): string {
-    let inner = rawHtml.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n")
-
-    const placeholders: string[] = []
-    inner = inner.replace(
-      /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
-      (_m, attrs, labelHtml) => {
-        const hrefMatch = attrs.match(
-          /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
-        )
-        const href = hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? ""
-        const decodedHref = decodeHtmlEntities(href)
-        const labelText = decodeHtmlEntities(stripTags(labelHtml)).trim()
-
-        const n = cid ? parseChapterN(decodedHref) : null
-        const isInSiteChapter =
-          !!cid && n !== null && decodedHref.startsWith(`/novel/${cid}/`)
-
-        if (!isInSiteChapter) {
-          // 外链或无法映射：只保留文字
-          return labelText
+    const cleaned = sanitizeContentHtml(
+      rawHtml,
+      (href, label) => {
+        const n = cid ? parseChapterN(href) : null
+        if (n !== null && href.startsWith(`/novel/${cid}/`)) {
+          return {
+            href: `/book/${cid}?site=2&chapter=${n}`,
+            label: label || `第 ${n} 章`,
+          }
         }
-
-        const internal = `/book/${cid}?site=2&chapter=${n}`
-        const label = escapeHtml(labelText || `第 ${n} 章`)
-        const idx = placeholders.length
-        placeholders.push(`<a href="${escapeHtml(internal)}">${label}</a>`)
-        return `\u0000L${idx}\u0000`
-      }
+        return null
+      },
+      { pBreak: "closing" }
     )
-
-    let text = stripTags(inner)
-    text = decodeHtmlEntities(text)
-    text = escapeHtml(text)
-    text = text.replace(/\u0000L(\d+)\u0000/g, (_m, idx) => {
-      return placeholders[parseInt(idx, 10)] ?? ""
-    })
-
-    return text.replace(/\n{3,}/g, "\n\n").trim()
+    return cleaned.replace(/\n{3,}/g, "\n\n")
   }
 
   /**

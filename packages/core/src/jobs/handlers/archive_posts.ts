@@ -2,6 +2,7 @@ import { resolveSite } from "../../extractor"
 import type { HomePage } from "../../extractor"
 import type { Store } from "../../storage/store"
 import { sleep } from "../sleep"
+import { withRetry } from "../retry"
 import type { JobContext, JobHandler, JobResult } from "../handler"
 
 export type ArchiveMode = "full" | "resume" | "incremental"
@@ -104,7 +105,17 @@ export class ArchivePostsJob implements JobHandler {
     while (!ctx.signal.aborted) {
       let page: HomePage
       try {
-        page = await this.fetchPage(mtid, ctx.signal)
+        // 网络抖动重试（指数退避 + jitter），避免单次失败就整轮作废
+        page = await withRetry(() => this.fetchPage(mtid, ctx.signal), {
+          attempts: 3,
+          baseDelayMs: 500,
+          signal: ctx.signal,
+          onRetry: (attempt, errMsg) =>
+            ctx.log(
+              "warn",
+              `page ${pages + 1} attempt ${attempt} failed: ${errMsg}; retrying`
+            ),
+        })
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
         ctx.log("warn", `page ${pages + 1} failed: ${lastError}; stopping`)
@@ -231,7 +242,8 @@ export class ArchivePostsJob implements JobHandler {
       }
 
       mtid = page.nextMtid
-      await sleep(delayMs, ctx.signal)
+      // 固定延迟加 jitter：避免多实例/重跑形成确定性敲击模式
+      await sleep(delayMs + Math.floor(Math.random() * 300), ctx.signal)
     }
 
     if (ctx.signal.aborted) {

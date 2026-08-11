@@ -65,7 +65,7 @@ export default function BookPage() {
   })
 
   const fetchBook = useCallback(
-    async (opts?: { refresh?: boolean }) => {
+    async (opts?: { refresh?: boolean; signal?: AbortSignal }) => {
       if (!cid) return
       const seq = ++seqRef.current
       const refresh = opts?.refresh
@@ -74,7 +74,8 @@ export default function BookPage() {
       setError("")
       try {
         const res = await fetch(
-          `${api.books}?cid=${encodeURIComponent(cid)}&site=${site}${chapter ? `&chapter=${chapter}` : ""}${refresh ? "&refresh=1" : ""}`
+          `${api.books}?cid=${encodeURIComponent(cid)}&site=${site}${chapter ? `&chapter=${chapter}` : ""}${refresh ? "&refresh=1" : ""}`,
+          { signal: opts?.signal }
         )
         const json = await res.json()
         if (seq !== seqRef.current) return
@@ -87,6 +88,8 @@ export default function BookPage() {
         setRefreshNotice(json.stale ? "刷新失败，当前展示的是缓存内容" : "")
       } catch (e) {
         if (seq === seqRef.current) {
+          // 组件卸载触发的取消不算错误
+          if (e instanceof Error && e.name === "AbortError") return
           setError(e instanceof Error ? e.message : "未知错误")
         }
       } finally {
@@ -100,7 +103,10 @@ export default function BookPage() {
   )
 
   useEffect(() => {
-    fetchBook()
+    // 卸载/换章时取消飞行中请求（seq 守卫防错序，取消省带宽）
+    const controller = new AbortController()
+    fetchBook({ signal: controller.signal })
+    return () => controller.abort()
   }, [fetchBook])
 
   const actions = (

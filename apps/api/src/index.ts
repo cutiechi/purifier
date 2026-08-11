@@ -2,7 +2,7 @@
  * Pure Bun HTTP — API + optional SPA static files.
  * No Hono / Express / Next.
  */
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import {
   CONTENT_CACHE_HEADERS,
   DEFAULT_SITE,
@@ -123,7 +123,15 @@ function meListQuery(url: URL): ListQuery {
 }
 
 function countReplies(nodes: ReplyNode[]): number {
-  return nodes.reduce((n, node) => n + 1 + countReplies(node.children), 0)
+  // 迭代版：与 buildReplyTree 的深度截断配套，深树也不递归爆栈
+  let count = 0
+  const stack = [...nodes]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    count++
+    for (const child of node.children) stack.push(child)
+  }
+  return count
 }
 
 interface LoadedContent {
@@ -199,6 +207,8 @@ async function loadCachedContent(
 const LIST_MEM_TTL_MS = 45_000
 const LIST_MEM_MAX = 256
 const LIST_MEM_KEY_MAX = 512
+/** 单条缓存 value 序列化上限：防 page 无上限 + 大响应组合撑爆内存（256 × 几 MB = OOM） */
+const LIST_MEM_VALUE_MAX = 512 * 1024
 const listMemCache = new Map<string, { expires: number; data: unknown }>()
 
 function getListMemCache<T>(key: string): T | null {
@@ -216,6 +226,8 @@ function getListMemCache<T>(key: string): T | null {
 
 function setListMemCache(key: string, data: unknown): void {
   if (key.length > LIST_MEM_KEY_MAX) return
+  // 超大的响应不入缓存（DoS 防护；正常列表响应远小于此）
+  if (JSON.stringify(data).length > LIST_MEM_VALUE_MAX) return
   // 顺手清一批过期
   if (listMemCache.size >= LIST_MEM_MAX) {
     const now = Date.now()
@@ -289,10 +301,9 @@ async function handlePosts(url: URL): Promise<Response> {
   const extractor = resolveSite(site)
   const tid = url.searchParams.get("tid")
 
-  if (tid && siteId !== "1") {
-    // xbookcn 无帖子模型（review S3：两站阶段用 siteId!=="1" 可接受；
-    // 加第三站若有书站需改成按 extractor 能力判定，如 `extractor.name === "cool18"`）
-    return jsonError("xbookcn does not support posts", 404)
+  if (tid && !extractor.supportsPosts) {
+    // 按能力位判定，而非硬编码站点号：加第三站时不会误拒支持 posts 的站
+    return jsonError(`${extractor.name} does not support posts`, 404)
   }
 
   if (!tid) {
@@ -1122,7 +1133,10 @@ async function routeInner(req: Request): Promise<Response> {
     switch (pathname) {
       case "/api/health":
         requireGet(req)
-        return Response.json({ status: "ok", runtime: "bun" })
+        return Response.json(
+          { status: "ok", runtime: "bun" },
+          { headers: NO_STORE_HEADERS }
+        )
       case "/api/posts":
         requireGet(req)
         return await handlePosts(url)
@@ -1211,16 +1225,25 @@ async function serveSpa(pathname: string): Promise<Response | null> {
   const safe = pathname.replace(/\.\./g, "").split("?")[0] || "/"
   const rel =
     safe === "/" ? "index.html" : safe.startsWith("/") ? safe.slice(1) : safe
-  const file = Bun.file(join(WEB_DIST, rel))
+  // 显式路径围栏：解析后必须落在 WEB_DIST 内（URL 规范化之外的兜底）
+  const base = resolve(WEB_DIST)
+  const prefix = base.endsWith(sep) ? base : base + sep
+  const target = resolve(base, rel)
+  if (target !== base && !target.startsWith(prefix)) return null
+  const file = Bun.file(target)
   if (await file.exists()) {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = {
+      "X-Content-Type-Options": "nosniff",
+    }
     if (rel === "index.html" || rel.endsWith(".html")) {
+      headers["Content-Type"] = "text/html; charset=utf-8"
       headers["Cache-Control"] = "no-store"
     } else if (
       /assets\//.test(rel) ||
       /\.[a-f0-9]{8,}\.(js|css|woff2?|png|svg|jpg|webp)$/i.test(rel)
     ) {
       headers["Cache-Control"] = "public, max-age=31536000, immutable"
+      headers["Content-Type"] = file.type || "application/octet-stream"
     }
     return new Response(file, { headers })
   }
@@ -1231,6 +1254,7 @@ async function serveSpa(pathname: string): Promise<Response | null> {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     })
   }
@@ -1247,3 +1271,33 @@ console.log(
   `[purifier] bun ${Bun.version} on http://${server.hostname}:${server.port}` +
     ` (web: ${WEB_DIST})`
 )
+
+/**
+ * 优雅关闭：abort 全部在跑任务 → 等 runJob finally 真正收尾
+ * （markFinished / 游标写入完成，SQLite busy_timeout 最坏 5s）
+ * → 超时才兜底标记残留 running/pending 为 interrupted → 关库 → 停服退出。
+ * 避免固定延时关库截断 handler 收尾，也避免 SIGTERM 后任务永远卡 running。
+ */
+let shuttingDown = false
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) {
+    // 第二次信号：不再等待，强制退出
+    process.exit(1)
+  }
+  shuttingDown = true
+  console.log(`[purifier] ${signal} received, shutting down`)
+  runner.abortAll()
+  const idle = await runner.waitForIdle(5_000)
+  try {
+    if (!idle) {
+      // 超时兜底：与崩溃恢复同路径，标记残留任务
+      runner.recoverOnStartup()
+    }
+    store.close()
+  } finally {
+    server.stop(true)
+    process.exit(0)
+  }
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"))
+process.on("SIGINT", () => void shutdown("SIGINT"))
