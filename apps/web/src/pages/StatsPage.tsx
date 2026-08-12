@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { PageHeader } from "@/components/page-header"
+import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import { SectionLabel } from "@/components/page-header"
 import { StatsHeatmap } from "@/components/stats-heatmap"
 import { AsyncBody } from "@/components/ui-state"
 import { api, bookPath, readPath, type SiteId } from "@/lib/routes"
@@ -68,6 +67,7 @@ export default function StatsPage() {
   const [data, setData] = useState<StatsResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -85,7 +85,7 @@ export default function StatsPage() {
     return () => {
       cancelled = true
     }
-  }, [scope])
+  }, [scope, reloadKey])
 
   const hasSessions = !!data && (data.summary.trackedSince !== null)
   const maxHour = data ? Math.max(1, ...data.timeOfDay) : 1
@@ -122,6 +122,7 @@ export default function StatsPage() {
         error={error}
         empty={!hasSessions}
         emptyText="还没有阅读记录，读几篇再来看看吧"
+        onRetry={() => setReloadKey((k) => k + 1)}
       >
         {data && (
           <div className="space-y-8">
