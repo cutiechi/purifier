@@ -33,6 +33,11 @@ export function useReadingSession(opts: {
 
   useEffect(() => {
     if (!enabled) return
+    // 重置段锚点：refs 跨 effect 存活，上次 cleanup 的 re-arm 会留下旧锚点；
+    // 不重置会把 enabled=false（loading/换篇）期间的墙钟时间算进第一个段。
+    accMs.current = 0
+    segStartPerf.current = null
+    segStartWall.current = null
     const visible = () => document.visibilityState === "visible"
     const startSegment = () => {
       if (segStartPerf.current === null) {
@@ -65,7 +70,10 @@ export function useReadingSession(opts: {
         const url = "/api/me/sessions"
         try {
           if (navigator.sendBeacon) {
-            navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }))
+            navigator.sendBeacon(
+              url,
+              new Blob([payload], { type: "application/json" })
+            )
           } else {
             void fetch(url, {
               method: "POST",
