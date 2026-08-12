@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type {
   CharacterName,
   CharacterScope,
@@ -33,8 +33,12 @@ export function useCharacters(kind: "post" | "book", id: string) {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  // 防止慢的旧请求（kind/id 已切换）覆盖新作用域：序号递增，过期响应直接丢弃
+  const seqRef = useRef(0)
+
   const reload = useCallback(async () => {
     if (!id) return
+    const seq = ++seqRef.current
     setLoading(true)
     setError("")
     try {
@@ -42,6 +46,7 @@ export function useCharacters(kind: "post" | "book", id: string) {
         `${api.meCharacters}?kind=${kind}&id=${encodeURIComponent(id)}`
       )
       const json = await res.json()
+      if (seq !== seqRef.current) return
       if (!res.ok) {
         setError(json.error || "加载人物失败")
         return
@@ -49,9 +54,11 @@ export function useCharacters(kind: "post" | "book", id: string) {
       setScope(json.scope)
       setCharacters(json.characters ?? [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载人物失败")
+      if (seq === seqRef.current) {
+        setError(e instanceof Error ? e.message : "加载人物失败")
+      }
     } finally {
-      setLoading(false)
+      if (seq === seqRef.current) setLoading(false)
     }
   }, [kind, id])
 
@@ -74,21 +81,20 @@ export function useCharacters(kind: "post" | "book", id: string) {
     [kind, id]
   )
 
-  // 与 add 一致：乐观更新本地列表，失败再 reload 回滚（避免 loading 闪烁）
+  // 乐观删除本地列表；失败 reload 回滚（服务端权威列表，避免旧快照复活已删名字、丢弃并发新增）
   const remove = useCallback(
     async (name: string) => {
-      const prev = characters
       setCharacters((c) => c.filter((x) => x.name !== name))
       const q = new URLSearchParams({ kind, id, name })
       const res = await fetch(`${api.meCharacters}?${q}`, { method: "DELETE" })
       const json = await res.json()
       if (!res.ok) {
-        setCharacters(prev)
+        await reload()
         throw new Error(json.error || "删除失败")
       }
       return json as { removed: number }
     },
-    [kind, id, characters]
+    [kind, id, reload]
   )
 
   return { characters, scope, error, loading, reload, add, remove }
