@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openDatabase } from "./db"
-import { Store, normalizeTag } from "./store"
+import { Store, computeStreaks, dayBefore, localDateStr, normalizeTag } from "./store"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "purifier-db-"))
@@ -805,6 +805,94 @@ describe("recordSession", () => {
         .get() as { n: number }
     ).n
     expect(n).toBe(1) // 设计：清历史不级联删会话（冗余 title 保留）
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("computeStreaks", () => {
+  test("current streak anchors today, else yesterday", () => {
+    const today = "2026-08-12"
+    expect(
+      computeStreaks(["2026-08-10", "2026-08-11", "2026-08-12"], today)
+    ).toEqual({ currentStreak: 3, longestStreak: 3 })
+    // 今天还没读 → 以昨天为锚
+    expect(
+      computeStreaks(["2026-08-10", "2026-08-11"], today)
+    ).toEqual({ currentStreak: 2, longestStreak: 2 })
+    // 今天和昨天都没有 → 0（历史最长仍算）
+    expect(
+      computeStreaks(["2026-08-01", "2026-08-09"], today)
+    ).toEqual({ currentStreak: 0, longestStreak: 1 })
+  })
+  test("longest run independent of current", () => {
+    expect(
+      computeStreaks(
+        ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-10", "2026-08-12"],
+        "2026-08-12"
+      )
+    ).toEqual({ currentStreak: 1, longestStreak: 3 })
+  })
+})
+
+describe("getStats", () => {
+  function setup(nowMs: number) {
+    const dir = tempDir()
+    const db = openDatabase(dir)
+    const store = new Store(db, () => nowMs)
+    return { store, db, dir }
+  }
+  function at(year: number, month: number, day: number, hour = 12): number {
+    return new Date(year, month - 1, day, hour).getTime()
+  }
+  test("summary ignores NULL, calendar estimated rule, timeOfDay, topItems title, site filter", () => {
+    // “今天” 2026-08-12 12:00 本地
+    const now = at(2026, 8, 12, 12)
+    const { store, db, dir } = setup(now)
+    // 回填行（历史活跃日，durationS NULL）：08-09 纯回填
+    db.query(
+      `INSERT INTO reading_sessions (site,kind,item_id,title,started_at,duration_s,estimated)
+       VALUES ('1','post','old','Old',?1,NULL,1)`
+    ).run(at(2026, 8, 9, 8))
+    // I1 混合日：08-12 同时插回填行 + 真实段 → 该日 estimated 须为 0
+    db.query(
+      `INSERT INTO reading_sessions (site,kind,item_id,title,started_at,duration_s,estimated)
+       VALUES ('1','post','old2','Old2',?1,NULL,1)`
+    ).run(at(2026, 8, 12, 6))
+    // 今天真实段：post a 读 60s @10:00，book b 读 120s @22:00
+    store.recordSession({ site: "1", kind: "post", itemId: "a", title: "A", startedAt: at(2026, 8, 12, 10), durationS: 60 })
+    store.recordSession({ site: "2", kind: "book", itemId: "b", title: "B", startedAt: at(2026, 8, 12, 22), durationS: 120 })
+    // I2：groups 无 site 列，带 site 过滤时仍全局计数
+    store.upsertGroup({ key: "k", title: "G", items: [{ tid: "g1", title: "GT" }] })
+
+    const all = store.getStats()
+    expect(all.summary.totalDurationS).toBe(180)
+    // 活跃日：08-09（回填）+ 08-12（真实）→ 连读从今天回数，08-11/08-10 无 → currentStreak=1
+    expect(all.summary.activeDays).toBe(2)
+    expect(all.summary.currentStreak).toBe(1)
+    expect(all.summary.longestStreak).toBe(1)
+    expect(all.summary.trackedSince).toBe(at(2026, 8, 9, 8))
+    expect(all.summary.lastActiveAt).toBe(at(2026, 8, 12, 22))
+    // calendar：08-09 纯回填 estimated=1；08-12 混合（回填+真实）estimated=0、durationS=180
+    const cal = Object.fromEntries(all.calendar.map((c) => [c.date, c]))
+    expect(cal["2026-08-09"]).toEqual({ date: "2026-08-09", durationS: 0, estimated: 1 })
+    expect(cal["2026-08-12"]).toEqual({ date: "2026-08-12", durationS: 180, estimated: 0 })
+    // timeOfDay：下标 10=60，22=120
+    expect(all.timeOfDay[10]).toBe(60)
+    expect(all.timeOfDay[22]).toBe(120)
+    // topItems：b(120) 在 a(60) 之前；title 取 max(started_at) 段
+    expect(all.topItems[0]).toMatchObject({ id: "b", durationS: 120, title: "B" })
+    expect(all.topItems[1]).toMatchObject({ id: "a", durationS: 60, title: "A" })
+    // recentSessions 只含真实段
+    expect(all.recentSessions.length).toBe(2)
+    expect(all.recentSessions[0]).toMatchObject({ id: "b" })
+
+    // site 过滤：site=2 只剩 b 的 120s
+    const onlyBooks = store.getStats({ site: "2" })
+    expect(onlyBooks.summary.totalDurationS).toBe(120)
+    expect(onlyBooks.topItems.every((t) => t.site === "2")).toBe(true)
+    // I2：groups 无 site 列 → 带 site=2 仍全局计数（setup 插了 1 个组）
+    expect(onlyBooks.inventory.groups).toBe(1)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })

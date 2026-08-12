@@ -158,3 +158,55 @@ export interface ReadingSessionInput {
   startedAt: number
   durationS: number
 }
+
+export interface StatsSummary {
+  totalDurationS: number
+  currentStreak: number
+  longestStreak: number
+  activeDays: number
+  thisWeekS: number
+  thisMonthS: number
+  trackedSince: number | null
+  lastActiveAt: number | null
+}
+
+export interface StatsCalendarDay {
+  date: string
+  durationS: number
+  estimated: number
+}
+
+export interface StatsTopItem {
+  kind: ItemKind
+  site: SiteId
+  id: string
+  title: string
+  durationS: number
+  sessions: number
+}
+
+export interface StatsRecentSession {
+  startedAt: number
+  durationS: number
+  kind: ItemKind
+  site: SiteId
+  id: string
+  title: string
+}
+
+export interface StatsInventory {
+  history: number
+  favorites: number
+  tags: number
+  groups: number
+  characters: number
+}
+
+export interface StatsResult {
+  summary: StatsSummary
+  calendar: StatsCalendarDay[]
+  timeOfDay: number[]
+  topItems: StatsTopItem[]
+  recentSessions: StatsRecentSession[]
+  inventory: StatsInventory
+}

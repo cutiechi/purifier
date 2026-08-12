@@ -19,6 +19,12 @@ import {
   ListQuery,
   ListResult,
   ReadingSessionInput,
+  StatsCalendarDay,
+  StatsInventory,
+  StatsRecentSession,
+  StatsResult,
+  StatsSummary,
+  StatsTopItem,
   TagCount,
   PAGE_SIZE,
 } from "./types"
@@ -56,6 +62,49 @@ export function normalizeTags(tags: string[]): string[] {
     }
   }
   return out
+}
+
+/** 本地日期串 YYYY-MM-DD（按服务端本地 TZ） */
+export function localDateStr(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** YYYY-MM-DD 的前一天 */
+export function dayBefore(dateStr: string): string {
+  const [y = 0, m = 1, d = 1] = dateStr.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() - 1)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+}
+
+/**
+ * 连读：锚点为今天（今天无活动则昨天）；从锚往回数连续日。
+ * longestStreak = 活跃日集合里最长连续段。activeDays 由调用方算（=集合大小）。
+ */
+export function computeStreaks(
+  dates: string[],
+  today: string
+): { currentStreak: number; longestStreak: number } {
+  const set = new Set(dates)
+  const sorted = [...set].sort()
+  let longest = 0
+  let run = 0
+  let prev: string | null = null
+  for (const d of sorted) {
+    run = prev !== null && dayBefore(d) === prev ? run + 1 : 1
+    longest = Math.max(longest, run)
+    prev = d
+  }
+  let current = 0
+  let cur = set.has(today) ? today : set.has(dayBefore(today)) ? dayBefore(today) : null
+  while (cur !== null && set.has(cur)) {
+    current++
+    cur = dayBefore(cur)
+  }
+  return { currentStreak: current, longestStreak: longest }
 }
 
 export class Store {
@@ -174,6 +223,153 @@ export class Store {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)`
       )
       .run(input.site, input.kind, input.itemId, input.title, input.startedAt, durationS)
+  }
+
+  /** 统计聚合：summary / calendar(365d) / timeOfDay(24h) / topItems / recentSessions / inventory。 */
+  getStats(opts: { site?: SiteId } = {}): StatsResult {
+    const site = opts.site
+    // site 过滤片段 + 绑定助手：site 的 ? 始终在额外 cond 的 ? 之前
+    const scoped = (cond: string) =>
+      site
+        ? `WHERE site = ?${cond ? ` AND ${cond}` : ""}`
+        : cond
+          ? `WHERE ${cond}`
+          : ""
+    const runScoped = <T>(sql: string, extra: SQLQueryBindings[] = []): T[] =>
+      (this.db.query(sql).all(...(site ? [site] : []), ...extra) as T[])
+
+    const sinceMs = this.now() - 365 * 86_400_000
+
+    // calendar（近 365 天）
+    const calRows = runScoped<{
+      d: string
+      s: number
+      est: number
+    }>(
+      `SELECT date(started_at / 1000, 'unixepoch', 'localtime') AS d,
+              COALESCE(SUM(duration_s), 0) AS s,
+              CASE WHEN SUM(CASE WHEN duration_s IS NOT NULL THEN 1 ELSE 0 END) > 0
+                   THEN 0 ELSE 1 END AS est
+       FROM reading_sessions ${scoped("started_at >= ?")}
+       GROUP BY d ORDER BY d`,
+      [sinceMs]
+    )
+    const calendar: StatsCalendarDay[] = calRows.map((r) => ({
+      date: r.d,
+      durationS: r.s,
+      estimated: r.est,
+    }))
+
+    // 时段分布（24h）
+    const todRows = runScoped<{ h: string; s: number }>(
+      `SELECT strftime('%H', started_at / 1000, 'unixepoch', 'localtime') AS h,
+              COALESCE(SUM(duration_s), 0) AS s
+       FROM reading_sessions ${scoped("duration_s IS NOT NULL")}
+       GROUP BY h`
+    )
+    const timeOfDay = new Array(24).fill(0)
+    for (const r of todRows) timeOfDay[Number(r.h)] = r.s
+
+    // 时长 TOP（title = max(started_at) 那段；避免 GROUP BY bare column 随机）
+    const topItems: StatsTopItem[] = runScoped(
+      `SELECT kind, site, item_id AS id,
+              (SELECT r2.title FROM reading_sessions r2
+               WHERE r2.site = reading_sessions.site AND r2.kind = reading_sessions.kind
+                 AND r2.item_id = reading_sessions.item_id
+               ORDER BY r2.started_at DESC LIMIT 1) AS title,
+              COALESCE(SUM(duration_s), 0) AS durationS,
+              COUNT(*) AS sessions
+       FROM reading_sessions ${scoped("duration_s IS NOT NULL")}
+       GROUP BY site, kind, item_id
+       ORDER BY durationS DESC LIMIT 10`
+    )
+
+    const recentSessions: StatsRecentSession[] = runScoped(
+      `SELECT started_at AS startedAt, duration_s AS durationS, kind, site,
+              item_id AS id, title
+       FROM reading_sessions ${scoped("duration_s IS NOT NULL")}
+       ORDER BY started_at DESC LIMIT 20`
+    )
+
+    const sumDuration = (cond: string, extra: SQLQueryBindings[] = []): number =>
+      (
+        runScoped<{ t: number }>(
+          `SELECT COALESCE(SUM(duration_s), 0) AS t FROM reading_sessions ${scoped(cond)}`,
+          extra
+        )[0] ?? { t: 0 }
+      ).t
+
+    const totalDurationS = sumDuration("duration_s IS NOT NULL")
+    const range =
+      runScoped<{ mn: number | null; mx: number | null }>(
+        `SELECT MIN(started_at) AS mn, MAX(started_at) AS mx FROM reading_sessions ${scoped("")}`
+      )[0] ?? { mn: null, mx: null }
+
+    // 本周（周一起）/ 本月边界（本地）
+    const now = new Date(this.now())
+    const weekStartMs = (() => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const dow = (d.getDay() + 6) % 7 // 周一=0
+      d.setDate(d.getDate() - dow)
+      return d.getTime()
+    })()
+    const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    const thisWeekS = sumDuration("duration_s IS NOT NULL AND started_at >= ?", [
+      weekStartMs,
+    ])
+    const thisMonthS = sumDuration("duration_s IS NOT NULL AND started_at >= ?", [
+      monthStartMs,
+    ])
+
+    // 活跃日集合（真实+回填）→ streak / activeDays
+    const dayRows = runScoped<{ d: string }>(
+      `SELECT DISTINCT date(started_at / 1000, 'unixepoch', 'localtime') AS d
+       FROM reading_sessions ${scoped("")}`
+    )
+    const dates = dayRows.map((r) => r.d)
+    const { currentStreak, longestStreak } = computeStreaks(dates, localDateStr(this.now()))
+
+    // inventory：items/favorites/tags 按 site；groups/character_names 无 site 列 → 全局
+    const countSite = (table: string): number =>
+      site
+        ? (
+            this.db.query(`SELECT COUNT(*) AS n FROM ${table} WHERE site = ?`).get(site) as {
+              n: number
+            }
+          ).n
+        : (this.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+    const inventory: StatsInventory = {
+      history: countSite("items"),
+      favorites: countSite("favorites"),
+      tags: site
+        ? (
+            this.db
+              .query("SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags WHERE site = ?)")
+              .get(site) as { n: number }
+          ).n
+        : (
+            this.db.query("SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags)").get() as {
+              n: number
+            }
+          ).n,
+      groups: (this.db.query("SELECT COUNT(*) AS n FROM groups").get() as { n: number }).n,
+      characters: (
+        this.db.query("SELECT COUNT(*) AS n FROM character_names").get() as { n: number }
+      ).n,
+    }
+
+    const summary: StatsSummary = {
+      totalDurationS,
+      currentStreak,
+      longestStreak,
+      activeDays: new Set(dates).size,
+      thisWeekS,
+      thisMonthS,
+      trackedSince: range.mn,
+      lastActiveAt: range.mx,
+    }
+
+    return { summary, calendar, timeOfDay, topItems, recentSessions, inventory }
   }
 
   /** 收藏；对象必须已存在于 items，否则返回 false（API 层映射 404） */
