@@ -34,7 +34,8 @@
 | `apps/web/src/App.tsx` | 注册 `/stats` → `StatsPage` |
 | `apps/web/src/lib/format.ts` | `formatDuration` |
 | `apps/web/src/pages/StatsPage.tsx` | 统计页 + `all|1|2` 站点控件 + 各板块（新文件） |
-| `Dockerfile` | `ENV TZ` |
+| `apps/web/src/components/stats-heatmap.tsx` | 近 365 天热力图（7×N 周对齐，新文件） |
+| `Dockerfile` | runner 阶段装 tzdata + `ENV TZ` |
 | `AGENTS.md` | API 表两行 + 环境变量 `TZ` |
 
 ---
@@ -272,6 +273,27 @@ describe("recordSession", () => {
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
+  test("sessions survive deleteItem (no cascade)", () => {
+    const { store, db, dir } = setup()
+    store.recordVisit("1", "post", "a", "A", "/read/a")
+    store.recordSession({
+      site: "1",
+      kind: "post",
+      itemId: "a",
+      title: "A",
+      startedAt: 10,
+      durationS: 9,
+    })
+    store.deleteItem("1", "post", "a")
+    const n = (
+      db
+        .query("SELECT COUNT(*) AS n FROM reading_sessions WHERE item_id='a'")
+        .get() as { n: number }
+    ).n
+    expect(n).toBe(1) // 设计：清历史不级联删会话（冗余 title 保留）
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 ```
 
@@ -505,14 +527,21 @@ describe("getStats", () => {
     // “今天” 2026-08-12 12:00 本地
     const now = at(2026, 8, 12, 12)
     const { store, db, dir } = setup(now)
-    // 回填行（first_seen 历史活跃日，durationS NULL）
+    // 回填行（历史活跃日，durationS NULL）：08-09 纯回填
     db.query(
       `INSERT INTO reading_sessions (site,kind,item_id,title,started_at,duration_s,estimated)
        VALUES ('1','post','old','Old',?1,NULL,1)`
     ).run(at(2026, 8, 9, 8))
+    // I1 混合日：08-12 同时插回填行 + 真实段 → 该日 estimated 须为 0
+    db.query(
+      `INSERT INTO reading_sessions (site,kind,item_id,title,started_at,duration_s,estimated)
+       VALUES ('1','post','old2','Old2',?1,NULL,1)`
+    ).run(at(2026, 8, 12, 6))
     // 今天真实段：post a 读 60s @10:00，book b 读 120s @22:00
     store.recordSession({ site: "1", kind: "post", itemId: "a", title: "A", startedAt: at(2026, 8, 12, 10), durationS: 60 })
     store.recordSession({ site: "2", kind: "book", itemId: "b", title: "B", startedAt: at(2026, 8, 12, 22), durationS: 120 })
+    // I2：groups 无 site 列，带 site 过滤时仍全局计数
+    store.upsertGroup({ key: "k", title: "G", items: [{ tid: "g1", title: "GT" }] })
 
     const all = store.getStats()
     expect(all.summary.totalDurationS).toBe(180)
@@ -522,7 +551,7 @@ describe("getStats", () => {
     expect(all.summary.longestStreak).toBe(1)
     expect(all.summary.trackedSince).toBe(at(2026, 8, 9, 8))
     expect(all.summary.lastActiveAt).toBe(at(2026, 8, 12, 22))
-    // calendar：08-09 estimated=1（纯回填），08-12 estimated=0 + 180s
+    // calendar：08-09 纯回填 estimated=1；08-12 混合（回填+真实）estimated=0、durationS=180
     const cal = Object.fromEntries(all.calendar.map((c) => [c.date, c]))
     expect(cal["2026-08-09"]).toEqual({ date: "2026-08-09", durationS: 0, estimated: 1 })
     expect(cal["2026-08-12"]).toEqual({ date: "2026-08-12", durationS: 180, estimated: 0 })
@@ -540,8 +569,8 @@ describe("getStats", () => {
     const onlyBooks = store.getStats({ site: "2" })
     expect(onlyBooks.summary.totalDurationS).toBe(120)
     expect(onlyBooks.topItems.every((t) => t.site === "2")).toBe(true)
-    // groups/characters 无 site 列 → 仍全局（此处为 0，验证不报错/不变 0 假象）
-    expect(onlyBooks.inventory.groups).toBe(0)
+    // I2：groups 无 site 列 → 带 site=2 仍全局计数（setup 插了 1 个组）
+    expect(onlyBooks.inventory.groups).toBe(1)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -762,6 +791,7 @@ Expected: FAIL（`reading_sessions` key 不存在）。
 
 ```ts
 reading_sessions: Array<{
+  id: number
   site: string
   kind: string
   item_id: string
@@ -778,6 +808,7 @@ reading_sessions: Array<{
 const reading_sessions = this.db
   .query("SELECT * FROM reading_sessions ORDER BY started_at")
   .all() as Array<{
+  id: number
   site: string
   kind: string
   item_id: string
@@ -841,10 +872,11 @@ async function handleSessionsWrite(req: Request): Promise<Response> {
   assertSafeId(idRaw)
   const site = "site" in body ? String(body.site) : "1"
   resolveSite(site) // 非法 site → ExtractorError(400)
-  const title = "title" in body ? body.title : undefined
-  if (typeof title !== "string" || title.trim() === "") {
+  const titleRaw = "title" in body ? body.title : undefined
+  if (typeof titleRaw !== "string" || titleRaw.trim() === "") {
     throw new ExtractorError("invalid title", 400)
   }
+  const title = titleRaw.trim()
   const startedAt = "startedAt" in body ? body.startedAt : undefined
   if (typeof startedAt !== "number" || !Number.isFinite(startedAt) || startedAt <= 0) {
     throw new ExtractorError("invalid startedAt", 400)
@@ -921,7 +953,7 @@ git commit -m "feat(api): add POST /api/me/sessions and GET /api/me/stats"
 
 **Interfaces:**
 - Consumes: `api.meSessions`（Task 8 先加常量；本任务先用字面量 `/api/me/sessions`，Task 8 改为常量）。
-- Produces: `useReadingSession(opts: { site: SiteId; kind: ItemKind; id: string; title: string; enabled: boolean }): void`。可见时计 + `sendBeacon`/`fetch keepalive` 分段 flush（≥3s 才发）；`enabled=false` 不计时。
+- Produces: `useReadingSession(opts: { site: SiteId; kind: "post" | "book"; id: string; title: string; enabled: boolean }): void`。可见时计 + `sendBeacon`/`fetch keepalive` 分段 flush（≥3s 才发）；`enabled=false` 不计时。
 
 > 前端无单测；typecheck + build + 手测验证。
 
@@ -931,7 +963,7 @@ git commit -m "feat(api): add POST /api/me/sessions and GET /api/me/stats"
 
 ```ts
 import { useEffect, useRef } from "react"
-import { type ItemKind, type SiteId } from "@/lib/routes"
+import { type SiteId } from "@/lib/routes"
 
 const FLUSH_INTERVAL_MS = 60_000
 const MIN_SEGMENT_S = 3
@@ -940,17 +972,23 @@ const MIN_SEGMENT_S = 3
  * 可见时计阅读时长，分段 sendBeacon 提交。
  * enabled 与 useReadingProgress 的 ready 一致：仅在「正文就绪」时计时；
  * 目录页 / loading / error 壳传 enabled=false。换 id/chapter 经依赖变化重挂：旧实例 flush + 新实例。
+ *
+ * 双锚点：segStartPerf（performance.now，单调，算时长）+ segStartWall（Date.now，
+ * 作 payload startedAt，归因日/小时按它分桶）。
+ * accumulate 无条件把「段起点→now」计入 accMs：visibilitychange→hidden 时 visible()
+ * 已是 false，若再要求 visible() 才累加会丢掉当前段（最多近 60s）。
  */
 export function useReadingSession(opts: {
   site: SiteId
-  kind: ItemKind
+  kind: "post" | "book"
   id: string
   title: string
   enabled: boolean
 }): void {
   const { site, kind, id, title, enabled } = opts
   const accMs = useRef(0)
-  const segStart = useRef<number | null>(null)
+  const segStartPerf = useRef<number | null>(null)
+  const segStartWall = useRef<number | null>(null)
   // 最新 title 进 ref：title 变化不重置计时，只影响后续 flush payload
   const titleRef = useRef(title)
   useEffect(() => {
@@ -960,25 +998,32 @@ export function useReadingSession(opts: {
   useEffect(() => {
     if (!enabled) return
     const visible = () => document.visibilityState === "visible"
-    const tick = () => {
-      if (visible() && segStart.current === null) segStart.current = performance.now()
-    }
-    const accumulate = () => {
-      if (segStart.current !== null && visible()) {
-        accMs.current += performance.now() - segStart.current
+    const startSegment = () => {
+      if (segStartPerf.current === null) {
+        segStartPerf.current = performance.now()
+        segStartWall.current = Date.now()
       }
-      segStart.current = visible() ? performance.now() : null
+    }
+    // 无条件累加当前段（hidden 转换点不能因 visible()=false 而漏计）
+    const accumulate = () => {
+      if (segStartPerf.current !== null) {
+        accMs.current += performance.now() - segStartPerf.current
+        segStartPerf.current = null
+        segStartWall.current = null
+      }
     }
     const flush = () => {
+      const wallStart = segStartWall.current // accumulate 前先取段起点墙钟
       accumulate()
       const durationS = Math.round(accMs.current / 1000)
+      const startedAt = wallStart ?? Date.now() - durationS * 1000
       if (durationS >= MIN_SEGMENT_S) {
         const payload = JSON.stringify({
           site,
           kind,
           id,
           title: titleRef.current,
-          startedAt: Date.now() - durationS * 1000,
+          startedAt,
           durationS,
         })
         const url = "/api/me/sessions"
@@ -998,12 +1043,13 @@ export function useReadingSession(opts: {
         }
       }
       accMs.current = 0
+      if (visible()) startSegment() // 仍可见 → 开新段
     }
     const onVisibility = () => {
       if (!visible()) flush()
-      else tick()
+      else startSegment()
     }
-    tick()
+    startSegment()
     const timer = setInterval(flush, FLUSH_INTERVAL_MS)
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pagehide", flush)
@@ -1149,7 +1195,7 @@ meStats: "/api/me/stats",
 `use-reading-session.ts`：
 
 ```ts
-import { api, type ItemKind, type SiteId } from "@/lib/routes"
+import { api, type SiteId } from "@/lib/routes"
 ```
 
 把 `const url = "/api/me/sessions"` 改为 `const url = api.meSessions`。
@@ -1231,39 +1277,59 @@ const LEVEL_BG = [
   "bg-primary/70",
   "bg-primary",
 ]
+const keyOf = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`
 
-/** 近 365 天 GitHub 式热力图。空日也要画（durationS=0）。 */
+/**
+ * 近 365 天 GitHub 式热力图：列=周、行=周日…周六。先按首日 weekday 补 null 对齐到
+ * 周日，再每 7 个切一列。空日也画（durationS=0）。
+ */
 export function StatsHeatmap({ days }: { days: Day[] }) {
   const [hover, setHover] = useState<Day | null>(null)
   const byDate = new Map(days.map((d) => [d.date, d]))
   const today = new Date()
-  const todayMid = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  )
-  const cells: (Day | null)[] = []
+  const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const all: Day[] = []
   for (let i = 364; i >= 0; i--) {
     const d = new Date(todayMid)
     d.setDate(d.getDate() - i)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-    cells.push(byDate.get(key) ?? { date: key, durationS: 0, estimated: 0 })
+    const key = keyOf(d)
+    all.push(byDate.get(key) ?? { date: key, durationS: 0, estimated: 0 })
   }
+  // 对齐到周日（getDay 周日=0）：首日之前补 null，使每列同 weekday
+  const pad = all.length ? new Date(all[0].date + "T00:00:00").getDay() : 0
+  const flat: (Day | null)[] = [...Array(pad).fill(null), ...all]
+  const weeks: (Day | null)[][] = []
+  for (let i = 0; i < flat.length; i += 7) weeks.push(flat.slice(i, i + 7))
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap gap-[3px]" role="img" aria-label="近一年阅读热力图">
-        {cells.map((c) => (
-          <div
-            key={c!.date}
-            title={`${c!.date} · ${formatDuration(c!.durationS)}`}
-            onMouseEnter={() => setHover(c)}
-            onMouseLeave={() => setHover(null)}
-            className={cn(
-              "h-2.5 w-2.5 rounded-[2px]",
-              LEVEL_BG[level(c!.durationS)],
-              c!.estimated === 1 && "ring-1 ring-inset ring-amber-400/70"
-            )}
-          />
+      <div
+        className="flex gap-[3px] overflow-x-auto"
+        role="img"
+        aria-label="近一年阅读热力图"
+      >
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-[3px]">
+            {Array.from({ length: 7 }).map((_, di) => {
+              const c = week[di] ?? null
+              if (!c) return <div key={di} className="h-2.5 w-2.5" />
+              return (
+                <div
+                  key={c.date}
+                  title={`${c.date} · ${formatDuration(c.durationS)}`}
+                  onMouseEnter={() => setHover(c)}
+                  onMouseLeave={() => setHover(null)}
+                  className={cn(
+                    "h-2.5 w-2.5 rounded-[2px]",
+                    LEVEL_BG[level(c.durationS)],
+                    c.estimated === 1 && "ring-1 ring-inset ring-amber-400/70"
+                  )}
+                />
+              )
+            })}
+          </div>
         ))}
       </div>
       {hover && (
@@ -1416,6 +1482,12 @@ export default function StatsPage() {
               <StatCard value={String(data.summary.activeDays)} label="活跃天数" />
               <StatCard value={formatDuration(data.summary.thisWeekS)} label="本周时长" />
               <StatCard value={formatDuration(data.summary.thisMonthS)} label="本月时长" />
+              {data.summary.trackedSince != null && (
+                <StatCard
+                  value={formatDateTime(data.summary.trackedSince)}
+                  label="记录始于"
+                />
+              )}
             </section>
 
             <section>
@@ -1543,20 +1615,25 @@ git commit -m "feat(web): add StatsPage with heatmap, streak, time-of-day, top i
 - Modify: `Dockerfile`（`ENV TZ`）
 - Modify: `AGENTS.md`（环境变量表 + API 表）
 
-- [ ] **Step 1: Dockerfile TZ**
+- [ ] **Step 1: runner 阶段装 tzdata 并设 TZ**
 
-`Dockerfile` 现有 `ENV` 块（`ENV DATA_DIR=/data` 之后）加：
+`oven/bun:1.3`（Debian 系）不一定带 tzdata；仅 `ENV TZ=` 时 SQLite `local time` 仍可能按 UTC → 热力图/连读错位。在 `Dockerfile` 的 **runner 阶段、`USER bun` 之前**（root 权限）装 tzdata 并设 TZ：把下块插在 runner 阶段 `RUN mkdir -p /data && chown -R bun:bun /data` 这一行之前：
 
 ```dockerfile
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+  && rm -rf /var/lib/apt/lists/*
 ENV TZ=Asia/Shanghai
 ```
+
+> 阶段末尾原有的 `USER bun` 在后，故运行身份仍是 `bun`。手测：`docker run --rm purifier date` 与容器内 `SELECT date('now','localtime')` 都应是上海日。
 
 - [ ] **Step 2: AGENTS.md 环境变量表**
 
 环境变量表加一行（按表格式）：
 
 ```markdown
-| `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致 |
+| `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致（镜像需含 tzdata，见 Dockerfile runner 阶段） |
 ```
 
 - [ ] **Step 3: AGENTS.md API 表**
@@ -1571,7 +1648,10 @@ API 表追加两行（保持现有表格列：路径 / 参数 / 行为）：
 - [ ] **Step 4: 验证**
 
 Run: `bun run typecheck && bun run build`
-Expected: 无错误（文档变更不影响构建）。
+Expected: 无错误（文档/构建变更不影响类型检查）。
+
+Run: `docker build -t purifier:latest . && docker run --rm purifier:latest date`
+Expected: 容器时间为上海时区（`CST` / `+08`）；镜像内 tzdata 已装。
 
 - [ ] **Step 5: Commit**
 
@@ -1582,20 +1662,28 @@ git commit -m "docs(stats): set container TZ and document stats API"
 
 ---
 
-## Self-Review（写完计划后自查结果）
+## Self-Review（含 plan-review 修订核对）
 
-**Spec coverage：**
+**Spec / plan-review 覆盖：**
 - 会话日志（篇/日/时段/时长）→ T1 表 + T2 recordSession + T6 hook。✓
-- 仅可见时计 + 目录页禁用 → T6 hook（visibility）+ T7 enabled 条件（isToc 排除）。✓
+- 仅可见时计 + 目录页禁用 → T6（visibility + 无条件 accumulate）+ T7 enabled（isToc 排除）。✓
 - 回填活跃日、不伪造时长 → T1 回填（estimated=1, duration_s NULL）+ T3 calendar estimated 规则。✓
-- `/stats` + 顶栏导航（独立页）→ T8 routes/NAV_ITEMS/App + T9 StatsPage。✓
+- `/stats` + 顶栏导航（独立页）→ T8 + T9。✓
 - 站点控件 all|1|2 不复用 useSetSite → T9 自绘控件。✓
 - 服务端一次聚合 → T3 getStats + T5 handleStats。✓
 - 进 export → T4。✓
-- 热力图/连读/时段/TOP/最近/库存 → T3 数据 + T9 渲染。✓
-- 归因到 started_at（I1）、estimated（I2）、title 时序（I3）、clamp+assertSafeId+startedAt 上界（I4）、清历史不级联（I5，实现上 deleteItem 不动 reading_sessions，天然满足）、inventory×site（I6）、回填密度说明（I1 注释）、Docker TZ（I8）、改动面（本文 File Structure + 各 Task）、topItems.title argMax（I10）。✓
-- `formatDuration`、热力图自建含空日、export key=`reading_sessions`、StrictMode 注记 → 各 Task。✓
+- 板块齐全（含「记录始于」）→ T3 数据 + T9 渲染。✓
+- **plan-review C1** hidden 不丢段：T6 `accumulate` 无条件、`flush` 先取 `wallStart` 再累加。✓
+- **plan-review C2** startedAt 用段起点墙钟（`segStartWall`）→ T6。✓
+- **plan-review C3** `ItemKind` 不从 routes 引：T6/T8 用 `"post" | "book"` 字面量、仅引 `SiteId`。✓
+- **plan-review I1** 混合日 estimated：T3 测试 08-12 同时插回填+真实 → `estimated: 0`。✓
+- **plan-review I2** groups 全局：T3 测试 `upsertGroup` 后 `getStats({site:"2"}).inventory.groups === 1`。✓
+- **plan-review I3** 热力图 7×N 周对齐：T9 `StatsHeatmap` 按周日对齐 + 首 padding。✓
+- **plan-review I4** 记录始于：T9 概览第 7 卡（`trackedSince != null` 才渲染）。✓
+- **plan-review I5** tzdata：T10 runner 阶段 root 装 tzdata + `ENV TZ`，`USER bun` 在后。✓
+- **plan-review I6** File Structure 列 `stats-heatmap.tsx`。✓
+- 归因到 started_at、estimated 规则、clamp+assertSafeId+startedAt 上界、清历史不级联（+T2「sessions survive deleteItem」测试锁定）、inventory×site、topItems.title argMax、export key=`reading_sessions`（含 `id`）、API title 入库前 trim → 各 Task。✓
 
-**Placeholder scan：** 无 TBD/TODO；API handler 中 `resolveSite` 返回结构给了一致性备注（按现有签名调用），非占位。
+**Placeholder scan：** 无 TBD/TODO；`resolveSite(id?): Extractor` 已按真实签名调用（仅校验、传 site 字符串）。
 
-**Type consistency：** `ReadingSessionInput`、`StatsResult` 及子类型在 T2/T3 定义，T5（API）/T9（StatsPage 内联类型）消费，字段名（`itemId` 入参 ↔ `item_id` 列；`startedAt`/`durationS` camel）一致；`recordSession` 签名 T2 定义、T5 调用一致；`getStats({site?})` T3 定义、T5 调用一致；`useReadingSession({site,kind,id,title,enabled})` T6 定义、T7 调用一致。
+**Type consistency：** `ReadingSessionInput` / `StatsResult` 及子类型在 T2/T3 定义，T5（API）/T9（内联类型）消费；`recordSession` / `getStats({site?})` 跨 T2/T3/T5 一致；hook 用 `kind: "post" | "book"` 字面量（与 web 现有 `useReadingProgress` 一致，不引 `ItemKind`），`useReadingSession({site,kind,id,title,enabled})` T6 定义、T7 调用一致；`exportBackup.reading_sessions` 类型含 `id` 与 `SELECT *` 对齐。
