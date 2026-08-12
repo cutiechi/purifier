@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS character_names (
   created_at  INTEGER NOT NULL,
   PRIMARY KEY (scope_type, scope_id, name)
 );
+
+CREATE TABLE IF NOT EXISTS reading_sessions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  site        TEXT    NOT NULL DEFAULT '1',
+  kind        TEXT    NOT NULL CHECK (kind IN ('post', 'book')),
+  item_id     TEXT    NOT NULL,
+  title       TEXT    NOT NULL,
+  started_at  INTEGER NOT NULL,
+  duration_s  INTEGER,
+  estimated   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_started ON reading_sessions (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_item    ON reading_sessions (site, kind, item_id);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */
@@ -250,6 +263,43 @@ export function openDatabase(dataDir: string): Database {
         "CREATE UNIQUE INDEX group_items_tid_unique ON group_items(tid)"
       )
     })()
+  }
+
+  // 4. reading_sessions 回填：表为空且 items 非空时，按 first_seen_at / last_visited_at
+  //    补活跃日（duration_s NULL, estimated 1）。幂等：表非空跳过。不按 visit_count 插值。
+  const sessionsEmpty = (
+    db.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as { n: number }
+  ).n
+  if (sessionsEmpty === 0) {
+    const itemsCount = (
+      db.query("SELECT COUNT(*) AS n FROM items").get() as { n: number }
+    ).n
+    if (itemsCount > 0) {
+      db.transaction(() => {
+        const insert = db.query(
+          `INSERT INTO reading_sessions (site, kind, item_id, title, started_at, duration_s, estimated)
+           VALUES (?1, ?2, ?3, ?4, ?5, NULL, 1)`
+        )
+        const rows = db
+          .query(
+            "SELECT site, kind, id, title, first_seen_at, last_visited_at FROM items"
+          )
+          .all() as {
+          site: string
+          kind: string
+          id: string
+          title: string
+          first_seen_at: number
+          last_visited_at: number
+        }[]
+        for (const r of rows) {
+          insert.run(r.site, r.kind, r.id, r.title, r.first_seen_at)
+          if (r.last_visited_at !== r.first_seen_at) {
+            insert.run(r.site, r.kind, r.id, r.title, r.last_visited_at)
+          }
+        }
+      })()
+    }
   }
   return db
 }

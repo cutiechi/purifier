@@ -29,6 +29,7 @@ describe("openDatabase", () => {
       "items",
       "job_logs",
       "jobs",
+      "reading_sessions",
       "tags",
     ])
     // 新库直接是 site 主键
@@ -50,6 +51,36 @@ describe("openDatabase", () => {
     const fk = db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }
     expect(fk.foreign_keys).toBe(1)
     db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("backfills reading_sessions from items on reopen", () => {
+    const dir = tempDir()
+    const db1 = openDatabase(dir)
+    const s1 = new Store(db1, () => 1000)
+    s1.recordVisit("1", "post", "a", "A", "/read/a") // first=last=1000
+    new Store(db1, () => 5000).recordVisit("1", "post", "a", "A", "/read/a") // last=5000
+    db1.close()
+
+    const db2 = openDatabase(dir) // 触发回填
+    const rows = db2
+      .query(
+        "SELECT started_at, duration_s, estimated FROM reading_sessions ORDER BY started_at"
+      )
+      .all() as { started_at: number; duration_s: number | null; estimated: number }[]
+    expect(rows).toEqual([
+      { started_at: 1000, duration_s: null, estimated: 1 },
+      { started_at: 5000, duration_s: null, estimated: 1 },
+    ])
+
+    // 幂等：再次打开不重复回填
+    db2.close()
+    const db3 = openDatabase(dir)
+    const n = (
+      db3.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as { n: number }
+    ).n
+    expect(n).toBe(2)
+    db3.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
