@@ -21,6 +21,7 @@ FROM ${BUN_IMAGE} AS web-builder
 WORKDIR /app
 COPY --from=monorepo-deps /app/ ./
 COPY apps/web ./apps/web
+COPY packages/core ./packages/core
 COPY packages/ui ./packages/ui
 COPY packages/typescript-config ./packages/typescript-config
 RUN cd apps/web && bunx vite build
