@@ -89,15 +89,12 @@ describe("characters", () => {
       title: "T",
       items: [{ tid: "1", title: "a" }],
     })
-    store.addCharacter(
-      { type: "group", id: String(g.id) },
-      "甲"
-    )
+    store.addCharacter({ type: "group", id: String(g.id) }, "甲")
     const r = store.removeGroupItems(g.id, ["1"])
     expect(r.deleted).toBe(true)
-    expect(
-      store.listCharacters({ type: "group", id: String(g.id) })
-    ).toEqual([])
+    expect(store.listCharacters({ type: "group", id: String(g.id) })).toEqual(
+      []
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -133,9 +130,7 @@ describe("characters", () => {
     }
     // 整批回滚：组 b 不应存在，tid 2 也不应进任何组
     expect(store.listGroups().map((g) => g.key)).toEqual(["a"])
-    const orphan = store
-      .listGroups()
-      .flatMap((g) => g.items.map((i) => i.tid))
+    const orphan = store.listGroups().flatMap((g) => g.items.map((i) => i.tid))
     expect(orphan).toEqual(["1"])
     expect(store.resolveCharacterScope("post", "2").type).toBe("post")
     rmSync(dir, { recursive: true, force: true })
@@ -168,9 +163,9 @@ describe("characters", () => {
     store.addCharacter({ type: "group", id: String(g.id) }, "组内")
     expect(store.resolveCharacterScope("post", "1").type).toBe("group")
     expect(
-      store.listCharacters(store.resolveCharacterScope("post", "1")).map(
-        (c) => c.name
-      )
+      store
+        .listCharacters(store.resolveCharacterScope("post", "1"))
+        .map((c) => c.name)
     ).toEqual(["组内"])
     store.removeGroupItems(g.id, ["1"])
     expect(store.resolveCharacterScope("post", "1")).toEqual({

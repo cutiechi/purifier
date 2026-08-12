@@ -1,4 +1,5 @@
 import type { Store } from "../../storage/store"
+import { ExtractorError } from "../../extractor/types"
 import { parseListTitle } from "../../title-parse"
 import type { JobContext, JobHandler, JobResult } from "../handler"
 import { sleep } from "../sleep"
@@ -37,7 +38,10 @@ export class ArchiveAutoGroupJob implements JobHandler {
         : 2
 
     const posts = this.store.listAllArchivePosts(site)
-    ctx.log("info", `scanned ${posts.length} archive posts (minMembers=${minMembers})`)
+    ctx.log(
+      "info",
+      `scanned ${posts.length} archive posts (minMembers=${minMembers})`
+    )
 
     type Bucket = {
       key: string
@@ -67,7 +71,8 @@ export class ArchiveAutoGroupJob implements JobHandler {
       if (!b) {
         b = {
           key,
-          title: stripTrailingChapterMarker(parsed.title || p.title).trim() || key,
+          title:
+            stripTrailingChapterMarker(parsed.title || p.title).trim() || key,
           author: parsed.author,
           genre: parsed.genre,
           items: [],
@@ -88,6 +93,7 @@ export class ArchiveAutoGroupJob implements JobHandler {
     let groupsUpserted = 0
     let membersLinked = 0
     let skippedSingles = 0
+    let skippedConflicts = 0
     let i = 0
     const eligible = [...buckets.values()].filter(
       (b) => b.items.length >= minMembers
@@ -100,16 +106,34 @@ export class ArchiveAutoGroupJob implements JobHandler {
         break
       }
       b.items.sort((a, c) => Number(a.tid) - Number(c.tid))
-      this.store.upsertGroup({
-        key: b.key,
-        title: b.title,
-        items: b.items,
-        author: b.author,
-        genre: b.genre,
-      })
-      groupsUpserted++
-      membersLinked += b.items.length
+      let grouped = false
+      try {
+        this.store.upsertGroup({
+          key: b.key,
+          title: b.title,
+          items: b.items,
+          author: b.author,
+          genre: b.genre,
+        })
+        grouped = true
+      } catch (e) {
+        // 一帖一组：tid 已被用户放进其它组 → 跳过整组，不让自动分组与手动分组打架；
+        // 其余异常照常抛出（任务 failed）
+        if (e instanceof ExtractorError && e.statusCode === 409) {
+          ctx.log(
+            "warn",
+            `skip group "${b.title}": tid already in another group`
+          )
+          skippedConflicts++
+        } else {
+          throw e
+        }
+      }
       i++
+      if (grouped) {
+        groupsUpserted++
+        membersLinked += b.items.length
+      }
       // 每组 upsert 后让出，SQLite 写密集时仍可响应其它 API
       if (i % 3 === 0) {
         await sleep(0, ctx.signal)
@@ -135,13 +159,14 @@ export class ArchiveAutoGroupJob implements JobHandler {
       groupsUpserted,
       membersLinked,
       skippedSingles,
+      skippedConflicts,
       minMembers,
       site,
       aborted: ctx.signal.aborted,
     }
     ctx.log(
       "info",
-      `done: upserted ${groupsUpserted} groups, ${membersLinked} members, skipped ${skippedSingles} singles`
+      `done: upserted ${groupsUpserted} groups, ${membersLinked} members, skipped ${skippedSingles} singles, ${skippedConflicts} conflicts`
     )
     return result
   }

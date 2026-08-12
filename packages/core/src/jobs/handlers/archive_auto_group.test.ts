@@ -53,16 +53,18 @@ describe("ArchiveAutoGroupJob", () => {
     expect(result.skippedSingles).toBe(1)
     const groups = store.listGroups()
     expect(groups).toHaveLength(1)
-    expect(groups[0]!.items.map((i) => i.tid).sort()).toEqual(["10", "11", "12"])
+    expect(groups[0]!.items.map((i) => i.tid).sort()).toEqual([
+      "10",
+      "11",
+      "12",
+    ])
     expect(groups[0]!.title).toContain("夏天的花")
     rmSync(dir, { recursive: true, force: true })
   })
 
   test("site!==1 抛错", async () => {
     const { job, dir } = make()
-    await expect(
-      job.run(makeCtx({ site: "2" }).ctx)
-    ).rejects.toThrow(/site=1/)
+    await expect(job.run(makeCtx({ site: "2" }).ctx)).rejects.toThrow(/site=1/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -86,6 +88,33 @@ describe("ArchiveAutoGroupJob", () => {
     expect(r2.groupsUpserted).toBe(1)
     expect(r2.membersLinked).toBe(3)
     expect(store.listGroups()[0]!.items).toHaveLength(3)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("tid 已在其它组 → 跳过该组，任务不失败", async () => {
+    const { job, store, dir } = make()
+    // 用户已手动把 tid 10 放进自己的组
+    store.upsertGroup({
+      key: "user-group",
+      title: "用户组",
+      items: [{ tid: "10", title: "x" }],
+    })
+    store.upsertArchivePosts(
+      "1",
+      [
+        { tid: "10", title: "【书B】（1）作者：丙" },
+        { tid: "11", title: "【书B】（2）作者：丙" },
+        { tid: "12", title: "【书B】（3）作者：丙" },
+      ],
+      1_000
+    )
+    const { ctx, logs } = makeCtx({ site: "1", minMembers: 2 })
+    const result = await job.run(ctx)
+    // 整组跳过（含未冲突的 11/12，不抢用户 tid），任务正常完成
+    expect(result.groupsUpserted).toBe(0)
+    expect(result.skippedConflicts).toBe(1)
+    expect(logs.some((l) => l.includes("already in another group"))).toBe(true)
+    expect(store.listGroups().map((g) => g.key)).toEqual(["user-group"])
     rmSync(dir, { recursive: true, force: true })
   })
 })
