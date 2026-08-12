@@ -35,3 +35,13 @@ export function formatDateTime(ms: number): string {
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+export function formatDuration(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "0m"
+  const m = Math.floor(s / 60)
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  if (h > 0) return `${h}h ${mm}m`
+  if (m > 0) return `${m}m ${Math.floor(s % 60)}s`
+  return `${Math.floor(s)}s`
+}
