@@ -5,7 +5,8 @@ import { cn } from "@workspace/ui/lib/utils"
 
 /**
  * 人物面板（Settings Popover 内「人物」section）：
- * 高亮总开关 + 名单（色点 + 名 + 删除）+ 空态引导 + 错误重试。
+ * 高亮总开关 + 名单（色点 + 名 + 删除）+ 空态引导 + 错误重试 +
+ * 增删失败提示（无重试按钮，用户重新操作即可）。
  */
 export function CharacterPanel({
   characters,
@@ -14,6 +15,7 @@ export function CharacterPanel({
   onRemove,
   error,
   onRetry,
+  mutationError,
 }: {
   characters: CharacterName[]
   enabled: boolean
@@ -21,6 +23,8 @@ export function CharacterPanel({
   onRemove: (name: string) => void
   error: string
   onRetry: () => void
+  /** PUT/DELETE 失败提示（本地名单已回滚/不变，直接展示） */
+  mutationError?: string
 }) {
   return (
     <div className="flex flex-col gap-2.5">
@@ -60,39 +64,48 @@ export function CharacterPanel({
             重试
           </button>
         </div>
-      ) : characters.length === 0 ? (
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          还没有人物。在正文中选中人名即可标记，全文同名会按颜色高亮。
-        </p>
       ) : (
-        <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto pr-0.5">
-          {characters.map((c) => (
-            <li key={c.name} className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className={cn(
-                  "size-2.5 shrink-0 rounded-full",
-                  `character-mark--${colorSlot(c.colorIndex)}`
-                )}
-                style={{ background: "var(--character-mark-bg)" }}
-              />
-              <span
-                className="min-w-0 flex-1 truncate text-sm text-foreground"
-                title={c.name}
-              >
-                {c.name}
-              </span>
-              <button
-                type="button"
-                aria-label={`删除人物 ${c.name}`}
-                onClick={() => onRemove(c.name)}
-                className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-              >
-                <IconClose size={12} />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          {mutationError && (
+            <div className="rounded-lg bg-destructive/8 px-2.5 py-2 text-xs text-destructive">
+              <span className="leading-relaxed">{mutationError}</span>
+            </div>
+          )}
+          {characters.length === 0 ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              还没有人物。在正文中选中人名即可标记，全文同名会按颜色高亮。
+            </p>
+          ) : (
+            <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto pr-0.5">
+              {characters.map((c) => (
+                <li key={c.name} className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-2.5 shrink-0 rounded-full",
+                      `character-mark--${colorSlot(c.colorIndex)}`
+                    )}
+                    style={{ background: "var(--character-mark-bg)" }}
+                  />
+                  <span
+                    className="min-w-0 flex-1 truncate text-sm text-foreground"
+                    title={c.name}
+                  >
+                    {c.name}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`删除人物 ${c.name}`}
+                    onClick={() => onRemove(c.name)}
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+                  >
+                    <IconClose size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   )

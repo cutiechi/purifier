@@ -55,6 +55,24 @@ export default function BookPage() {
     name: string
     rect: DOMRect
   } | null>(null)
+  const [mutationError, setMutationError] = useState("")
+  // PUT/DELETE 失败时展示错误；成功后清除（add 成功才更新名单，remove 失败已回滚）
+  const handleAdd = async (name: string) => {
+    try {
+      await add(name)
+      setMutationError("")
+    } catch (e) {
+      setMutationError(e instanceof Error ? e.message : "标记失败")
+    }
+  }
+  const handleRemove = async (name: string) => {
+    try {
+      await remove(name)
+      setMutationError("")
+    } catch (e) {
+      setMutationError(e instanceof Error ? e.message : "删除失败")
+    }
+  }
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [loadedKey, setLoadedKey] = useState("")
@@ -141,9 +159,13 @@ export default function BookPage() {
           characters={characters}
           enabled={enabled}
           setEnabled={setEnabled}
-          onRemove={(n) => void remove(n)}
+          onRemove={(n) => void handleRemove(n)}
           error={charactersError}
-          onRetry={() => void reloadCharacters()}
+          mutationError={mutationError}
+          onRetry={() => {
+            setMutationError("")
+            void reloadCharacters()
+          }}
         />
       }
     />
@@ -303,8 +325,8 @@ export default function BookPage() {
       </AsyncBody>
       <CharacterSelectionToolbar
         characters={characters}
-        onAdd={(n) => void add(n)}
-        onRemove={(n) => void remove(n)}
+        onAdd={(n) => void handleAdd(n)}
+        onRemove={(n) => void handleRemove(n)}
       />
       {markPopup && (
         <CharacterMarkPopover
@@ -314,7 +336,7 @@ export default function BookPage() {
             characters.find((c) => c.name === markPopup.name)?.colorIndex
           }
           onRemove={() => {
-            void remove(markPopup.name)
+            void handleRemove(markPopup.name)
             setMarkPopup(null)
           }}
           onClose={() => setMarkPopup(null)}
