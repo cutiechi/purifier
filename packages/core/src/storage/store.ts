@@ -238,7 +238,12 @@ export class Store {
     const runScoped = <T>(sql: string, extra: SQLQueryBindings[] = []): T[] =>
       (this.db.query(sql).all(...(site ? [site] : []), ...extra) as T[])
 
-    const sinceMs = this.now() - 365 * 86_400_000
+    // 日历窗对齐本地日边界（热力图按本地日渲染 365 格）：窗起点 = 今日本地零点 − 364 天
+    const nowLocal = new Date(this.now())
+    const todayMid = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate())
+    const sinceStart = new Date(todayMid)
+    sinceStart.setDate(sinceStart.getDate() - 364)
+    const sinceMs = sinceStart.getTime()
 
     // calendar（近 365 天）
     const calRows = runScoped<{

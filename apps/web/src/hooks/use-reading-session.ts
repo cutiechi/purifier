@@ -93,7 +93,7 @@ export function useReadingSession(opts: {
       if (!visible()) flush()
       else startSegment()
     }
-    startSegment()
+    if (visible()) startSegment() // 页面隐藏时（后台标签页加载完成）不武装段锚点：不产生幻影会话；可见后由 onVisibility 重武装
     const timer = setInterval(flush, FLUSH_INTERVAL_MS)
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pagehide", flush)
