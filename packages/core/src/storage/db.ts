@@ -102,6 +102,15 @@ CREATE TABLE IF NOT EXISTS archive_cursors (
   pages      INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS character_names (
+  scope_type  TEXT NOT NULL,
+  scope_id    TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  color_index INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (scope_type, scope_id, name)
+);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */
@@ -203,6 +212,43 @@ export function openDatabase(dataDir: string): Database {
     db.exec(
       "CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC)"
     )
+    })()
+  }
+
+  // 3. group_items.tid 全局唯一（一帖一组）
+  //    不可逆迁移：先删重复（保留每组 tid 中 group_id 最小者），再建唯一索引。
+  //    幂等：索引已存在则跳过。对真实 data/purifier.db 动手前可先跑
+  //    SELECT tid, COUNT(*) AS n FROM group_items GROUP BY tid HAVING n > 1;
+  const tidUnique = db
+    .query(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='group_items_tid_unique'"
+    )
+    .get()
+  if (!tidUnique) {
+    db.transaction(() => {
+      const before = (
+        db.query("SELECT COUNT(*) AS n FROM group_items").get() as { n: number }
+      ).n
+      db.exec(`
+        DELETE FROM group_items
+        WHERE EXISTS (
+          SELECT 1 FROM group_items o
+          WHERE o.tid = group_items.tid
+            AND o.group_id < group_items.group_id
+        )
+      `)
+      const after = (
+        db.query("SELECT COUNT(*) AS n FROM group_items").get() as { n: number }
+      ).n
+      const removed = before - after
+      if (removed > 0) {
+        console.log(
+          `[db] removed ${removed} duplicate group_items rows for tid UNIQUE`
+        )
+      }
+      db.exec(
+        "CREATE UNIQUE INDEX group_items_tid_unique ON group_items(tid)"
+      )
     })()
   }
   return db

@@ -22,6 +22,7 @@ describe("openDatabase", () => {
     expect(rows.map((r) => r.name)).toEqual([
       "archive_cursors",
       "archive_posts",
+      "character_names", // ← 按字母序插在 archive_posts 与 favorites 之间
       "favorites",
       "group_items",
       "groups",
@@ -56,6 +57,73 @@ describe("openDatabase", () => {
     const dir = tempDir()
     openDatabase(dir).close()
     const db = openDatabase(dir) // 不抛错即通过
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("character_names table and group_items tid unique", () => {
+    const dir = tempDir()
+    const db = openDatabase(dir)
+    const ddl = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='character_names'"
+      )
+      .get() as { sql: string } | null
+    expect(ddl?.sql).toMatch(/color_index/)
+    expect(ddl?.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*scope_type,\s*scope_id,\s*name/i)
+
+    const idx = db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='group_items_tid_unique'"
+      )
+      .get() as { name: string } | null
+    expect(idx?.name).toBe("group_items_tid_unique")
+
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("migrates duplicate group_items tids keeping min group_id", () => {
+    const dir = tempDir()
+    // tempDir() 已是存在的空目录，不要再 mkdirSync
+    const dbPath = join(dir, "purifier.db")
+    const raw = new Database(dbPath)
+    raw.exec(`
+      CREATE TABLE groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        author TEXT, genre TEXT,
+        favorited INTEGER NOT NULL DEFAULT 0,
+        favorited_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE group_items (
+        group_id INTEGER NOT NULL,
+        tid TEXT NOT NULL,
+        title TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, tid)
+      );
+      INSERT INTO groups (id, key, title, favorited, created_at, updated_at)
+        VALUES (1, 'a', 'A', 0, 1, 1), (2, 'b', 'B', 0, 1, 1);
+      INSERT INTO group_items (group_id, tid, title, added_at) VALUES
+        (1, '100', 'x', 1), (2, '100', 'y', 1);
+    `)
+    raw.close()
+
+    const db = openDatabase(dir)
+    const rows = db
+      .query("SELECT group_id, tid FROM group_items WHERE tid='100'")
+      .all() as { group_id: number; tid: string }[]
+    expect(rows).toEqual([{ group_id: 1, tid: "100" }])
+    const idx = db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='group_items_tid_unique'"
+      )
+      .get()
+    expect(idx).toBeTruthy()
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
