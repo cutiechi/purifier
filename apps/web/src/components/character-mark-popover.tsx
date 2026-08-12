@@ -24,7 +24,8 @@ export function CharacterMarkPopover({
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // 先给占位坐标让浮条挂载，useLayoutEffect 在绘制前测宽高并重定位
+  const [pos, setPos] = useState({ top: 0, left: 0 })
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -57,8 +58,6 @@ export function CharacterMarkPopover({
       document.removeEventListener("pointerdown", onPointerDown)
     }
   }, [onClose])
-
-  if (!pos) return null
 
   return (
     <div

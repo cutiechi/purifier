@@ -37,7 +37,8 @@ export function CharacterSelectionToolbar({
   onRemove: (name: string) => void
 }) {
   const [anchor, setAnchor] = useState<Anchor | null>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // 先给占位坐标让浮条挂载，useLayoutEffect 在绘制前测宽高并重定位
+  const [pos, setPos] = useState({ top: 0, left: 0 })
   const barRef = useRef<HTMLDivElement>(null)
 
   const handleSelection = useCallback((e: MouseEvent | TouchEvent) => {
@@ -114,13 +115,12 @@ export function CharacterSelectionToolbar({
     }
   }, [anchor])
 
-  if (!anchor || !pos) return null
+  if (!anchor) return null
 
   const exists = characters.some((c) => c.name === anchor.name)
   const act = () => {
     const name = anchor.name
     setAnchor(null)
-    setPos(null)
     if (exists) onRemove(name)
     else onAdd(name)
   }
