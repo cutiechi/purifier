@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openDatabase } from "./db"
@@ -836,6 +836,26 @@ describe("computeStreaks", () => {
 })
 
 describe("getStats", () => {
+  // TZ env 已设置时 JS 与 SQLite 天然一致（都跟随 env）；bun test 在 TZ 未设置时强制 JS Date 为 UTC，
+  // 而 SQLite 'localtime' 跟随系统 TZ（JS 侧改 process.env.TZ 不影响 SQLite）。
+  // 因此把 JS 固定到 SQLite 实际使用的时区（优先 env，其次系统 zoneinfo），日期断言与机器/CI 时区无关。
+  let systemTz = process.env.TZ ?? ""
+  if (!systemTz) {
+    try {
+      const link = readlinkSync("/etc/localtime")
+      const marker = "/zoneinfo/"
+      const i = link.indexOf(marker)
+      if (i !== -1) systemTz = link.slice(i + marker.length)
+      else throw new Error("unexpected localtime target")
+    } catch {
+      try {
+        systemTz = readFileSync("/etc/timezone", "utf8").trim()
+      } catch {
+        // 保持 UTC（CI 默认）
+      }
+    }
+    process.env.TZ = systemTz || "UTC"
+  }
   function setup(nowMs: number) {
     const dir = tempDir()
     const db = openDatabase(dir)
