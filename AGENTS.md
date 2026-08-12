@@ -98,6 +98,8 @@ packages/typescript-config/               # base / react-library 配置
 | `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 tid）、`order` | `{ items, nextPage?, total }` 归档目录                                                                      |
 | `GET /api/me/archive/status`             | `site`（默认 1）                                            | `{ total, maxTid, cursor }` 归档库规模与续跑游标                                                            |
 | `GET /api/me/export`                     | 无                                                          | 下载 JSON 备份（items/favorites/tags/groups/archive_posts/character_names/cursors）                         |
+| `POST /api/me/sessions`                  | body `{ site?, kind, id, title, startedAt, durationS }`    | 记一段阅读会话 `{ ok }`；`id` 走 `assertSafeId`，`durationS<3` 丢弃、`>300` clamp，`startedAt>now+5m` 400 |
+| `GET /api/me/stats`                      | `site?`                                                     | `{ summary, calendar, timeOfDay, topItems, recentSessions, inventory }`；省略 `site` 跨站 |
 
 错误处理：
 
@@ -120,6 +122,7 @@ packages/typescript-config/               # base / react-library 配置
 | `WEB_DIST`                   | `apps/web/dist`         | SPA 静态目录；存在时才托管                   |
 | `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data` |
 | `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy`           |
+| `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致（镜像需含 tzdata，见 Dockerfile runner 阶段） |
 | `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                            |
 
 ## 常见改动路径

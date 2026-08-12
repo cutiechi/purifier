@@ -64,6 +64,10 @@ COPY --from=api-deps /app/packages/typescript-config ./packages/typescript-confi
 COPY --from=web-builder /app/apps/web/dist ./apps/web/dist
 
 EXPOSE 3000
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+  && rm -rf /var/lib/apt/lists/*
+ENV TZ=Asia/Shanghai
 RUN mkdir -p /data && chown -R bun:bun /data
 USER bun
 CMD ["bun", "run", "apps/api/src/index.ts"]
