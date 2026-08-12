@@ -724,3 +724,88 @@ test("clearHistory clears read_progress for all rows", () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+describe("recordSession", () => {
+  function setup() {
+    const dir = tempDir()
+    const db = openDatabase(dir)
+    const store = new Store(db)
+    return { store, db, dir }
+  }
+  test("inserts a real segment", () => {
+    const { store, db, dir } = setup()
+    store.recordSession({
+      site: "1",
+      kind: "post",
+      itemId: "a",
+      title: "A",
+      startedAt: 1000,
+      durationS: 42,
+    })
+    const row = db
+      .query(
+        "SELECT duration_s, estimated FROM reading_sessions WHERE item_id='a'"
+      )
+      .get() as { duration_s: number; estimated: number }
+    expect(row).toEqual({ duration_s: 42, estimated: 0 })
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  test("discards segments under 3s", () => {
+    const { store, db, dir } = setup()
+    store.recordSession({
+      site: "1",
+      kind: "post",
+      itemId: "a",
+      title: "A",
+      startedAt: 1000,
+      durationS: 2,
+    })
+    const n = (
+      db.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as {
+        n: number
+      }
+    ).n
+    expect(n).toBe(0)
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  test("clamps duration over 300s", () => {
+    const { store, db, dir } = setup()
+    store.recordSession({
+      site: "1",
+      kind: "book",
+      itemId: "b",
+      title: "B",
+      startedAt: 1000,
+      durationS: 9999,
+    })
+    const row = db
+      .query("SELECT duration_s FROM reading_sessions WHERE item_id='b'")
+      .get() as { duration_s: number }
+    expect(row.duration_s).toBe(300)
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+  test("sessions survive deleteItem (no cascade)", () => {
+    const { store, db, dir } = setup()
+    store.recordVisit("1", "post", "a", "A", "/read/a")
+    store.recordSession({
+      site: "1",
+      kind: "post",
+      itemId: "a",
+      title: "A",
+      startedAt: 10,
+      durationS: 9,
+    })
+    store.deleteItem("1", "post", "a")
+    const n = (
+      db
+        .query("SELECT COUNT(*) AS n FROM reading_sessions WHERE item_id='a'")
+        .get() as { n: number }
+    ).n
+    expect(n).toBe(1) // 设计：清历史不级联删会话（冗余 title 保留）
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

@@ -18,6 +18,7 @@ import {
   ListItem,
   ListQuery,
   ListResult,
+  ReadingSessionInput,
   TagCount,
   PAGE_SIZE,
 } from "./types"
@@ -161,6 +162,18 @@ export class Store {
       read_progress: row.read_progress,
       lastChapter: row.last_chapter,
     }
+  }
+
+  /** 记录一段真实阅读：durationS<3 丢弃（去噪），>300 clamp 到 300（防脏数据）。 */
+  recordSession(input: ReadingSessionInput): void {
+    if (input.durationS < 3) return
+    const durationS = Math.min(input.durationS, 300)
+    this.db
+      .query(
+        `INSERT INTO reading_sessions (site, kind, item_id, title, started_at, duration_s, estimated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)`
+      )
+      .run(input.site, input.kind, input.itemId, input.title, input.startedAt, durationS)
   }
 
   /** 收藏；对象必须已存在于 items，否则返回 false（API 层映射 404） */

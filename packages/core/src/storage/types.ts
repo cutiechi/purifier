@@ -149,3 +149,12 @@ export interface CharacterName {
   name: string
   colorIndex: number
 }
+
+export interface ReadingSessionInput {
+  site: SiteId
+  kind: ItemKind
+  itemId: string
+  title: string
+  startedAt: number
+  durationS: number
+}
