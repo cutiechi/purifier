@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { type SiteId } from "@/lib/routes"
+import { api, type SiteId } from "@/lib/routes"
 
 const FLUSH_INTERVAL_MS = 60_000
 const MIN_SEGMENT_S = 3
@@ -67,7 +67,7 @@ export function useReadingSession(opts: {
           startedAt,
           durationS,
         })
-        const url = "/api/me/sessions"
+        const url = api.meSessions
         try {
           if (navigator.sendBeacon) {
             navigator.sendBeacon(

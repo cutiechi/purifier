@@ -46,6 +46,7 @@ export const routes = {
   /** 全站目录（原归档） */
   archive: "/archive",
   jobs: "/jobs",
+  stats: "/stats",
 } as const
 
 /** 发现页栏目（按站过滤） */
@@ -103,6 +104,8 @@ export const api = {
   meArchive: "/api/me/archive",
   meArchiveStatus: "/api/me/archive/status",
   meExport: "/api/me/export",
+  meSessions: "/api/me/sessions",
+  meStats: "/api/me/stats",
   health: "/api/health",
 } as const
 
@@ -245,6 +248,11 @@ export const NAV_ITEMS = [
       p === routes.history ||
       p === routes.favorites ||
       p === routes.tags,
+  },
+  {
+    href: routes.stats,
+    label: "统计",
+    match: (p: string) => p === routes.stats,
   },
   {
     href: routes.jobs,

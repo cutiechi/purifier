@@ -20,6 +20,7 @@ const TagsPage = lazy(() => import("@/pages/TagsPage"))
 const GroupPage = lazy(() => import("@/pages/GroupPage"))
 const JobsPage = lazy(() => import("@/pages/JobsPage"))
 const ArchivePage = lazy(() => import("@/pages/ArchivePage"))
+const StatsPage = lazy(() => import("@/pages/StatsPage"))
 
 function PageFallback() {
   return (
@@ -187,6 +188,14 @@ export function App() {
             element={
               <RouteBoundary>
                 <ArchivePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/stats"
+            element={
+              <RouteBoundary>
+                <StatsPage />
               </RouteBoundary>
             }
           />
