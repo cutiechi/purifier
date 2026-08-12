@@ -1400,6 +1400,16 @@ export class Store {
       color_index: number
       created_at: number
     }>
+    reading_sessions: Array<{
+      id: number
+      site: string
+      kind: string
+      item_id: string
+      title: string
+      started_at: number
+      duration_s: number | null
+      estimated: number
+    }>
   } {
     const items = this.db.query("SELECT * FROM items").all()
     const favorites = this.db.query("SELECT * FROM favorites").all()
@@ -1429,6 +1439,18 @@ export class Store {
       color_index: number
       created_at: number
     }>
+    const reading_sessions = this.db
+      .query("SELECT * FROM reading_sessions ORDER BY started_at")
+      .all() as Array<{
+      id: number
+      site: string
+      kind: string
+      item_id: string
+      title: string
+      started_at: number
+      duration_s: number | null
+      estimated: number
+    }>
     return {
       version: 1,
       exportedAt: this.now(),
@@ -1446,6 +1468,7 @@ export class Store {
         updated_at: r.updated_at,
       })),
       character_names,
+      reading_sessions,
     }
   }
 

@@ -810,6 +810,19 @@ describe("recordSession", () => {
   })
 })
 
+test("exportBackup includes reading_sessions", () => {
+  const dir = tempDir()
+  const db = openDatabase(dir)
+  const store = new Store(db)
+  store.recordSession({ site: "1", kind: "post", itemId: "a", title: "A", startedAt: 7, durationS: 9 })
+  const backup = store.exportBackup()
+  expect(Array.isArray(backup.reading_sessions)).toBe(true)
+  expect(backup.reading_sessions.length).toBe(1)
+  expect(backup.reading_sessions[0]).toMatchObject({ item_id: "a", duration_s: 9 })
+  db.close()
+  rmSync(dir, { recursive: true, force: true })
+})
+
 describe("computeStreaks", () => {
   test("current streak anchors today, else yesterday", () => {
     const today = "2026-08-12"
