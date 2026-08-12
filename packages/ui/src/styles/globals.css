@@ -161,6 +161,24 @@
 .reading-body p:last-child {
   margin-bottom: 0;
 }
+.reading-body mark.character-mark {
+  color: inherit;
+  border-radius: 0.15em;
+  padding: 0 0.1em;
+  background: var(--character-mark-bg);
+}
+.character-mark--0 { --character-mark-bg: oklch(0.92 0.06 85); }
+.character-mark--1 { --character-mark-bg: oklch(0.92 0.06 160); }
+.character-mark--2 { --character-mark-bg: oklch(0.92 0.06 220); }
+.character-mark--3 { --character-mark-bg: oklch(0.92 0.06 300); }
+.character-mark--4 { --character-mark-bg: oklch(0.92 0.06 30); }
+.character-mark--5 { --character-mark-bg: oklch(0.92 0.06 350); }
+.dark .character-mark--0 { --character-mark-bg: oklch(0.35 0.06 85); }
+.dark .character-mark--1 { --character-mark-bg: oklch(0.35 0.06 160); }
+.dark .character-mark--2 { --character-mark-bg: oklch(0.35 0.06 220); }
+.dark .character-mark--3 { --character-mark-bg: oklch(0.35 0.06 300); }
+.dark .character-mark--4 { --character-mark-bg: oklch(0.35 0.06 30); }
+.dark .character-mark--5 { --character-mark-bg: oklch(0.35 0.06 350); }
 
 /* 阅读偏好滑块：webkit + moz 一致，跟随 oklch token */
 input[type="range"].reading-range {

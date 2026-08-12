@@ -6,6 +6,7 @@ import { PostMetaBar, type PostMetaFields } from "@/components/post-meta"
 import { PostCard, PostList } from "@/components/post-card"
 import { ReadingProgress } from "@/components/reading-progress"
 import { readPath } from "@/lib/routes"
+import { characterHighlight } from "@workspace/core/character-highlight"
 
 function withParagraphs(html: string): string {
   // 后端 extractPreHtml 已清洗；前端再 DOMPurify 兜底（纵深防御）。
@@ -26,14 +27,38 @@ function sanitizeBodyHtml(html: string): string {
   })
 }
 
-export function ContentBody({ html }: { html: string }) {
+export function ContentBody({
+  html,
+  characters = [],
+  highlightEnabled = true,
+  onCharacterClick,
+}: {
+  html: string
+  characters?: { name: string; colorIndex: number }[]
+  highlightEnabled?: boolean
+  onCharacterClick?: (name: string, rect: DOMRect) => void
+}) {
   const navigate = useNavigate()
-  const safeHtml = useMemo(() => sanitizeBodyHtml(html), [html])
+  const safeHtml = useMemo(() => {
+    const purified = sanitizeBodyHtml(html)
+    if (!highlightEnabled || characters.length === 0) return purified
+    return characterHighlight(purified, characters)
+  }, [html, characters, highlightEnabled])
 
   const onClick = useCallback(
     (e: React.MouseEvent<HTMLElement>) => {
       const target = e.target
       if (!(target instanceof Element)) return
+      const mark = target.closest("mark.character-mark")
+      if (mark) {
+        e.preventDefault()
+        e.stopPropagation()
+        const name = mark.textContent ?? ""
+        if (name && onCharacterClick) {
+          onCharacterClick(name, mark.getBoundingClientRect())
+        }
+        return
+      }
       const a = target.closest("a")
       if (!a) return
       const href = a.getAttribute("href")
@@ -41,7 +66,7 @@ export function ContentBody({ html }: { html: string }) {
       e.preventDefault()
       navigate(href)
     },
-    [navigate]
+    [navigate, onCharacterClick]
   )
 
   return (
@@ -76,6 +101,9 @@ export function ArticleView({
   actions,
   footer,
   progress,
+  characters,
+  highlightEnabled,
+  onCharacterClick,
 }: {
   title: string
   meta?: PostMetaFields
@@ -85,6 +113,9 @@ export function ArticleView({
   actions?: ReactNode
   footer?: ReactNode
   progress?: number
+  characters?: { name: string; colorIndex: number }[]
+  highlightEnabled?: boolean
+  onCharacterClick?: (name: string, rect: DOMRect) => void
 }) {
   return (
     <article className="rounded-2xl border border-border/80 bg-card/90 p-4 shadow-sm sm:rounded-3xl sm:p-8 md:p-10">
@@ -100,7 +131,12 @@ export function ArticleView({
 
       {meta && <PostMetaBar meta={meta} currentTid={currentTid} />}
 
-      <ContentBody html={contentHtml} />
+      <ContentBody
+        html={contentHtml}
+        characters={characters}
+        highlightEnabled={highlightEnabled}
+        onCharacterClick={onCharacterClick}
+      />
 
       {footer}
 

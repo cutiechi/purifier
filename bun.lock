@@ -28,6 +28,7 @@
       "name": "web",
       "version": "0.0.1",
       "dependencies": {
+        "@workspace/core": "workspace:*",
         "@workspace/ui": "workspace:*",
         "dompurify": "^3.4.13",
         "lucide-react": "^1.28.0",
