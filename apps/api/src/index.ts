@@ -635,6 +635,58 @@ function handleMeArchiveStatus(url: URL): Response {
   return jsonOk(store.getArchiveStatus(site), NO_STORE_HEADERS)
 }
 
+async function handleSessionsWrite(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") throw new ExtractorError("invalid json body", 400)
+  const kindRaw = "kind" in body ? body.kind : undefined
+  const idRaw = "id" in body ? body.id : undefined
+  if (kindRaw !== "post" && kindRaw !== "book") {
+    throw new ExtractorError("invalid kind", 400)
+  }
+  if (typeof idRaw !== "string") throw new ExtractorError("invalid id", 400)
+  assertSafeId(idRaw)
+  const site = "site" in body ? String(body.site) : "1"
+  resolveSite(site) // 非法 site → ExtractorError(400)
+  const titleRaw = "title" in body ? body.title : undefined
+  if (typeof titleRaw !== "string" || titleRaw.trim() === "") {
+    throw new ExtractorError("invalid title", 400)
+  }
+  const title = titleRaw.trim()
+  const startedAt = "startedAt" in body ? body.startedAt : undefined
+  if (typeof startedAt !== "number" || !Number.isFinite(startedAt) || startedAt <= 0) {
+    throw new ExtractorError("invalid startedAt", 400)
+  }
+  if (startedAt > Date.now() + 5 * 60_000) {
+    throw new ExtractorError("startedAt in future", 400)
+  }
+  const durationS = "durationS" in body ? body.durationS : undefined
+  if (typeof durationS !== "number" || !Number.isFinite(durationS) || durationS < 0) {
+    throw new ExtractorError("invalid durationS", 400)
+  }
+  // <3 丢弃 / >300 clamp 在 store 层；不写则不算一次会话
+  store.recordSession({
+    site,
+    kind: kindRaw,
+    itemId: idRaw,
+    title,
+    startedAt,
+    durationS: Math.floor(durationS),
+  })
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+function handleStats(url: URL): Response {
+  const siteParam = url.searchParams.get("site")
+  if (siteParam == null) return jsonOk(store.getStats({}), NO_STORE_HEADERS)
+  resolveSite(siteParam) // 非法 site → ExtractorError(400)
+  return jsonOk(store.getStats({ site: siteParam }), NO_STORE_HEADERS)
+}
+
 function handleMeExport(): Response {
   const backup = store.exportBackup()
   const body = JSON.stringify(backup, null, 2)
@@ -1282,6 +1334,14 @@ async function routeInner(req: Request): Promise<Response> {
       case "/api/me/progress":
         if (req.method === "PUT") return await handleProgressWrite(req)
         throw new ExtractorError("method not allowed", 405)
+      case "/api/me/sessions": {
+        if (req.method === "POST") return await handleSessionsWrite(req)
+        throw new ExtractorError("method not allowed", 405)
+      }
+      case "/api/me/stats": {
+        requireGet(req)
+        return handleStats(url)
+      }
       default:
         return jsonError("not found", 404)
     }
