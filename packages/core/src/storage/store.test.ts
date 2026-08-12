@@ -833,6 +833,11 @@ describe("computeStreaks", () => {
       )
     ).toEqual({ currentStreak: 1, longestStreak: 3 })
   })
+  test("dayBefore crosses month and year boundaries", () => {
+    expect(dayBefore("2026-03-01")).toBe("2026-02-28")
+    expect(dayBefore("2026-01-01")).toBe("2025-12-31")
+    expect(dayBefore("2024-03-01")).toBe("2024-02-29") // 闰年
+  })
 })
 
 describe("getStats", () => {
@@ -884,6 +889,13 @@ describe("getStats", () => {
     store.recordSession({ site: "2", kind: "book", itemId: "b", title: "B", startedAt: at(2026, 8, 12, 22), durationS: 120 })
     // I2：groups 无 site 列，带 site 过滤时仍全局计数
     store.upsertGroup({ key: "k", title: "G", items: [{ tid: "g1", title: "GT" }] })
+    // inventory 的 site 作用域：items/favorites/tags 按 site 计数；groups/character_names 全局。
+    // recordVisit 只写 items、不回填 reading_sessions（回填仅在 openDatabase 且会话表为空时触发）→ 不影响上面日期/时长断言
+    store.recordVisit("1", "post", "h1", "H1", "/read/h1")
+    store.recordVisit("2", "post", "h2", "H2", "/read/h2")
+    store.addFavorite("1", "post", "h1")
+    store.setTags("1", "post", "h1", ["x"])
+    store.setTags("2", "post", "h2", ["y"])
 
     const all = store.getStats()
     expect(all.summary.totalDurationS).toBe(180)
@@ -893,6 +905,9 @@ describe("getStats", () => {
     expect(all.summary.longestStreak).toBe(1)
     expect(all.summary.trackedSince).toBe(at(2026, 8, 9, 8))
     expect(all.summary.lastActiveAt).toBe(at(2026, 8, 12, 22))
+    // 本月 = 全部真实段（都在 8 月）：180；本周从周一 08-10 起：08-09 回填日（NULL 时长）被排除，仍 180
+    expect(all.summary.thisMonthS).toBe(180)
+    expect(all.summary.thisWeekS).toBe(180)
     // calendar：08-09 纯回填 estimated=1；08-12 混合（回填+真实）estimated=0、durationS=180
     const cal = Object.fromEntries(all.calendar.map((c) => [c.date, c]))
     expect(cal["2026-08-09"]).toEqual({ date: "2026-08-09", durationS: 0, estimated: 1 })
@@ -906,6 +921,11 @@ describe("getStats", () => {
     // recentSessions 只含真实段
     expect(all.recentSessions.length).toBe(2)
     expect(all.recentSessions[0]).toMatchObject({ id: "b" })
+    // inventory：h1(1)/h2(2) 两个 item，h1 收藏 1 条，tag x/y 各 1 个 → 全局计数
+    expect(all.inventory.history).toBe(2)
+    expect(all.inventory.favorites).toBe(1)
+    expect(all.inventory.tags).toBe(2)
+    expect(all.inventory.groups).toBe(1)
 
     // site 过滤：site=2 只剩 b 的 120s
     const onlyBooks = store.getStats({ site: "2" })
@@ -913,6 +933,12 @@ describe("getStats", () => {
     expect(onlyBooks.topItems.every((t) => t.site === "2")).toBe(true)
     // I2：groups 无 site 列 → 带 site=2 仍全局计数（setup 插了 1 个组）
     expect(onlyBooks.inventory.groups).toBe(1)
+    // 周/月边界随 site=2 过滤：120；inventory 只数 site=2 的 item/收藏/tag
+    expect(onlyBooks.summary.thisMonthS).toBe(120)
+    expect(onlyBooks.summary.thisWeekS).toBe(120)
+    expect(onlyBooks.inventory.history).toBe(1)
+    expect(onlyBooks.inventory.favorites).toBe(0)
+    expect(onlyBooks.inventory.tags).toBe(1)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
