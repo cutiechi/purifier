@@ -10,16 +10,19 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-12-character-highlight-design.md`
 
+**状态：** 已按 `docs/superpowers/plans/review.md` 修订（B1/B3/I2/I4/I5/I6/I8 + S 系列）
+
 ## Global Constraints
 
 - Prettier：无分号、双引号、`printWidth: 80`、`trailingComma: "es5"`。
 - 验证：`bun run test` / `bun run typecheck` / `bun run build`。
 - `/api/me/*` 用 `NO_STORE_HEADERS`；错误体 `{ "error": "..." }`。
 - **不引入 `site`**；不改 `extractPreHtml` / `sanitizeContentHtml` / DOMPurify 配置。
-- `color_index` 存单调递增原值；渲染 `color_index % 6`；`COLOR_COUNT = 6`。
+- `color_index` 存单调递增原值；渲染 `color_index % COLOR_COUNT`；`COLOR_COUNT = 6`。
 - `scope_id` 一律 TEXT；group 用 `String(group_id)`。
 - 组件不做单测；纯函数与 store 进 `bun test`。
-- web 通过 `@workspace/core/character-highlight` 子路径导入，避免把 cheerio/sqlite 打进浏览器包。
+- web / API 一律 `from "@workspace/core/character-highlight"`；**`packages/core/src/index.ts` 不 re-export**（仅 package.json 子路径）。
+- Dark 模式：项目用 `@custom-variant dark (&:is(.dark *))` + `.dark {…}`（`globals.css`），人物色块写 `.dark .character-mark--N`，**不要**用 `prefers-color-scheme`。
 
 ## File Structure
 
@@ -37,9 +40,10 @@
 | `packages/ui/src/styles/globals.css` | `.character-mark--0..5` |
 | `apps/web/src/hooks/use-characters.ts` | 拉名单 / 增删 / 高亮开关 |
 | `apps/web/src/components/character-panel.tsx` | 人物面板 |
-| `apps/web/src/components/character-selection-toolbar.tsx` | 选区浮条 |
-| `apps/web/src/components/article-view.tsx` | ContentBody 高亮 + mark 点击 |
-| `apps/web/src/components/item-actions.tsx` | 「人物」入口 |
+| `apps/web/src/components/character-selection-toolbar.tsx` | 选区浮条（仅 mouseup 选区） |
+| `apps/web/src/components/character-mark-popover.tsx` | 点 mark 后的取消浮层（独立组件） |
+| `apps/web/src/components/article-view.tsx` | ContentBody / ArticleView 高亮 props |
+| `apps/web/src/components/item-actions.tsx` | Settings Popover 内「人物」section |
 | `apps/web/src/pages/ReadPage.tsx` / `BookPage.tsx` | 接线 |
 
 ---
@@ -57,7 +61,24 @@
 
 - [ ] **Step 1: 写失败测试**
 
-在 `store.test.ts` 的表名断言中加入 `"character_names"`（按字母序插在 `"archive_posts"` 与 `"favorites"` 之间），并追加：
+**必须先改**已有 `creates items/favorites/tags/groups tables` 的完整期望数组（精确相等，漏改会立刻红）：
+
+```ts
+expect(rows.map((r) => r.name)).toEqual([
+  "archive_cursors",
+  "archive_posts",
+  "character_names", // ← 按字母序插在 archive_posts 与 favorites 之间
+  "favorites",
+  "group_items",
+  "groups",
+  "items",
+  "job_logs",
+  "jobs",
+  "tags",
+])
+```
+
+并追加：
 
 ```ts
 test("character_names table and group_items tid unique", () => {
@@ -78,15 +99,14 @@ test("character_names table and group_items tid unique", () => {
     .get() as { name: string } | null
   expect(idx?.name).toBe("group_items_tid_unique")
 
-  // 旧库去重：先造重复再 reopen
   db.close()
   rmSync(dir, { recursive: true, force: true })
 })
 
 test("migrates duplicate group_items tids keeping min group_id", () => {
   const dir = tempDir()
+  // tempDir() 已是存在的空目录，不要再 mkdirSync
   const dbPath = join(dir, "purifier.db")
-  mkdirSync(dir, { recursive: true })
   const raw = new Database(dbPath)
   raw.exec(`
     CREATE TABLE groups (
@@ -129,7 +149,9 @@ test("migrates duplicate group_items tids keeping min group_id", () => {
 })
 ```
 
-（`migrates...` 用例需 `import { mkdirSync } from "node:fs"` 与已有 `Database`。）
+**实施提示（B2）：** 迁移不可逆。对真实 `data/purifier.db` 动手前可先跑  
+`SELECT tid, COUNT(*) AS n FROM group_items GROUP BY tid HAVING n > 1;`  
+确认重复量；当前无 `site` 列，与 spec YAGNI 一致。
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -331,7 +353,7 @@ describe("characters", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("upsertGroup cross-group tid throws 409", () => {
+  test("upsertGroup cross-group tid throws 409 and rolls back whole batch", () => {
     const { dir, store } = tempStore()
     store.upsertGroup({
       key: "a",
@@ -342,19 +364,32 @@ describe("characters", () => {
       store.upsertGroup({
         key: "b",
         title: "B",
-        items: [{ tid: "1", title: "y" }],
+        items: [
+          { tid: "1", title: "冲突" },
+          { tid: "2", title: "应一并回滚" },
+        ],
       })
     ).toThrow(ExtractorError)
     try {
       store.upsertGroup({
         key: "b",
         title: "B",
-        items: [{ tid: "1", title: "y" }],
+        items: [
+          { tid: "1", title: "冲突" },
+          { tid: "2", title: "应一并回滚" },
+        ],
       })
     } catch (e) {
       expect(e).toBeInstanceOf(ExtractorError)
       expect((e as ExtractorError).statusCode).toBe(409)
     }
+    // 整批回滚：组 b 不应存在，tid 2 也不应进任何组
+    expect(store.listGroups().map((g) => g.key)).toEqual(["a"])
+    const orphan = store
+      .listGroups()
+      .flatMap((g) => g.items.map((i) => i.tid))
+    expect(orphan).toEqual(["1"])
+    expect(store.resolveCharacterScope("post", "2").type).toBe("post")
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -509,9 +544,11 @@ deleteGroupCascade(id: number): void {
 }
 ```
 
-将 `deleteGroup` 改为调用 `deleteGroupCascade`（可包在 transaction 里）。`removeGroupItems` 在组空删除时改为调用 `deleteGroupCascade` 而非手写两行 DELETE。
+将 `deleteGroup` 改为调用 `deleteGroupCascade`（可包在 transaction 里）。
 
-`upsertGroup` 在 insert 循环前：
+**`removeGroupItems` 签名与返回值不变**：仍返回 `{ removed: number; deleted: boolean }`。仅把空组分支里原先手写的两行 `DELETE group_items` / `DELETE groups` **替换为** `this.deleteGroupCascade(id)`（仍设 `deleted = true`）。非空分支的 `UPDATE updated_at` 逻辑不动。
+
+`upsertGroup` 在 insert 循环前（整个函数仍在 `transaction` 内；抛 409 则**整批回滚**，含同请求里其它未冲突 tid）：
 
 ```ts
 for (const it of input.items) {
@@ -560,7 +597,7 @@ git commit -m "feat(core): character names store CRUD and one-tid-one-group"
 - Create: `packages/core/src/character-highlight.ts`
 - Create: `packages/core/src/character-highlight.test.ts`
 - Modify: `packages/core/package.json`（exports）
-- Modify: `packages/core/src/index.ts`（可选 re-export；子路径必须有）
+- **不修改** `packages/core/src/index.ts`（不 re-export，仅子路径）
 
 **Interfaces:**
 - Produces:
@@ -568,6 +605,7 @@ git commit -m "feat(core): character names store CRUD and one-tid-one-group"
   - `export function normalizeCharacterName(raw: string): string | null`
   - `export function characterHighlight(html: string, characters: { name: string; colorIndex: number }[]): string`
   - `export function colorSlot(colorIndex: number): number` → `colorIndex % COLOR_COUNT`
+  - `export type { CharacterName, CharacterScope } from "./storage/types"`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -600,9 +638,7 @@ describe("characterHighlight", () => {
     expect(out).toContain(
       '<mark class="character-mark character-mark--1">王小明</mark>'
     )
-    expect(out).not.toMatch(
-      /character-mark--0">王小<\/mark>明/
-    )
+    expect(out).not.toMatch(/character-mark--0">王小<\/mark>明/)
   })
 
   test("does not break anchors", () => {
@@ -615,14 +651,32 @@ describe("characterHighlight", () => {
     )
   })
 
-  test("literal name with special chars does not inject html", () => {
-    const html = "<p>a&quot;b</p>"
-    // 正文里若有字面 </mark> 或引号，只作文本匹配；class 不含 name
+  test("name is never parsed as HTML / does not match escaped entities", () => {
+    // DOMPurify 后文本是实体；选区 name 是未转义字面量 → 不匹配（期望）
     const out = characterHighlight("<p>x&lt;/mark&gt;y</p>", [
       { name: "</mark>", colorIndex: 0 },
     ])
-    // 净化后文本可能是字面 </mark> 或实体；断言不出现双 mark 嵌套注入
-    expect(out.match(/<mark/g)?.length ?? 0).toBeLessThanOrEqual(1)
+    expect(out).toBe("<p>x&lt;/mark&gt;y</p>")
+
+    const out2 = characterHighlight("<p>a&quot;b</p>", [
+      { name: 'a"b', colorIndex: 0 },
+    ])
+    expect(out2).toBe("<p>a&quot;b</p>")
+
+    const out3 = characterHighlight("<p>a&lt;b</p>", [
+      { name: "a<b", colorIndex: 0 },
+    ])
+    expect(out3).toBe("<p>a&lt;b</p>")
+    expect(out3.includes("<mark")).toBe(false)
+  })
+
+  test("safe wrap for plain CJK names", () => {
+    const out = characterHighlight("<p>你好甲世界</p>", [
+      { name: "甲", colorIndex: 0 },
+    ])
+    expect(out).toBe(
+      '<p>你好<mark class="character-mark character-mark--0">甲</mark>世界</p>'
+    )
   })
 
   test("colorSlot wraps", () => {
@@ -643,10 +697,13 @@ Expected: FAIL
 `character-highlight.ts`：
 
 ```ts
+export type { CharacterName, CharacterScope } from "./storage/types"
+
 export const COLOR_COUNT = 6
 
 export function colorSlot(colorIndex: number): number {
-  return ((colorIndex % COLOR_COUNT) + COLOR_COUNT) % COLOR_COUNT
+  // color_index 来自 COALESCE(MAX,-1)+1，恒 ≥ 0
+  return colorIndex % COLOR_COUNT
 }
 
 export function normalizeCharacterName(raw: string): string | null {
@@ -657,9 +714,12 @@ export function normalizeCharacterName(raw: string): string | null {
 }
 
 /**
- * 输入：已 DOMPurify 的 HTML。输出仅额外插入
- * <mark class="character-mark character-mark--N">。
- * 按标签切分，只改文本节点；人名长度降序；不把 name 写入属性。
+ * 输入约定：已 DOMPurify 净化的 HTML；文本节点中无裸 `<`
+ *（`<` 已是 `&lt;`），因此用 `/(<[^>]*>)/` 切标签安全。
+ * 复杂度约 O(正文长度 × 人名数 × 名字长度)；当前章节量级可接受，
+ * 超长卡顿可后续换 Aho-Corasick。
+ * 输出仅额外插入 <mark class="character-mark character-mark--N">；
+ * 不把 name 写入属性。
  */
 export function characterHighlight(
   html: string,
@@ -668,7 +728,10 @@ export function characterHighlight(
   const names = characters
     .filter((c) => c.name.length > 0)
     .slice()
-    .sort((a, b) => b.name.length - a.name.length || a.name.localeCompare(b.name))
+    .sort(
+      (a, b) =>
+        b.name.length - a.name.length || a.name.localeCompare(b.name)
+    )
   if (!names.length) return html
 
   const parts = html.split(/(<[^>]*>)/)
@@ -684,7 +747,6 @@ function highlightText(
   text: string,
   names: { name: string; colorIndex: number }[]
 ): string {
-  // 标记已覆盖区间，避免短名吞长名
   const taken = new Array<boolean>(text.length).fill(false)
   type Hit = { start: number; end: number; slot: number }
   const hits: Hit[] = []
@@ -731,10 +793,12 @@ function highlightText(
 "./character-highlight": "./src/character-highlight.ts"
 ```
 
+**不要**改 `src/index.ts`。
+
 - [ ] **Step 4: 运行确认通过**
 
 Run: `cd packages/core && bun test src/character-highlight.test.ts`
-Expected: PASS（若「特殊字符」用例与实体切分不一致，按实际 DOMPurify 后文本调整断言，但不得允许把 name 拼进标签）
+Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -855,10 +919,16 @@ Expected: PASS
 - [ ] **Step 3: 手动冒烟（可选，有 API 在跑时）**
 
 ```bash
+# GET 空
 curl -s 'http://127.0.0.1:3001/api/me/characters?kind=post&id=1'
+# PUT
 curl -s -X PUT http://127.0.0.1:3001/api/me/characters \
   -H 'content-type: application/json' \
   -d '{"kind":"post","id":"1","name":"甲"}'
+# DELETE 后 GET 应无「甲」
+curl -s -X DELETE 'http://127.0.0.1:3001/api/me/characters?kind=post&id=1&name=%E7%94%B2'
+curl -s 'http://127.0.0.1:3001/api/me/characters?kind=post&id=1'
+# 入组后再 GET，断言 scope.type === "group"（先 PUT /api/me/groups 再 GET characters）
 ```
 
 - [ ] **Step 4: Commit**
@@ -892,6 +962,8 @@ cd /Users/cutiechi/projects/personal/purifier && bun install
 
 - [ ] **Step 2: CSS**
 
+Dark 模式已确认用 `.dark` 类（`@custom-variant dark (&:is(.dark *))`），色块用 `.dark .character-mark--N`。
+
 在 `globals.css` `.reading-body` 块后追加：
 
 ```css
@@ -919,10 +991,11 @@ cd /Users/cutiechi/projects/personal/purifier && bun install
 
 ```ts
 import { useCallback, useEffect, useState } from "react"
+import type {
+  CharacterName,
+  CharacterScope,
+} from "@workspace/core/character-highlight"
 import { api } from "@/lib/routes"
-
-export type CharacterName = { name: string; colorIndex: number }
-export type CharacterScope = { type: string; id: string }
 
 const HIGHLIGHT_KEY = "purifier:character-highlight"
 
@@ -988,24 +1061,26 @@ export function useCharacters(kind: "post" | "book", id: string) {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || "标记失败")
       setCharacters(json.characters ?? [])
-      if (json.character) {
-        /* ok */
-      }
       return json as { characters: CharacterName[] }
     },
     [kind, id]
   )
 
+  // 与 add 一致：乐观更新本地列表，失败再 reload 回滚（避免 loading 闪烁）
   const remove = useCallback(
     async (name: string) => {
+      const prev = characters
+      setCharacters((c) => c.filter((x) => x.name !== name))
       const q = new URLSearchParams({ kind, id, name })
       const res = await fetch(`${api.meCharacters}?${q}`, { method: "DELETE" })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || "删除失败")
-      await reload()
+      if (!res.ok) {
+        setCharacters(prev)
+        throw new Error(json.error || "删除失败")
+      }
       return json as { removed: number }
     },
-    [kind, id, reload]
+    [kind, id, characters]
   )
 
   return { characters, scope, error, loading, reload, add, remove }
@@ -1071,7 +1146,43 @@ export function ContentBody({
 }
 ```
 
-`ArticleView` 把 `characters` / `highlightEnabled` / `onCharacterClick` 透传给 `ContentBody`。
+`ArticleView` **显式新增 props**（全部可选，默认与现行为一致）：
+
+```ts
+export function ArticleView({
+  title,
+  meta,
+  contentHtml,
+  sourceUrl,
+  currentTid,
+  actions,
+  footer,
+  progress,
+  characters,
+  highlightEnabled,
+  onCharacterClick,
+}: {
+  title: string
+  meta?: PostMetaFields
+  contentHtml: string
+  sourceUrl: string
+  currentTid?: string
+  actions?: ReactNode
+  footer?: ReactNode
+  progress?: number
+  characters?: { name: string; colorIndex: number }[]
+  highlightEnabled?: boolean
+  onCharacterClick?: (name: string, rect: DOMRect) => void
+}) {
+  // …现有结构…
+  // <ContentBody
+  //   html={contentHtml}
+  //   characters={characters}
+  //   highlightEnabled={highlightEnabled}
+  //   onCharacterClick={onCharacterClick}
+  // />
+}
+```
 
 - [ ] **Step 5: typecheck + test**
 
@@ -1092,27 +1203,26 @@ git commit -m "feat(web): wire character highlight into ContentBody"
 
 **Files:**
 - Create: `apps/web/src/components/character-selection-toolbar.tsx`
+- Create: `apps/web/src/components/character-mark-popover.tsx`
 - Create: `apps/web/src/components/character-panel.tsx`
 - Modify: `apps/web/src/components/item-actions.tsx`
 - Modify: `apps/web/src/pages/ReadPage.tsx`
 - Modify: `apps/web/src/pages/BookPage.tsx`
 
 **Interfaces:**
-- Consumes: `useCharacters`、`useCharacterHighlightEnabled`、`normalizeCharacterName`
+- Consumes: `useCharacters`、`useCharacterHighlightEnabled`、`normalizeCharacterName`、`ArticleView` 新 props
 - Produces: 完整阅读页交互
 
-- [ ] **Step 1: 选区浮条**
+- [ ] **Step 1: 选区浮条**（仅选中文字触发）
 
-`character-selection-toolbar.tsx`：监听 `mouseup`（捕获于 `.reading-body` 容器或 document），若选区在 `.reading-body` 内：
+`character-selection-toolbar.tsx`：监听 `mouseup`；选区须在 `.reading-body` 内：
 
-1. `const raw = selection.toString()`
-2. `normalizeCharacterName(raw)` 为 null → 隐藏
-3. 否则在选区 `getBoundingClientRect()` 上方显示固定定位小条
-4. 若 `characters.some(c => c.name === name)` → 按钮「取消标记」，否则「标记为人物」
-5. Esc / scroll / 点空白关闭
+1. `normalizeCharacterName(selection.toString())` 为 null → 隐藏
+2. 在选区 `getBoundingClientRect()` 上方 `fixed` 小条（`z-50`）
+3. 已存在 →「取消标记」，否则「标记为人物」
+4. Esc / scroll / 点空白关闭
 
 ```tsx
-// 关键结构示意
 <div
   className="fixed z-50 rounded-lg border border-border bg-popover px-2 py-1 shadow-md"
   style={{ top, left }}
@@ -1123,48 +1233,119 @@ git commit -m "feat(web): wire character highlight into ContentBody"
 </div>
 ```
 
-- [ ] **Step 2: 人物面板**
+- [ ] **Step 2: mark 点击浮层**（独立组件，勿与选区浮条混用）
 
-`character-panel.tsx`：接收 `characters`、`enabled`、`setEnabled`、`onRemove`、`error`、`onRetry`。
+`character-mark-popover.tsx`：
 
-- 开关：「显示人物高亮」
-- 列表：色点（用 `colorSlot` + 同 CSS 类）+ 名 + 删除按钮
-- 空态：「在正文中选中人名即可标记」
-- 错误：文案 + 重试
-
-- [ ] **Step 3: ItemActions**
-
-增加可选 props：
-
-```ts
-characterPanel?: ReactNode
+```tsx
+export function CharacterMarkPopover({
+  name,
+  rect,
+  onRemove,
+  onClose,
+}: {
+  name: string
+  rect: DOMRect
+  onRemove: () => void
+  onClose: () => void
+}) {
+  // fixed 定位于 rect 上方；显示人名 + 「取消标记」
+  // Esc / 点空白 → onClose
+}
 ```
 
-或在 actions 行增加独立 Popover「人物」按钮（`Users` lucide 图标），内容为 `CharacterPanel`。推荐独立按钮，避免塞进设置 Popover。
+- [ ] **Step 3: 人物面板**
 
-- [ ] **Step 4: ReadPage / BookPage**
+`character-panel.tsx`：`characters`、`enabled`、`setEnabled`、`onRemove`、`error`、`onRetry`。
+
+- 开关「显示人物高亮」；色点 + 名 + 删除；空态引导；错误可重试
+
+- [ ] **Step 4: ItemActions —— 复用现有 Settings Popover**
+
+**不要**再加第二个独立 Popover（与现有 `Settings2` fixed 浮窗叠层冲突）。
+
+在现有 `ItemActions` Popover 内容里、`ReadingSettingsPanel` **之上**加分隔线 +「人物」section：
+
+```tsx
+{/* 人物 */}
+{characterSlot}
+<div className="my-2 border-t border-border" />
+{/* 阅读偏好 */}
+<ReadingSettingsPanel />
+```
+
+新增可选 prop：
+
+```ts
+characterSlot?: ReactNode
+```
+
+页面传入：
+
+```tsx
+<ItemActions
+  ...
+  characterSlot={
+    <CharacterPanel
+      characters={characters}
+      enabled={enabled}
+      setEnabled={setEnabled}
+      onRemove={(n) => void remove(n)}
+      error={error}
+      onRetry={() => void reload()}
+    />
+  }
+/>
+```
+
+- [ ] **Step 5: ReadPage / BookPage**
 
 ```tsx
 const { characters, error, reload, add, remove } = useCharacters("post", tid)
 const { enabled, setEnabled } = useCharacterHighlightEnabled()
-const [markPopup, setMarkPopup] = useState<{ name: string; rect: DOMRect } | null>(null)
+const [markPopup, setMarkPopup] = useState<{
+  name: string
+  rect: DOMRect
+} | null>(null)
 
-// ArticleView / ContentBody 传入 characters、highlightEnabled={enabled}
-// onCharacterClick → setMarkPopup
-// CharacterSelectionToolbar 绑定 add/remove
-// ItemActions 旁挂 CharacterPanel
+<ArticleView
+  ...
+  characters={characters}
+  highlightEnabled={enabled}
+  onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
+  actions={
+    <ItemActions
+      ...
+      characterSlot={<CharacterPanel ... />}
+    />
+  }
+/>
+<CharacterSelectionToolbar
+  characters={characters}
+  onAdd={(n) => void add(n)}
+  onRemove={(n) => void remove(n)}
+/>
+{markPopup && (
+  <CharacterMarkPopover
+    name={markPopup.name}
+    rect={markPopup.rect}
+    onRemove={() => {
+      void remove(markPopup.name)
+      setMarkPopup(null)
+    }}
+    onClose={() => setMarkPopup(null)}
+  />
+)}
 ```
 
-BookPage 用 `useCharacters("book", cid)`。
+BookPage 用 `useCharacters("book", cid)`，其余同构。
 
-点 mark 浮层：显示名 + 「取消标记」→ `remove(name)` → 关闭。
-
-- [ ] **Step 5: typecheck + build**
+- [ ] **Step 6: typecheck + build**
 
 Run: `bun run typecheck && bun run build`
 Expected: PASS
 
-- [ ] **Step 6: 手动验收（对照 spec）**
+- [ ] **Step 7: 手动验收（对照 spec）**
 
 1. 未入组帖标记两人名 → 刷新仍在 → 轮色  
 2. 同组两章共享；移出组后恢复 post 名单  
@@ -1174,10 +1355,11 @@ Expected: PASS
 6. export 含 `character_names`  
 7. tid 加第二组 409  
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/components/character-selection-toolbar.tsx \
+  apps/web/src/components/character-mark-popover.tsx \
   apps/web/src/components/character-panel.tsx \
   apps/web/src/components/item-actions.tsx \
   apps/web/src/pages/ReadPage.tsx apps/web/src/pages/BookPage.tsx
@@ -1186,22 +1368,9 @@ git commit -m "feat(web): character selection toolbar and panel"
 
 ---
 
-### Task 7: Spec 状态收尾
+### Task 7: Spec 状态收尾（可选；状态链接多半已写好）
 
-**Files:**
-- Modify: `docs/superpowers/specs/2026-08-12-character-highlight-design.md`（状态改为已实现 / 计划已写）
-
-- [ ] **Step 1:** 将 spec 状态改为：`实施计划见 docs/superpowers/plans/2026-08-12-character-highlight.md`
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add docs/superpowers/specs/2026-08-12-character-highlight-design.md \
-  docs/superpowers/plans/2026-08-12-character-highlight.md
-git commit -m "docs: character highlight implementation plan"
-```
-
-（若本 plan 文件尚未入库，本步一并加入。）
+若 spec 状态行尚未指向本 plan，补一行后随实现末次 commit 带上即可，不必单独成 commit。
 
 ---
 
@@ -1212,17 +1381,18 @@ git commit -m "docs: character highlight implementation plan"
 | character_names DDL / 无多余 index | 1 |
 | color_index 单调 + 渲染 % 6 | 2, 3, 5 |
 | 一帖一组 UNIQUE + 去重日志 | 1, 2 |
-| deleteGroupCascade / 空组删 | 2 |
+| deleteGroupCascade / 空组删；`removeGroupItems` 返回不变 | 2 |
 | 入组不合并；离组恢复 post | 2 |
 | export character_names | 2 |
 | API GET/PUT/DELETE + assertSafeId + 不校验 items | 4 |
-| groups 跨组 409 / 同组幂等 | 2, 4 |
-| 零改动 extractPreHtml / DOMPurify | 3, 5（显式不改） |
-| characterHighlight + 安全/长名 | 3 |
-| 选区拒换行；浮条；面板；mark 拦截 | 6 |
+| groups 跨组 409 整批回滚 / 同组幂等 | 2, 4 |
+| 零改动 extractPreHtml / DOMPurify | 3, 5 |
+| `normalizeCharacterName` 单测 + 选区拒换行 | 3, 6 |
+| characterHighlight 安全/长名/实体不匹配 | 3 |
+| 选区浮条；mark 浮层；面板；Settings 内 section | 6 |
 | localStorage 总开关不生成 mark | 5, 6 |
-| Read + Book 接线 | 6 |
+| Read + Book + ArticleView 新 props | 5, 6 |
 | AGENTS.md | 4 |
-| 无 site | Global Constraints |
+| 无 site；index.ts 不 re-export | Global / 3 |
 
 无 TBD / 占位实现步骤。
