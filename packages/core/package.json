@@ -5,6 +5,7 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./character-highlight": "./src/character-highlight.ts",
     "./extractor": "./src/extractor/index.ts",
     "./upstream": "./src/upstream.ts"
   },
