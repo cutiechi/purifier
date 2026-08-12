@@ -12,6 +12,8 @@ import {
   useCharacterHighlightEnabled,
 } from "@/hooks/use-characters"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
+import { useReadingSession } from "@/hooks/use-reading-session"
+import { useSite } from "@/hooks/use-site"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
 import { api } from "@/lib/routes"
@@ -27,6 +29,7 @@ interface ContentData {
 
 export default function ReadPage() {
   const { tid = "" } = useParams<{ tid: string }>()
+  const site = useSite()
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("post", tid)
   const {
@@ -69,6 +72,13 @@ export default function ReadPage() {
     ready: loadedTid === tid, // 当前 tid 内容已挂载（按 id 区分，避免串用上一篇）
     stateReady: state !== null && state.id === tid, // 当前文章的 state GET 已完成
     restore: state?.id === tid ? state.read_progress : undefined,
+  })
+  useReadingSession({
+    site,
+    kind: "post",
+    id: tid,
+    title: content?.title ?? "",
+    enabled: loadedTid === tid,
   })
 
   // 抓取序号：换帖时递增，过期响应（成功/错误）一律丢弃，

@@ -13,6 +13,7 @@ import {
   useCharacterHighlightEnabled,
 } from "@/hooks/use-characters"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
+import { useReadingSession } from "@/hooks/use-reading-session"
 import { useSite } from "@/hooks/use-site"
 import { api, bookPath } from "@/lib/routes"
 
@@ -99,6 +100,13 @@ export default function BookPage() {
     chapter: isChapterBody ? chapter : undefined,
     restoreChapter: state?.id === cid ? state.lastChapter : null,
     site,
+  })
+  useReadingSession({
+    site,
+    kind: "book",
+    id: cid,
+    title: isToc ? "" : (book?.bookTitle ?? book?.title ?? ""),
+    enabled: (isChapterBody || isCool18Book) && loadedKey === currentKey,
   })
 
   const fetchBook = useCallback(
