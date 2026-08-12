@@ -1,7 +1,7 @@
 # 阅读页人物名称标记与高亮
 
 日期：2026-08-12  
-状态：brainstorming 已通过；已按 `review.md` 修订，待写实施计划
+状态：brainstorming 已通过；已按 `review.md` 修订；实施计划见 `docs/superpowers/plans/2026-08-12-character-highlight.md`
 
 ## 背景
 
