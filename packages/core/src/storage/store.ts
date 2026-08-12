@@ -1,9 +1,12 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import type { SiteId } from "../extractor"
+import { ExtractorError } from "../extractor/types"
 import {
   ArchiveCursor,
   ArchiveCursorStatus,
   ArchivePost,
+  CharacterName,
+  CharacterScope,
   Group,
   GroupMember,
   ItemKind,
@@ -669,6 +672,18 @@ export class Store {
       const row = this.db
         .query("SELECT id FROM groups WHERE key = ?1")
         .get(input.key) as { id: number }
+      // 一帖一组：tid 已属于其它组 → 409，抛错使整个事务回滚（同请求未冲突 tid 一并回滚）
+      for (const it of input.items) {
+        const other = this.db
+          .query(
+            `SELECT group_id FROM group_items
+             WHERE tid = ?1 AND group_id <> ?2`
+          )
+          .get(it.tid, row.id) as { group_id: number } | null
+        if (other) {
+          throw new ExtractorError("tid already in another group", 409)
+        }
+      }
       const insert = this.db.query(
         "INSERT OR IGNORE INTO group_items (group_id, tid, title, added_at) VALUES (?1, ?2, ?3, ?4)"
       )
@@ -681,8 +696,7 @@ export class Store {
 
   deleteGroup(id: number): void {
     const run = this.db.transaction(() => {
-      this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
-      this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
+      this.deleteGroupCascade(id)
     })
     run()
   }
@@ -704,8 +718,7 @@ export class Store {
         .query("SELECT COUNT(*) AS n FROM group_items WHERE group_id = ?1")
         .get(id) as { n: number }
       if (Number(remaining.n ?? 0) === 0) {
-        this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
-        this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
+        this.deleteGroupCascade(id)
         return true
       }
       this.db
@@ -717,6 +730,79 @@ export class Store {
     // `{ removed, deleted: run() }` 会在 run() 修改 removed 之前就读取到 0
     const deleted = run()
     return { removed, deleted }
+  }
+
+  // --- Characters ---
+
+  resolveCharacterScope(kind: ItemKind, id: string): CharacterScope {
+    if (kind === "book") return { type: "book", id }
+    const row = this.db
+      .query("SELECT group_id FROM group_items WHERE tid = ?1 LIMIT 1")
+      .get(id) as { group_id: number } | null
+    if (row) return { type: "group", id: String(row.group_id) }
+    return { type: "post", id }
+  }
+
+  listCharacters(scope: CharacterScope): CharacterName[] {
+    const rows = this.db
+      .query(
+        `SELECT name, color_index FROM character_names
+         WHERE scope_type = ?1 AND scope_id = ?2
+         ORDER BY created_at, name`
+      )
+      .all(scope.type, scope.id) as { name: string; color_index: number }[]
+    return rows.map((r) => ({ name: r.name, colorIndex: r.color_index }))
+  }
+
+  addCharacter(scope: CharacterScope, name: string): CharacterName {
+    const existing = this.db
+      .query(
+        `SELECT name, color_index FROM character_names
+         WHERE scope_type = ?1 AND scope_id = ?2 AND name = ?3`
+      )
+      .get(scope.type, scope.id, name) as
+      | { name: string; color_index: number }
+      | null
+    if (existing) {
+      return { name: existing.name, colorIndex: existing.color_index }
+    }
+    const maxRow = this.db
+      .query(
+        `SELECT MAX(color_index) AS m FROM character_names
+         WHERE scope_type = ?1 AND scope_id = ?2`
+      )
+      .get(scope.type, scope.id) as { m: number | null }
+    const colorIndex = (maxRow.m ?? -1) + 1
+    this.db
+      .query(
+        `INSERT INTO character_names
+           (scope_type, scope_id, name, color_index, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)`
+      )
+      .run(scope.type, scope.id, name, colorIndex, this.now())
+    return { name, colorIndex }
+  }
+
+  removeCharacter(scope: CharacterScope, name: string): number {
+    return Number(
+      this.db
+        .query(
+          `DELETE FROM character_names
+           WHERE scope_type = ?1 AND scope_id = ?2 AND name = ?3`
+        )
+        .run(scope.type, scope.id, name).changes ?? 0
+    )
+  }
+
+  deleteGroupCascade(id: number): void {
+    this.db
+      .query(
+        `DELETE FROM character_names
+         WHERE scope_type = 'group' AND scope_id = ?1`
+      )
+      .run(String(id))
+    this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
+    this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
   }
 
   setGroupFavorite(id: number, favorited: boolean): boolean {
@@ -1098,6 +1184,13 @@ export class Store {
     groups: Group[]
     archive_posts: ArchivePost[]
     archive_cursors: ArchiveCursor[]
+    character_names: Array<{
+      scope_type: string
+      scope_id: string
+      name: string
+      color_index: number
+      created_at: number
+    }>
   } {
     const items = this.db.query("SELECT * FROM items").all()
     const favorites = this.db.query("SELECT * FROM favorites").all()
@@ -1116,6 +1209,17 @@ export class Store {
       pages: number
       updated_at: number
     }>
+    const character_names = this.db
+      .query(
+        "SELECT * FROM character_names ORDER BY scope_type, scope_id, name"
+      )
+      .all() as Array<{
+      scope_type: string
+      scope_id: string
+      name: string
+      color_index: number
+      created_at: number
+    }>
     return {
       version: 1,
       exportedAt: this.now(),
@@ -1132,6 +1236,7 @@ export class Store {
         pages: r.pages,
         updated_at: r.updated_at,
       })),
+      character_names,
     }
   }
 

@@ -137,3 +137,15 @@ export interface ArchiveCursor {
   pages: number
   updated_at: number
 }
+
+export type CharacterScopeType = "group" | "post" | "book"
+
+export interface CharacterScope {
+  type: CharacterScopeType
+  id: string
+}
+
+export interface CharacterName {
+  name: string
+  colorIndex: number
+}
