@@ -81,10 +81,13 @@ packages/typescript-config/               # base / react-library 配置
 | `PUT /api/me/progress`                   | body `{ kind, id, progress, site?, chapter? }`              | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                              |
 | `DELETE /api/me/cache`                   | 无                                                          | 清空内容缓存 `{ cleared: n }`                                                                           |
 | `GET /api/me/groups`                     | `q`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters` | 无 page/limit 时 `{ groups }` 全量；有 page 或 limit 时 `{ items, nextPage?, total }` 分页；v1 仅论坛 |
-| `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }` | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空                                                    |
+| `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }` | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空；tid 已在其它组 409                                    |
 | `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
 | `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |
 | `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                          | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                            |
+| `GET /api/me/characters`                 | `kind`、`id`                                               | 角色列表 `{ scope, characters }`；`kind=post` 且 tid 已在分组时 scope 指向该组                            |
+| `PUT /api/me/characters`                 | body `{ kind, id, name }`                                  | 新增角色（幂等）`{ ok, character, characters }`；`name` 规范化（trim、禁换行/Tab、1-32 字符）后为空 400    |
+| `DELETE /api/me/characters`              | `kind`、`id`、`name`                                       | 删除角色 `{ ok, removed }`                                                                              |
 | `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items, nextPage?, total }` 任务列表                                                                      |
 | `POST /api/me/jobs`                      | body `{ type, payload? }`                                   | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                               |
 | `DELETE /api/me/jobs`                    | 无                                                           | 清空已结束任务 `{ ok, removed }`                                                                               |

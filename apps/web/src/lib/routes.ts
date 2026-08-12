@@ -97,6 +97,7 @@ export const api = {
   meState: "/api/me/state",
   meProgress: "/api/me/progress",
   meCache: "/api/me/cache",
+  meCharacters: "/api/me/characters",
   meGroups: "/api/me/groups",
   meJobs: "/api/me/jobs",
   meArchive: "/api/me/archive",

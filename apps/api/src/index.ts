@@ -37,6 +37,7 @@ import {
   type JobLog,
   type JobStatus,
 } from "@workspace/core"
+import { normalizeCharacterName } from "@workspace/core/character-highlight"
 
 // Dev: 3001 (Vite on 3000 proxies /api). Prod Docker sets PORT=3000 + WEB_DIST.
 const PORT = Number(process.env.PORT || 3001)
@@ -648,6 +649,68 @@ function handleMeExport(): Response {
   })
 }
 
+/** 角色作用域参数：kind/id 校验（kind 须 post|book，id 走 assertSafeId） */
+function parseMeKindId(kindRaw: unknown, idRaw: unknown): {
+  kind: ItemKind
+  id: string
+} {
+  if (kindRaw !== "post" && kindRaw !== "book") {
+    throw new ExtractorError("invalid kind", 400)
+  }
+  if (typeof idRaw !== "string") throw new ExtractorError("invalid id", 400)
+  assertSafeId(idRaw)
+  return { kind: kindRaw, id: idRaw }
+}
+
+function handleCharactersGet(url: URL): Response {
+  const { kind, id } = parseMeKindId(
+    url.searchParams.get("kind"),
+    url.searchParams.get("id")
+  )
+  const scope = store.resolveCharacterScope(kind, id)
+  const characters = store.listCharacters(scope)
+  return jsonOk({ scope, characters }, NO_STORE_HEADERS)
+}
+
+async function handleCharactersPut(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  const { kind, id } = parseMeKindId(
+    "kind" in body ? body.kind : undefined,
+    "id" in body ? body.id : undefined
+  )
+  const nameRaw = "name" in body ? body.name : undefined
+  if (typeof nameRaw !== "string") {
+    throw new ExtractorError("invalid name", 400)
+  }
+  const name = normalizeCharacterName(nameRaw)
+  if (!name) throw new ExtractorError("invalid name", 400)
+  const scope = store.resolveCharacterScope(kind, id)
+  const character = store.addCharacter(scope, name)
+  const characters = store.listCharacters(scope)
+  return jsonOk({ ok: true, character, characters }, NO_STORE_HEADERS)
+}
+
+function handleCharactersDelete(url: URL): Response {
+  const { kind, id } = parseMeKindId(
+    url.searchParams.get("kind"),
+    url.searchParams.get("id")
+  )
+  const nameRaw = url.searchParams.get("name") ?? ""
+  const name = normalizeCharacterName(nameRaw)
+  if (!name) throw new ExtractorError("invalid name", 400)
+  const scope = store.resolveCharacterScope(kind, id)
+  const removed = store.removeCharacter(scope, name)
+  return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+}
+
 async function handleFavoriteWrite(
   req: Request,
   favorite: boolean
@@ -1201,6 +1264,12 @@ async function routeInner(req: Request): Promise<Response> {
       case "/api/me/state":
         requireGet(req)
         return handleMeState(url)
+      case "/api/me/characters": {
+        if (req.method === "GET") return handleCharactersGet(url)
+        if (req.method === "PUT") return await handleCharactersPut(req)
+        if (req.method === "DELETE") return handleCharactersDelete(url)
+        throw new ExtractorError("method not allowed", 405)
+      }
       case "/api/me/archive":
         requireGet(req)
         return handleMeArchive(url)
