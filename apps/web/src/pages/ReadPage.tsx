@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
+import { CharacterMarkPopover } from "@/components/character-mark-popover"
+import { CharacterPanel } from "@/components/character-panel"
+import { CharacterSelectionToolbar } from "@/components/character-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { useReadingSettings } from "@/components/reading-settings"
+import {
+  useCharacters,
+  useCharacterHighlightEnabled,
+} from "@/hooks/use-characters"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
@@ -22,6 +29,18 @@ export default function ReadPage() {
   const { tid = "" } = useParams<{ tid: string }>()
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("post", tid)
+  const {
+    characters,
+    error: charactersError,
+    reload: reloadCharacters,
+    add,
+    remove,
+  } = useCharacters("post", tid)
+  const { enabled, setEnabled } = useCharacterHighlightEnabled()
+  const [markPopup, setMarkPopup] = useState<{
+    name: string
+    rect: DOMRect
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
   const [loadedTid, setLoadedTid] = useState("")
@@ -105,6 +124,9 @@ export default function ReadPage() {
               sourceUrl={content.url}
               currentTid={tid}
               progress={progress}
+              characters={characters}
+              highlightEnabled={enabled}
+              onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
               actions={
                 <ItemActions
                   kind="post"
@@ -113,6 +135,16 @@ export default function ReadPage() {
                   reload={reload}
                   onRefresh={() => void fetchContent({ refresh: true })}
                   refreshing={refreshing}
+                  characterSlot={
+                    <CharacterPanel
+                      characters={characters}
+                      enabled={enabled}
+                      setEnabled={setEnabled}
+                      onRemove={(n) => void remove(n)}
+                      error={charactersError}
+                      onRetry={() => void reloadCharacters()}
+                    />
+                  }
                 />
               }
               footer={
@@ -125,6 +157,25 @@ export default function ReadPage() {
           </>
         )}
       </AsyncBody>
+      <CharacterSelectionToolbar
+        characters={characters}
+        onAdd={(n) => void add(n)}
+        onRemove={(n) => void remove(n)}
+      />
+      {markPopup && (
+        <CharacterMarkPopover
+          name={markPopup.name}
+          rect={markPopup.rect}
+          colorIndex={
+            characters.find((c) => c.name === markPopup.name)?.colorIndex
+          }
+          onRemove={() => {
+            void remove(markPopup.name)
+            setMarkPopup(null)
+          }}
+          onClose={() => setMarkPopup(null)}
+        />
+      )}
     </PageShell>
   )
 }

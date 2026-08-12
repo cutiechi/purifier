@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
+import { CharacterMarkPopover } from "@/components/character-mark-popover"
+import { CharacterPanel } from "@/components/character-panel"
+import { CharacterSelectionToolbar } from "@/components/character-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
+import {
+  useCharacters,
+  useCharacterHighlightEnabled,
+} from "@/hooks/use-characters"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { useSite } from "@/hooks/use-site"
 import { api, bookPath } from "@/lib/routes"
@@ -36,6 +43,18 @@ export default function BookPage() {
   const site = useSite()
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("book", cid)
+  const {
+    characters,
+    error: charactersError,
+    reload: reloadCharacters,
+    add,
+    remove,
+  } = useCharacters("book", cid)
+  const { enabled, setEnabled } = useCharacterHighlightEnabled()
+  const [markPopup, setMarkPopup] = useState<{
+    name: string
+    rect: DOMRect
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [loadedKey, setLoadedKey] = useState("")
@@ -117,6 +136,16 @@ export default function BookPage() {
       reload={reload}
       onRefresh={() => void fetchBook({ refresh: true })}
       refreshing={refreshing}
+      characterSlot={
+        <CharacterPanel
+          characters={characters}
+          enabled={enabled}
+          setEnabled={setEnabled}
+          onRemove={(n) => void remove(n)}
+          error={charactersError}
+          onRetry={() => void reloadCharacters()}
+        />
+      }
     />
   )
 
@@ -143,6 +172,9 @@ export default function BookPage() {
                 contentHtml={book.content}
                 sourceUrl={book.url}
                 progress={progress}
+                characters={characters}
+                highlightEnabled={enabled}
+                onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
                 actions={actions}
               />
             )}
@@ -221,6 +253,9 @@ export default function BookPage() {
                 contentHtml={book.content}
                 sourceUrl={book.url}
                 progress={progress}
+                characters={characters}
+                highlightEnabled={enabled}
+                onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
                 actions={actions}
                 footer={
                   (book.prevChapter !== undefined ||
@@ -266,6 +301,25 @@ export default function BookPage() {
           </>
         )}
       </AsyncBody>
+      <CharacterSelectionToolbar
+        characters={characters}
+        onAdd={(n) => void add(n)}
+        onRemove={(n) => void remove(n)}
+      />
+      {markPopup && (
+        <CharacterMarkPopover
+          name={markPopup.name}
+          rect={markPopup.rect}
+          colorIndex={
+            characters.find((c) => c.name === markPopup.name)?.colorIndex
+          }
+          onRemove={() => {
+            void remove(markPopup.name)
+            setMarkPopup(null)
+          }}
+          onClose={() => setMarkPopup(null)}
+        />
+      )}
     </PageShell>
   )
 }

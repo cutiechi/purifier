@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { Settings2, Star, Tag } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconRefreshCw, IconStar } from "@/components/icons"
@@ -54,6 +54,7 @@ export function ItemActions({
   reload,
   onRefresh,
   refreshing,
+  characterSlot,
 }: {
   kind: "post" | "book"
   id: string
@@ -61,6 +62,8 @@ export function ItemActions({
   reload: () => Promise<void>
   onRefresh: () => void
   refreshing: boolean
+  /** 「人物」section，渲染在分隔线与阅读偏好之上 */
+  characterSlot?: ReactNode
 }) {
   const site = useSite()
   const confirm = useConfirm()
@@ -190,6 +193,9 @@ export function ItemActions({
           onRemove={(tag) => void removeTag(tag)}
           removing={removing}
         />
+
+        {/* 人物 */}
+        {characterSlot}
 
         <div className="my-2 border-t border-border" />
 
