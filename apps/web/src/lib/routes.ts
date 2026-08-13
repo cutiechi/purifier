@@ -31,6 +31,8 @@ export const SITES: Record<SiteId, { label: string }> = {
 
 export const routes = {
   home: "/",
+  /** OIDC 登录页（不进 NAV_ITEMS） */
+  login: "/login",
   discover: "/discover",
   me: "/me",
   featured: "/featured",
@@ -110,6 +112,11 @@ export const api = {
   meExport: "/api/me/export",
   meSessions: "/api/me/sessions",
   meStats: "/api/me/stats",
+  authConfig: "/api/auth/config",
+  authMe: "/api/auth/me",
+  authAuthorize: "/api/auth/authorize",
+  authCallback: "/api/auth/callback",
+  authLogout: "/api/auth/logout",
   health: "/api/health",
 } as const
 

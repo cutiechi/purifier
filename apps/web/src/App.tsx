@@ -22,6 +22,7 @@ const GroupPage = lazy(() => import("@/pages/GroupPage"))
 const JobsPage = lazy(() => import("@/pages/JobsPage"))
 const ArchivePage = lazy(() => import("@/pages/ArchivePage"))
 const StatsPage = lazy(() => import("@/pages/StatsPage"))
+const LoginPage = lazy(() => import("@/pages/LoginPage"))
 
 function PageFallback() {
   return (
@@ -205,6 +206,14 @@ export function App() {
             element={
               <RouteBoundary>
                 <StatsPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <RouteBoundary>
+                <LoginPage />
               </RouteBoundary>
             }
           />
