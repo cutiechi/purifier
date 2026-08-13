@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-bookmarks-design.md`
 
+**状态：** 已按 `docs/superpowers/plans/review.md` 修订（#1 characters.test version；#2 PATCH note 400；#3 ReadPage useSearchParams；#4 保留 ME_TABS.sites；#5 BookmarkList props；#6 列表 URL 无空 `?`；#7 定位后 rAF 再 sync；#8 浮条 select/bookmark 两态）
+
 ## Global Constraints
 
 - Prettier：无分号、双引号、`printWidth: 80`、`trailingComma: "es5"`。
@@ -36,6 +38,7 @@
 | `packages/core/src/storage/store.ts` | CRUD、级联、export v3、inventory |
 | `packages/core/src/storage/bookmarks.test.ts` | store 行为 |
 | `packages/core/src/storage/store.test.ts` | 表名列表、export version、inventory |
+| `packages/core/src/storage/characters.test.ts` | `exportBackup().version` 改为 3 |
 | `apps/api/src/index.ts` | `/api/me/bookmarks` 与 `/:id` |
 | `apps/web/src/lib/routes.ts` | 路由、API、ME_TABS、NAV_ITEMS、`readPath`/`bookPath` 的 `bm` |
 | `apps/web/src/lib/hub-tabs.ts` | Me Tab 不带 site |
@@ -181,6 +184,7 @@ git commit -m "feat(core): normalize bookmark quote and find first index"
 - Modify: `packages/core/src/storage/store.ts`
 - Create: `packages/core/src/storage/bookmarks.test.ts`
 - Modify: `packages/core/src/storage/store.test.ts`（表名列表插入 `"bookmarks"`，字母序在 `archive_posts` 与 `character_clusters` 之间）
+- Modify: `packages/core/src/storage/characters.test.ts`（`bak.version` 改为 3）
 
 **Interfaces:**
 - Consumes: Task 1 规范化函数与 `BOOKMARKS_PER_SCOPE_CAP`
@@ -333,13 +337,15 @@ test("listBookmarks searches quote note title; update and delete note", () => {
 
 在 `store.test.ts` 的 `creates items/favorites/tags/groups tables` 期望数组中、`archive_posts` 之后插入 `"bookmarks"`。
 
-把 `exportBackup includes reading_sessions` 改为同时断言 `version === 3` 且 `Array.isArray(backup.bookmarks)`。其它 `toBe(2)` 的 export version 断言改为 `3`。
+把 `exportBackup includes reading_sessions` 改为同时断言 `version === 3` 且 `Array.isArray(backup.bookmarks)`。
+
+`packages/core/src/storage/characters.test.ts` 里 `expect(bak.version).toBe(2)` 改为 `toBe(3)`（`exportBackup` 全局升 version，漏改会红）。仓库里目前只有这一处 version 字面断言。
 
 在 inventory 断言处增加 `expect(all.inventory.bookmarks).toBe(...)`：测前先 `addBookmark` 一条，或期望 0 再加一条后为 1；带 `site` 时只数该站。
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd packages/core && bun test src/storage/bookmarks.test.ts src/storage/store.test.ts`
+Run: `cd packages/core && bun test src/storage/bookmarks.test.ts src/storage/store.test.ts src/storage/characters.test.ts`
 
 Expected: FAIL（无方法 / 表名数组不匹配 / version 仍为 2）
 
@@ -462,14 +468,14 @@ bookmarks: Bookmark[]
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd packages/core && bun test src/storage/bookmarks.test.ts src/storage/store.test.ts`
+Run: `cd packages/core && bun test src/storage/bookmarks.test.ts src/storage/store.test.ts src/storage/characters.test.ts`
 
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/core/src/storage/db.ts packages/core/src/storage/types.ts packages/core/src/storage/store.ts packages/core/src/storage/bookmarks.test.ts packages/core/src/storage/store.test.ts
+git add packages/core/src/storage/db.ts packages/core/src/storage/types.ts packages/core/src/storage/store.ts packages/core/src/storage/bookmarks.test.ts packages/core/src/storage/store.test.ts packages/core/src/storage/characters.test.ts
 git commit -m "feat(storage): bookmarks table CRUD cascade export and inventory"
 ```
 
@@ -564,7 +570,11 @@ POST body：`kind`, `id`, `quote`（string）, `site?`, `chapter?`, `note?`, `sc
 - `addBookmark`：`not_found` → 404 `item not found`；`full` → 409 `bookmark limit reached`；`invalid_quote` → 400 `invalid quote`
 - 成功 `{ ok: true, bookmark }`
 
-PATCH body `{ note }`（必须是 string，含 `""`）：`updateBookmarkNote` false → 404。
+PATCH：
+
+- body 非 object / 缺 `note` 字段 → 400 `invalid json body` 或 `note must be a string`
+- `note` 不是 string（含 number）→ 400 `note must be a string`
+- `note` 为 string（含 `""`）：`updateBookmarkNote`；`changes===0` → 404
 
 DELETE：`deleteBookmark` false → 404；成功 `{ ok: true, removed: 1 }`。
 
@@ -643,7 +653,7 @@ export function useMeTabs(activePath: string): SectionTab[] {
 }
 ```
 
-不再 `useSite`、不再 `filter`（四个 Tab 都是双站）。
+不再 `useSite`、不再按 `t.sites` `filter`。`ME_TABS` **保留** `sites: readonly SiteId[]` 字段：与 `DISCOVER_TABS` / `ALL_TABS` 同形，避免为「我的」单独改类型；四个 Tab 都是 `["1","2"]`，过滤本来就是恒真。以后若加单站 Me Tab 再决定是否恢复 filter，本次不做。
 
 - [ ] **Step 3: App 路由 + 占位页**
 
@@ -732,20 +742,32 @@ git commit -m "feat(web): sync reading progress bar from viewport without write"
 
 **Interfaces:**
 - Consumes: 现有人物 `clusters` / `onAdd` / `onRemove`
-- Produces: `ReadingSelectionToolbar` props：`onBookmark: (quote: string) => void` 另加人物回调
+- Produces: `ReadingSelectionToolbar` props：`onBookmark: (quote: string, note: string) => void` 另加人物回调
 
 - [ ] **Step 1: `git mv` 后改组件**
 
-选区逻辑：
+状态（两态，不要立刻关浮条）：
 
-- 不再用 `normalizeCharacterName` 决定是否显示浮条。
-- 选区非折叠、落在 `.reading-body` 即 `setAnchor({ quote: selection.toString(), rect })`。
-- 第一行两个按钮：「书签」「人物」（或「取消标记」若 `normalizeCharacterName(quote)` 已在某 cluster）。
-- 点「书签」：`const q = normalizeBookmarkQuote(anchor.quote)`；若 null 则不关闭或可忽略；否则 `onBookmark(q)` 并关浮条。本任务 `onBookmark` 可先空实现。
-- 点「人物」：`const name = normalizeCharacterName(anchor.quote)`；若 null，浮条内显示一行 `text-xs text-destructive`「不能作为人名」，**不** `setAnchor(null)`。
-- 挂靠列表仅在人物名合法且尚未标记时显示（保持现有）。
-- `onMouseDown preventDefault` 避免点按钮清选区。
-- Esc / 滚动 / 点空白关闭不变。
+```ts
+type Mode = "select" | "bookmark"
+interface Anchor {
+  quote: string
+  rect: DOMRect
+  mode: Mode
+  note: string
+  nameError: boolean
+}
+```
+
+- `mode: "select"`：选区非折叠、落在 `.reading-body` 即出现（不再用 `normalizeCharacterName` 决定是否显示）。两个按钮「书签」「人物」（已在 cluster 则「取消标记」）。
+- 点「书签」：`normalizeBookmarkQuote(anchor.quote)` 为 null 则忽略；否则 `setAnchor({ ...anchor, mode: "bookmark", note: "" })`，**不**调用 `onBookmark`、**不**关闭。
+- `mode: "bookmark"`：摘录只读、`note` input（`maxLength` 不必绑 80，保存时再 normalize）、保存 / 取消。保存：`onBookmark(quote, note)` 然后 `setAnchor(null)`。取消：回到 `select` 或直接关闭。
+- 点「人物」：`normalizeCharacterName(anchor.quote)` 为 null 则 `nameError: true`，浮条内 `text-xs text-destructive`「不能作为人名」，**不** `setAnchor(null)`。合法则走现有 add/remove/挂靠。
+- 挂靠列表仅在 `mode==="select"` 且人名合法且尚未标记时显示。
+- `onMouseDown preventDefault`；pointerdown 点在浮条内不关闭（否则点 input 会关）。
+- Esc / 滚动 / 点空白关闭（两态都关）。
+
+本任务页面 `onBookmark={() => {}}`；Task 7 接真实保存。
 
 `from "@workspace/core/bookmarks"` 与 `from "@workspace/core/character-highlight"`。
 
@@ -772,8 +794,8 @@ git commit -m "feat(web): reading selection toolbar with bookmark and character"
 - Create: `apps/web/src/lib/bookmark-locate.ts`
 - Create: `apps/web/src/hooks/use-bookmarks.ts`
 - Create: `apps/web/src/components/bookmark-list.tsx`
-- Modify: `apps/web/src/pages/ReadPage.tsx`
-- Modify: `apps/web/src/pages/BookPage.tsx`
+- Modify: `apps/web/src/pages/ReadPage.tsx`（新增 `useSearchParams` import；现文件只有 `useParams`）
+- Modify: `apps/web/src/pages/BookPage.tsx`（已有 `useSearchParams`）
 
 **Interfaces:**
 - Consumes: `findQuoteIndex`、`api.meBookmarks`、`Bookmark` 形状、`syncFromViewport`、Task 6 `onBookmark`
@@ -829,7 +851,7 @@ export function scrollToQuote(root: Element, quote: string): boolean {
     range.startContainer instanceof Element
       ? range.startContainer
       : range.startContainer.parentElement
-  el?.scrollIntoView({ block: "center" })
+  el?.scrollIntoView({ block: "center", behavior: "instant" })
   return true
 }
 
@@ -856,7 +878,17 @@ export function scrollToProgress(progress: number): void {
 
 - [ ] **Step 3: `bookmark-list.tsx`**
 
-列表：摘录、备注、`formatDateTime(createdAt)`；stale 显示「原文可能已变」。
+```ts
+interface BookmarkListProps {
+  items: Bookmark[]
+  staleId?: number
+  onJump: (item: Bookmark) => void
+  onUpdateNote: (id: number, note: string) => Promise<void>
+  onRemove: (id: number) => Promise<void>
+}
+```
+
+列表：摘录、备注、`formatDateTime(createdAt)`；`item.id === staleId` 时显示「原文可能已变」。
 
 每条：点击 → `onJump(item)`；改备注（小输入 + 保存）；删除。
 
@@ -864,7 +896,7 @@ export function scrollToProgress(progress: number): void {
 
 - [ ] **Step 4: 阅读页**
 
-`useSearchParams` 读 `bm`。
+`ReadPage.tsx` 把 `useParams` 那行改成 `import { useParams, useSearchParams } from "react-router-dom"`，再用 `useSearchParams` 读 `bm`。`BookPage.tsx` 已有该 import，只接 `bm`。
 
 `useBookmarks`：`enabled` = 内容已挂载（ReadPage：`loadedTid===tid`；BookPage：`isChapterBody || isCool18Book` 且 loadedKey 匹配）。
 
@@ -883,7 +915,7 @@ const skipRestore = Boolean(bmParam && target)
 
 `restore`: `skipRestore ? null : (原 restore)`。
 
-`onBookmark(quote)`：弹出备注（可用 `window.prompt("备注（可空）")` **不要**；用浮条展开的备注 input，或列表上方一个小 form）。推荐：点书签后浮条切到「摘录只读 + note input + 保存」，保存时：
+`onBookmark(quote, note)` 接 Task 6 浮条保存（不要 `window.prompt`）：
 
 ```ts
 const p = document.documentElement.scrollHeight - window.innerHeight
@@ -893,7 +925,7 @@ await add({ quote, note, scrollProgress })
 
 409 把错误写到 `mutationError`：「该书签已满（50），请先删除旧的」。
 
-**定位 effect**（独立于进度 hook）：`content ready && bookmarksReady && target` 时决策一次（ref 按 `bm+id+chapter`）。双 rAF 后：
+**定位 effect**（独立于进度 hook）：`content ready && bookmarksReady && target` 时决策一次（ref 按 `bm+id+chapter`）。双 rAF 后再滚：
 
 ```ts
 const root = document.querySelector(".reading-body")
@@ -902,8 +934,11 @@ if (!hit) {
   scrollToProgress(target.scrollProgress)
   setStaleId(target.id)
 }
-syncFromViewport()
+// scrollIntoView 后布局可能尚未稳定；再等一帧采样进度条，避免先显示旧 scrollY
+requestAnimationFrame(() => syncFromViewport())
 ```
+
+`scrollToQuote` 里 `scrollIntoView` 用 `{ block: "center", behavior: "instant" }`（不要 `smooth`，否则 rAF 仍采到半途）。
 
 无效 `bm`（ready 且找不到）：不 locate，不 skip restore。
 
@@ -945,7 +980,7 @@ git commit -m "feat(web): in-article bookmarks and quote locate"
 - 次行：`note`（若有）、`title`、`SITES[item.site]?.label ?? item.site`、有 `chapter` 则 `第 n 章`、`formatDateTime(createdAt)`
 - `Link`：`kind==="post" ? readPath(itemId, site, String(id)) : bookPath(itemId, { site, chapter: chapter != null ? String(chapter) : undefined, bm: String(id) })`
 - 删除按钮：`DELETE /api/me/bookmarks/:id`
-- `buildUrl`: `${api.meBookmarks}?${meListQuery({ q, kind, page })}`（不要 site）
+- URL：`const qs = meListQuery({ q, kind, page })`，然后 `` `${api.meBookmarks}${qs ? `?${qs}` : ""}` ``（无参数时不要裸 `?`）
 - 空文案：「还没有书签，阅读时选中正文即可添加」
 - 搜索 placeholder：「搜索摘录、备注或标题…」
 
