@@ -69,11 +69,13 @@ export default function BookPage() {
       await add(name, clusterId)
       setMutationError("")
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "标记失败"
+      const status = (e as { status?: number } | null)?.status
       setMutationError(
-        e instanceof Error && e.message === "character belongs to another cluster"
+        status === 409
           ? "该称呼已属于其他人，请到面板合并"
-          : msg
+          : e instanceof Error
+            ? e.message
+            : "标记失败"
       )
     }
   }

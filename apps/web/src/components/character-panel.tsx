@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { IconClose } from "@/components/icons"
 import type { CharacterCluster } from "@workspace/core/character-highlight"
-import { clampHue } from "@workspace/core/character-highlight"
 import { CharacterSwatch } from "@/components/character-swatch"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -138,7 +137,12 @@ export function CharacterPanel({
             </p>
           ) : (
             <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto pr-0.5">
-              {clusters.map((c) => (
+              {clusters.map((c) => {
+                const other =
+                  mergeFrom === c.id && mergeOther !== null
+                    ? clusters.find((x) => x.id === mergeOther) ?? null
+                    : null
+                return (
                 <li key={c.id} className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     <button
@@ -243,10 +247,31 @@ export function CharacterPanel({
                     </div>
                   )}
 
-                  {mergeFrom === c.id && mergeOther !== null && (
+                  {mergeFrom === c.id && mergeOther !== null && other && (
                     <div className="flex flex-col gap-1.5 pl-[18px]">
                       <div className="flex items-center gap-2">
-                        <CharacterSwatch hue={clampHue(mergeHue)} className="size-3.5" />
+                        <button
+                          type="button"
+                          onClick={() => setMergeHue(c.hue)}
+                          title={`选 ${c.names[0] ?? ""} 的颜色`}
+                          className={cn(
+                            "shrink-0 rounded-full",
+                            mergeHue === c.hue && "ring-2 ring-foreground ring-offset-1 ring-offset-background"
+                          )}
+                        >
+                          <CharacterSwatch hue={c.hue} className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMergeHue(other.hue)}
+                          title={`选 ${other.names[0] ?? ""} 的颜色`}
+                          className={cn(
+                            "shrink-0 rounded-full",
+                            mergeHue === other.hue && "ring-2 ring-foreground ring-offset-1 ring-offset-background"
+                          )}
+                        >
+                          <CharacterSwatch hue={other.hue} className="size-3.5" />
+                        </button>
                         <input
                           type="range"
                           min={0}
@@ -270,7 +295,8 @@ export function CharacterPanel({
                     </div>
                   )}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </>

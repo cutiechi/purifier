@@ -8,6 +8,13 @@ import { api } from "@/lib/routes"
 
 const HIGHLIGHT_KEY = "purifier:character-highlight"
 
+/** fetch 失败响应 → 带 HTTP status 的 Error，调用方（页面）可按 status 分流（如 409） */
+function httpError(message: string, status: number): Error {
+  const err = new Error(message)
+  ;(err as Error & { status?: number }).status = status
+  return err
+}
+
 export function useCharacterHighlightEnabled() {
   const [enabled, setEnabled] = useState(() => {
     try {
@@ -79,7 +86,7 @@ export function useCharacters(kind: "post" | "book", id: string) {
         body: JSON.stringify(body),
       })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || "标记失败")
+      if (!res.ok) throw httpError(json.error || "标记失败", res.status)
       setClusters(json.clusters ?? [])
       return json as { ok: boolean; cluster: CharacterCluster; clusters: CharacterCluster[] }
     },
@@ -104,7 +111,7 @@ export function useCharacters(kind: "post" | "book", id: string) {
       const json = await res.json()
       if (!res.ok) {
         await reload()
-        throw new Error(json.error || "删除失败")
+        throw httpError(json.error || "删除失败", res.status)
       }
       return json as { ok: boolean; removed: number }
     },
@@ -120,7 +127,7 @@ export function useCharacters(kind: "post" | "book", id: string) {
         body: JSON.stringify({ kind, id, op, ...body }),
       })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || "操作失败")
+      if (!res.ok) throw httpError(json.error || "操作失败", res.status)
       setClusters(json.clusters ?? [])
       return json as { ok: boolean; clusters: CharacterCluster[] }
     },
