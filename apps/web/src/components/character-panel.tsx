@@ -140,161 +140,168 @@ export function CharacterPanel({
               {clusters.map((c) => {
                 const other =
                   mergeFrom === c.id && mergeOther !== null
-                    ? clusters.find((x) => x.id === mergeOther) ?? null
+                    ? (clusters.find((x) => x.id === mergeOther) ?? null)
                     : null
                 return (
-                <li key={c.id} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      aria-label={`改色 ${c.names[0] ?? ""}`}
-                      title="改色"
-                      onClick={() => toggleRecolor(c)}
-                      className="shrink-0 rounded-full transition-opacity hover:opacity-80"
-                    >
-                      <CharacterSwatch hue={c.hue} />
-                    </button>
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      {c.names.map((n) => (
-                        <div key={n} className="flex items-center gap-1">
-                          <span
-                            className="min-w-0 flex-1 truncate text-sm text-foreground"
-                            title={n}
-                          >
-                            {n}
-                          </span>
-                          {c.names.length > 1 && (
+                  <li key={c.id} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label={`改色 ${c.names[0] ?? ""}`}
+                        title="改色"
+                        onClick={() => toggleRecolor(c)}
+                        className="shrink-0 rounded-full transition-opacity hover:opacity-80"
+                      >
+                        <CharacterSwatch hue={c.hue} />
+                      </button>
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        {c.names.map((n) => (
+                          <div key={n} className="flex items-center gap-1">
+                            <span
+                              className="min-w-0 flex-1 truncate text-sm text-foreground"
+                              title={n}
+                            >
+                              {n}
+                            </span>
+                            {c.names.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => onSplit(c.id, n)}
+                                className="shrink-0 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              >
+                                拆出
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => onSplit(c.id, n)}
-                              className="shrink-0 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              aria-label={`删除人物 ${n}`}
+                              onClick={() => onRemove(n)}
+                              className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
                             >
-                              拆出
+                              <IconClose size={12} />
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            aria-label={`删除人物 ${n}`}
-                            onClick={() => onRemove(n)}
-                            className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                          >
-                            <IconClose size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => pickMergeFrom(c.id)}
-                      className={cn(
-                        "shrink-0 rounded-md px-1.5 py-1 text-xs transition-colors",
-                        mergeFrom === c.id
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                      )}
-                    >
-                      {mergeFrom === c.id ? "取消合并" : "与其他人合并"}
-                    </button>
-                  </div>
-
-                  {recolorId === c.id && (
-                    <div className="flex items-center gap-2 pl-[18px]">
-                      <input
-                        type="range"
-                        min={0}
-                        max={359}
-                        className="reading-range h-1.5 flex-1"
-                        aria-label={`改色 ${c.names[0] ?? ""}`}
-                        value={draftHue}
-                        onChange={(e) => {
-                          const h = Number(e.target.value)
-                          setDraftHue(h)
-                          commitHue(c.id, h)
-                        }}
-                      />
-                      <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-                        {draftHue}
-                      </span>
-                    </div>
-                  )}
-
-                  {mergeFrom === c.id && (
-                    <div className="flex flex-col gap-1 pl-[18px]">
-                      {clusters
-                        .filter((x) => x.id !== c.id)
-                        .map((x) => (
-                          <button
-                            key={x.id}
-                            type="button"
-                            onClick={() => {
-                              setMergeOther(x.id)
-                              setMergeHue(c.hue)
-                            }}
-                            className={cn(
-                              "flex items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors",
-                              mergeOther === x.id
-                                ? "bg-accent text-foreground"
-                                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                            )}
-                          >
-                            <CharacterSwatch hue={x.hue} />
-                            <span className="min-w-0 flex-1 truncate">
-                              {x.names.join(" / ")}
-                            </span>
-                            并入
-                          </button>
+                          </div>
                         ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => pickMergeFrom(c.id)}
+                        className={cn(
+                          "shrink-0 rounded-md px-1.5 py-1 text-xs transition-colors",
+                          mergeFrom === c.id
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        )}
+                      >
+                        {mergeFrom === c.id ? "取消合并" : "与其他人合并"}
+                      </button>
                     </div>
-                  )}
 
-                  {mergeFrom === c.id && mergeOther !== null && other && (
-                    <div className="flex flex-col gap-1.5 pl-[18px]">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setMergeHue(c.hue)}
-                          title={`选 ${c.names[0] ?? ""} 的颜色`}
-                          className={cn(
-                            "shrink-0 rounded-full",
-                            mergeHue === c.hue && "ring-2 ring-foreground ring-offset-1 ring-offset-background"
-                          )}
-                        >
-                          <CharacterSwatch hue={c.hue} className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setMergeHue(other.hue)}
-                          title={`选 ${other.names[0] ?? ""} 的颜色`}
-                          className={cn(
-                            "shrink-0 rounded-full",
-                            mergeHue === other.hue && "ring-2 ring-foreground ring-offset-1 ring-offset-background"
-                          )}
-                        >
-                          <CharacterSwatch hue={other.hue} className="size-3.5" />
-                        </button>
+                    {recolorId === c.id && (
+                      <div className="flex items-center gap-2 pl-[18px]">
                         <input
                           type="range"
                           min={0}
                           max={359}
                           className="reading-range h-1.5 flex-1"
-                          aria-label="合并后颜色"
-                          value={mergeHue}
-                          onChange={(e) => setMergeHue(Number(e.target.value))}
+                          aria-label={`改色 ${c.names[0] ?? ""}`}
+                          value={draftHue}
+                          onChange={(e) => {
+                            const h = Number(e.target.value)
+                            setDraftHue(h)
+                            commitHue(c.id, h)
+                          }}
                         />
                         <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-                          {mergeHue}
+                          {draftHue}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={confirmMerge}
-                        className="self-start rounded-md bg-foreground/70 px-2.5 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground"
-                      >
-                        合并
-                      </button>
-                    </div>
-                  )}
-                </li>
+                    )}
+
+                    {mergeFrom === c.id && (
+                      <div className="flex flex-col gap-1 pl-[18px]">
+                        {clusters
+                          .filter((x) => x.id !== c.id)
+                          .map((x) => (
+                            <button
+                              key={x.id}
+                              type="button"
+                              onClick={() => {
+                                setMergeOther(x.id)
+                                setMergeHue(c.hue)
+                              }}
+                              className={cn(
+                                "flex items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors",
+                                mergeOther === x.id
+                                  ? "bg-accent text-foreground"
+                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                              )}
+                            >
+                              <CharacterSwatch hue={x.hue} />
+                              <span className="min-w-0 flex-1 truncate">
+                                {x.names.join(" / ")}
+                              </span>
+                              并入
+                            </button>
+                          ))}
+                      </div>
+                    )}
+
+                    {mergeFrom === c.id && mergeOther !== null && other && (
+                      <div className="flex flex-col gap-1.5 pl-[18px]">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setMergeHue(c.hue)}
+                            title={`选 ${c.names[0] ?? ""} 的颜色`}
+                            className={cn(
+                              "shrink-0 rounded-full",
+                              mergeHue === c.hue &&
+                                "ring-2 ring-foreground ring-offset-1 ring-offset-background"
+                            )}
+                          >
+                            <CharacterSwatch hue={c.hue} className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMergeHue(other.hue)}
+                            title={`选 ${other.names[0] ?? ""} 的颜色`}
+                            className={cn(
+                              "shrink-0 rounded-full",
+                              mergeHue === other.hue &&
+                                "ring-2 ring-foreground ring-offset-1 ring-offset-background"
+                            )}
+                          >
+                            <CharacterSwatch
+                              hue={other.hue}
+                              className="size-3.5"
+                            />
+                          </button>
+                          <input
+                            type="range"
+                            min={0}
+                            max={359}
+                            className="reading-range h-1.5 flex-1"
+                            aria-label="合并后颜色"
+                            value={mergeHue}
+                            onChange={(e) =>
+                              setMergeHue(Number(e.target.value))
+                            }
+                          />
+                          <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+                            {mergeHue}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={confirmMerge}
+                          className="self-start rounded-md bg-foreground/70 px-2.5 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground"
+                        >
+                          合并
+                        </button>
+                      </div>
+                    )}
+                  </li>
                 )
               })}
             </ul>

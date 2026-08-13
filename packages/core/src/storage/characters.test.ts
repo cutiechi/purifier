@@ -115,9 +115,7 @@ describe("characters", () => {
     store.addCharacter({ type: "group", id: String(g.id) }, "甲")
     const r = store.removeGroupItems(g.id, ["1"])
     expect(r.deleted).toBe(true)
-    expect(store.listClusters({ type: "group", id: String(g.id) })).toEqual(
-      []
-    )
+    expect(store.listClusters({ type: "group", id: String(g.id) })).toEqual([])
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -261,7 +259,9 @@ describe("characters", () => {
     const { dir, store } = tempStore()
     const scope = { type: "post" as const, id: "1" }
     const a = store.addCharacter(scope, "甲")
-    expect(() => store.splitCharacter(scope, a.id, "甲")).toThrow(ExtractorError)
+    expect(() => store.splitCharacter(scope, a.id, "甲")).toThrow(
+      ExtractorError
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 

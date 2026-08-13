@@ -37,7 +37,10 @@ import {
   type JobLog,
   type JobStatus,
 } from "@workspace/core"
-import { normalizeCharacterName, isHue } from "@workspace/core/character-highlight"
+import {
+  normalizeCharacterName,
+  isHue,
+} from "@workspace/core/character-highlight"
 
 // Dev: 3001 (Vite on 3000 proxies /api). Prod Docker sets PORT=3000 + WEB_DIST.
 const PORT = Number(process.env.PORT || 3001)
@@ -310,9 +313,7 @@ async function handlePosts(url: URL): Promise<Response> {
   if (!tid) {
     const mtid = parseMtid(url.searchParams.get("mtid"))
     const cacheKey = `home:${siteId}:${mtid}`
-    const hit = getListMemCache<{ links: unknown; nextMtid: unknown }>(
-      cacheKey
-    )
+    const hit = getListMemCache<{ links: unknown; nextMtid: unknown }>(cacheKey)
     if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
     const { links, nextMtid } = await extractor.fetchHomeLinks(mtid)
     const body = { links, nextMtid }
@@ -464,7 +465,10 @@ async function handleBooks(url: URL): Promise<Response> {
 async function handleBrowse(url: URL): Promise<Response> {
   const type = url.searchParams.get("type")
   const q = url.searchParams.get("q")
-  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1)
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get("page") || "1", 10) || 1
+  )
   if (type && type.length > 200) {
     return jsonError("type too long", 400)
   }
@@ -624,8 +628,7 @@ function handleMeArchive(url: URL): Response {
       ? sortRaw
       : "tid"
   const orderRaw = url.searchParams.get("order")
-  const order =
-    orderRaw === "asc" || orderRaw === "desc" ? orderRaw : undefined
+  const order = orderRaw === "asc" || orderRaw === "desc" ? orderRaw : undefined
   const result = store.listArchivePosts(site, { q, page, limit, sort, order })
   return jsonOk(result, NO_STORE_HEADERS)
 }
@@ -642,7 +645,8 @@ async function handleSessionsWrite(req: Request): Promise<Response> {
   } catch {
     throw new ExtractorError("invalid json body", 400)
   }
-  if (!body || typeof body !== "object") throw new ExtractorError("invalid json body", 400)
+  if (!body || typeof body !== "object")
+    throw new ExtractorError("invalid json body", 400)
   const kindRaw = "kind" in body ? body.kind : undefined
   const idRaw = "id" in body ? body.id : undefined
   if (kindRaw !== "post" && kindRaw !== "book") {
@@ -658,14 +662,22 @@ async function handleSessionsWrite(req: Request): Promise<Response> {
   }
   const title = titleRaw.trim()
   const startedAt = "startedAt" in body ? body.startedAt : undefined
-  if (typeof startedAt !== "number" || !Number.isFinite(startedAt) || startedAt <= 0) {
+  if (
+    typeof startedAt !== "number" ||
+    !Number.isFinite(startedAt) ||
+    startedAt <= 0
+  ) {
     throw new ExtractorError("invalid startedAt", 400)
   }
   if (startedAt > Date.now() + 5 * 60_000) {
     throw new ExtractorError("startedAt in future", 400)
   }
   const durationS = "durationS" in body ? body.durationS : undefined
-  if (typeof durationS !== "number" || !Number.isFinite(durationS) || durationS < 0) {
+  if (
+    typeof durationS !== "number" ||
+    !Number.isFinite(durationS) ||
+    durationS < 0
+  ) {
     throw new ExtractorError("invalid durationS", 400)
   }
   // <3 丢弃 / >300 clamp 在 store 层；不写则不算一次会话
@@ -702,7 +714,10 @@ function handleMeExport(): Response {
 }
 
 /** 角色作用域参数：kind/id 校验（kind 须 post|book，id 走 assertSafeId） */
-function parseMeKindId(kindRaw: unknown, idRaw: unknown): {
+function parseMeKindId(
+  kindRaw: unknown,
+  idRaw: unknown
+): {
   kind: ItemKind
   id: string
 } {
@@ -745,8 +760,15 @@ async function handleCharactersPut(req: Request): Promise<Response> {
   const name = normalizeCharacterName(nameRaw)
   if (!name) throw new ExtractorError("invalid name", 400)
   let clusterId: number | undefined
-  if ("clusterId" in body && body.clusterId !== undefined && body.clusterId !== null) {
-    if (typeof body.clusterId !== "number" || !Number.isInteger(body.clusterId)) {
+  if (
+    "clusterId" in body &&
+    body.clusterId !== undefined &&
+    body.clusterId !== null
+  ) {
+    if (
+      typeof body.clusterId !== "number" ||
+      !Number.isInteger(body.clusterId)
+    ) {
       throw new ExtractorError("invalid clusterId", 400)
     }
     clusterId = body.clusterId
@@ -808,7 +830,8 @@ async function handleCharactersPatch(req: Request): Promise<Response> {
     if (typeof clusterId !== "number" || !Number.isInteger(clusterId)) {
       throw new ExtractorError("invalid clusterId", 400)
     }
-    if (typeof nameRaw !== "string") throw new ExtractorError("invalid name", 400)
+    if (typeof nameRaw !== "string")
+      throw new ExtractorError("invalid name", 400)
     const name = normalizeCharacterName(nameRaw)
     if (!name) throw new ExtractorError("invalid name", 400)
     const clusters = store.splitCharacter(scope, clusterId, name)
@@ -945,14 +968,9 @@ function handleGroupsList(url: URL): Response {
     return jsonOk({ groups: store.listGroups(q) }, NO_STORE_HEADERS)
   }
   const page = Math.max(1, parseInt(pageRaw || "1", 10) || 1)
-  const limit = Math.min(
-    100,
-    Math.max(1, parseInt(limitRaw || "20", 10) || 20)
-  )
+  const limit = Math.min(100, Math.max(1, parseInt(limitRaw || "20", 10) || 20))
   const favorited =
-    favoritedRaw === "1" || favoritedRaw === "true"
-      ? true
-      : undefined
+    favoritedRaw === "1" || favoritedRaw === "true" ? true : undefined
   const sort =
     sortRaw === "title" || sortRaw === "chapters" || sortRaw === "updated"
       ? sortRaw
@@ -1002,7 +1020,10 @@ function handleJobsList(url: URL): Response {
   const total = store.countJobs(q)
   const nextPage =
     q.offset + q.limit < total ? q.offset / q.limit + 2 : undefined
-  return jsonOk({ items: items.map(parseJob), nextPage, total }, NO_STORE_HEADERS)
+  return jsonOk(
+    { items: items.map(parseJob), nextPage, total },
+    NO_STORE_HEADERS
+  )
 }
 
 async function handleJobStart(req: Request): Promise<Response> {
@@ -1094,9 +1115,7 @@ function isGroupTidRef(it: unknown): it is { tid: string } {
   if (!it || typeof it !== "object") return false
   const tid = "tid" in it ? it.tid : undefined
   return (
-    typeof tid === "string" &&
-    /^[A-Za-z0-9]+$/.test(tid) &&
-    tid.length <= 64
+    typeof tid === "string" && /^[A-Za-z0-9]+$/.test(tid) && tid.length <= 64
   )
 }
 
@@ -1123,7 +1142,11 @@ async function handleGroupUpsert(req: Request): Promise<Response> {
   ) {
     throw new ExtractorError("invalid key or title", 400)
   }
-  if (!Array.isArray(items) || items.length === 0 || !items.every(isGroupMember)) {
+  if (
+    !Array.isArray(items) ||
+    items.length === 0 ||
+    !items.every(isGroupMember)
+  ) {
     throw new ExtractorError("items must be a non-empty {tid,title}[]", 400)
   }
   const author = "author" in body ? body.author : null
@@ -1163,7 +1186,11 @@ async function handleGroupItemsDelete(
     throw new ExtractorError("invalid json body", 400)
   }
   const items = "items" in body ? body.items : undefined
-  if (!Array.isArray(items) || items.length === 0 || !items.every(isGroupTidRef)) {
+  if (
+    !Array.isArray(items) ||
+    items.length === 0 ||
+    !items.every(isGroupTidRef)
+  ) {
     throw new ExtractorError("items must be a non-empty {tid}[]", 400)
   }
   const { removed, deleted } = store.removeGroupItems(
@@ -1251,9 +1278,7 @@ async function routeInner(req: Request): Promise<Response> {
 
   try {
     // /api/me/jobs 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
-    const jobsSub = pathname.match(
-      /^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop))?$/
-    )
+    const jobsSub = pathname.match(/^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop))?$/)
     if (jobsSub) {
       const id = Number(jobsSub[1])
       const sub = jobsSub[2]

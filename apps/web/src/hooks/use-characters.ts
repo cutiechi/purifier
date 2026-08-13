@@ -88,7 +88,11 @@ export function useCharacters(kind: "post" | "book", id: string) {
       const json = await res.json()
       if (!res.ok) throw httpError(json.error || "标记失败", res.status)
       setClusters(json.clusters ?? [])
-      return json as { ok: boolean; cluster: CharacterCluster; clusters: CharacterCluster[] }
+      return json as {
+        ok: boolean
+        cluster: CharacterCluster
+        clusters: CharacterCluster[]
+      }
     },
     [kind, id]
   )
@@ -155,5 +159,17 @@ export function useCharacters(kind: "post" | "book", id: string) {
     [patchOp]
   )
 
-  return { clusters, marks, scope, error, loading, reload, add, remove, merge, split, recolor }
+  return {
+    clusters,
+    marks,
+    scope,
+    error,
+    loading,
+    reload,
+    add,
+    remove,
+    merge,
+    split,
+    recolor,
+  }
 }

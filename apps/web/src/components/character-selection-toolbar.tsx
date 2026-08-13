@@ -158,7 +158,9 @@ export function CharacterSelectionToolbar({
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-foreground transition-colors hover:bg-accent"
               >
                 <CharacterSwatch hue={c.hue} />
-                <span className="min-w-0 flex-1 truncate">{c.names.join(" / ")}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {c.names.join(" / ")}
+                </span>
               </button>
             </li>
           ))}

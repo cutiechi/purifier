@@ -147,9 +147,9 @@ export function openDatabase(dataDir: string): Database {
   //    旧库 character_names 有 color_index、无 cluster_id；CREATE TABLE IF NOT EXISTS 会跳过，
   //    故按行迁移：每行建一个 character_clusters（hue 按 LEGACY_SLOT_HUE 映射），再指向它。
   //    新库 DDL 已带 cluster_id，此块跳过。索引必须在其后无条件创建，新旧库都保证存在。
-  const charCols = db
-    .query("PRAGMA table_info(character_names)")
-    .all() as { name: string }[]
+  const charCols = db.query("PRAGMA table_info(character_names)").all() as {
+    name: string
+  }[]
   if (charCols.some((c) => c.name === "color_index")) {
     db.transaction(() => {
       db.exec(`
@@ -251,10 +251,10 @@ export function openDatabase(dataDir: string): Database {
     // 重建整库包在一个事务里：任一步失败整体回滚，
     // 避免 DROP 旧表后、RENAME 前崩溃导致数据永久丢失
     db.transaction(() => {
-    for (const { table, newSql, migrate } of [
-      {
-        table: "items",
-        newSql: `CREATE TABLE items_new (
+      for (const { table, newSql, migrate } of [
+        {
+          table: "items",
+          newSql: `CREATE TABLE items_new (
           kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
           site TEXT NOT NULL DEFAULT '1',
           id TEXT NOT NULL,
@@ -267,26 +267,26 @@ export function openDatabase(dataDir: string): Database {
           last_chapter INTEGER,
           PRIMARY KEY (site, kind, id)
         )`,
-        migrate: `INSERT INTO items_new
+          migrate: `INSERT INTO items_new
           (kind, site, id, title, url, first_seen_at, last_visited_at, visit_count, read_progress, last_chapter)
           SELECT kind, '1', id, title, url, first_seen_at, last_visited_at, visit_count, read_progress, NULL
           FROM items`,
-      },
-      {
-        table: "favorites",
-        newSql: `CREATE TABLE favorites_new (
+        },
+        {
+          table: "favorites",
+          newSql: `CREATE TABLE favorites_new (
           kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
           site TEXT NOT NULL DEFAULT '1',
           id TEXT NOT NULL,
           favorited_at INTEGER NOT NULL,
           PRIMARY KEY (site, kind, id)
         )`,
-        migrate: `INSERT INTO favorites_new (kind, site, id, favorited_at)
+          migrate: `INSERT INTO favorites_new (kind, site, id, favorited_at)
           SELECT kind, '1', id, favorited_at FROM favorites`,
-      },
-      {
-        table: "tags",
-        newSql: `CREATE TABLE tags_new (
+        },
+        {
+          table: "tags",
+          newSql: `CREATE TABLE tags_new (
           kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
           site TEXT NOT NULL DEFAULT '1',
           id TEXT NOT NULL,
@@ -294,22 +294,22 @@ export function openDatabase(dataDir: string): Database {
           created_at INTEGER NOT NULL,
           PRIMARY KEY (site, kind, id, tag)
         )`,
-        migrate: `INSERT INTO tags_new (kind, site, id, tag, created_at)
+          migrate: `INSERT INTO tags_new (kind, site, id, tag, created_at)
           SELECT kind, '1', id, tag, created_at FROM tags`,
-      },
-    ]) {
-      db.exec(newSql)
-      db.exec(migrate)
-      db.exec(`DROP TABLE ${table}`)
-      db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`)
-    }
-    db.exec("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags (tag)")
-    db.exec(
-      "CREATE INDEX IF NOT EXISTS idx_items_visited ON items (last_visited_at DESC)"
-    )
-    db.exec(
-      "CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC)"
-    )
+        },
+      ]) {
+        db.exec(newSql)
+        db.exec(migrate)
+        db.exec(`DROP TABLE ${table}`)
+        db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`)
+      }
+      db.exec("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags (tag)")
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_items_visited ON items (last_visited_at DESC)"
+      )
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_favorites_time ON favorites (favorited_at DESC)"
+      )
     })()
   }
 
@@ -344,16 +344,16 @@ export function openDatabase(dataDir: string): Database {
           `[db] removed ${removed} duplicate group_items rows for tid UNIQUE`
         )
       }
-      db.exec(
-        "CREATE UNIQUE INDEX group_items_tid_unique ON group_items(tid)"
-      )
+      db.exec("CREATE UNIQUE INDEX group_items_tid_unique ON group_items(tid)")
     })()
   }
 
   // 5. reading_sessions 回填：表为空且 items 非空时，按 first_seen_at / last_visited_at
   //    补活跃日（duration_s NULL, estimated 1）。幂等：表非空跳过。不按 visit_count 插值。
   const sessionsEmpty = (
-    db.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as { n: number }
+    db.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as {
+      n: number
+    }
   ).n
   if (sessionsEmpty === 0) {
     const itemsCount = (

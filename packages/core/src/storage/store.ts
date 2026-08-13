@@ -100,7 +100,11 @@ export function computeStreaks(
     prev = d
   }
   let current = 0
-  let cur = set.has(today) ? today : set.has(dayBefore(today)) ? dayBefore(today) : null
+  let cur = set.has(today)
+    ? today
+    : set.has(dayBefore(today))
+      ? dayBefore(today)
+      : null
   while (cur !== null && set.has(cur)) {
     current++
     cur = dayBefore(cur)
@@ -223,7 +227,14 @@ export class Store {
         `INSERT INTO reading_sessions (site, kind, item_id, title, started_at, duration_s, estimated)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)`
       )
-      .run(input.site, input.kind, input.itemId, input.title, input.startedAt, durationS)
+      .run(
+        input.site,
+        input.kind,
+        input.itemId,
+        input.title,
+        input.startedAt,
+        durationS
+      )
   }
 
   /** 统计聚合：summary / calendar(365d) / timeOfDay(24h) / topItems / recentSessions / inventory。 */
@@ -237,11 +248,15 @@ export class Store {
           ? `WHERE ${cond}`
           : ""
     const runScoped = <T>(sql: string, extra: SQLQueryBindings[] = []): T[] =>
-      (this.db.query(sql).all(...(site ? [site] : []), ...extra) as T[])
+      this.db.query(sql).all(...(site ? [site] : []), ...extra) as T[]
 
     // 日历窗对齐本地日边界（热力图按本地日渲染 365 格）：窗起点 = 今日本地零点 − 364 天
     const nowLocal = new Date(this.now())
-    const todayMid = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate())
+    const todayMid = new Date(
+      nowLocal.getFullYear(),
+      nowLocal.getMonth(),
+      nowLocal.getDate()
+    )
     const sinceStart = new Date(todayMid)
     sinceStart.setDate(sinceStart.getDate() - 364)
     const sinceMs = sinceStart.getTime()
@@ -297,7 +312,10 @@ export class Store {
        ORDER BY started_at DESC LIMIT 20`
     )
 
-    const sumDuration = (cond: string, extra: SQLQueryBindings[] = []): number =>
+    const sumDuration = (
+      cond: string,
+      extra: SQLQueryBindings[] = []
+    ): number =>
       (
         runScoped<{ t: number }>(
           `SELECT COALESCE(SUM(duration_s), 0) AS t FROM reading_sessions ${scoped(cond)}`,
@@ -306,10 +324,9 @@ export class Store {
       ).t
 
     const totalDurationS = sumDuration("duration_s IS NOT NULL")
-    const range =
-      runScoped<{ mn: number | null; mx: number | null }>(
-        `SELECT MIN(started_at) AS mn, MAX(started_at) AS mx FROM reading_sessions ${scoped("")}`
-      )[0] ?? { mn: null, mx: null }
+    const range = runScoped<{ mn: number | null; mx: number | null }>(
+      `SELECT MIN(started_at) AS mn, MAX(started_at) AS mx FROM reading_sessions ${scoped("")}`
+    )[0] ?? { mn: null, mx: null }
 
     // 本周（周一起）/ 本月边界（本地）
     const now = new Date(this.now())
@@ -319,13 +336,19 @@ export class Store {
       d.setDate(d.getDate() - dow)
       return d.getTime()
     })()
-    const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
-    const thisWeekS = sumDuration("duration_s IS NOT NULL AND started_at >= ?", [
-      weekStartMs,
-    ])
-    const thisMonthS = sumDuration("duration_s IS NOT NULL AND started_at >= ?", [
-      monthStartMs,
-    ])
+    const monthStartMs = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1
+    ).getTime()
+    const thisWeekS = sumDuration(
+      "duration_s IS NOT NULL AND started_at >= ?",
+      [weekStartMs]
+    )
+    const thisMonthS = sumDuration(
+      "duration_s IS NOT NULL AND started_at >= ?",
+      [monthStartMs]
+    )
 
     // 活跃日集合（真实+回填）→ streak / activeDays
     const dayRows = runScoped<{ d: string }>(
@@ -333,34 +356,53 @@ export class Store {
        FROM reading_sessions ${scoped("")}`
     )
     const dates = dayRows.map((r) => r.d)
-    const { currentStreak, longestStreak } = computeStreaks(dates, localDateStr(this.now()))
+    const { currentStreak, longestStreak } = computeStreaks(
+      dates,
+      localDateStr(this.now())
+    )
 
     // inventory：items/favorites/tags 按 site；groups/character_names 无 site 列 → 全局
     const countSite = (table: string): number =>
       site
         ? (
-            this.db.query(`SELECT COUNT(*) AS n FROM ${table} WHERE site = ?`).get(site) as {
+            this.db
+              .query(`SELECT COUNT(*) AS n FROM ${table} WHERE site = ?`)
+              .get(site) as {
               n: number
             }
           ).n
-        : (this.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+        : (
+            this.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
+              n: number
+            }
+          ).n
     const inventory: StatsInventory = {
       history: countSite("items"),
       favorites: countSite("favorites"),
       tags: site
         ? (
             this.db
-              .query("SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags WHERE site = ?)")
+              .query(
+                "SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags WHERE site = ?)"
+              )
               .get(site) as { n: number }
           ).n
         : (
-            this.db.query("SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags)").get() as {
+            this.db
+              .query(
+                "SELECT COUNT(*) AS n FROM (SELECT DISTINCT tag FROM tags)"
+              )
+              .get() as {
               n: number
             }
           ).n,
-      groups: (this.db.query("SELECT COUNT(*) AS n FROM groups").get() as { n: number }).n,
+      groups: (
+        this.db.query("SELECT COUNT(*) AS n FROM groups").get() as { n: number }
+      ).n,
       characters: (
-        this.db.query("SELECT COUNT(*) AS n FROM character_names").get() as { n: number }
+        this.db.query("SELECT COUNT(*) AS n FROM character_names").get() as {
+          n: number
+        }
       ).n,
     }
 
@@ -744,9 +786,7 @@ export class Store {
             "g.favorited DESC, g.updated_at DESC, g.id DESC"
 
     const totalRow = this.db
-      .query(
-        `SELECT COUNT(*) AS n FROM groups g ${where}`
-      )
+      .query(`SELECT COUNT(*) AS n FROM groups g ${where}`)
       .get(q, favOnly ? 1 : 0) as { n: number }
     const total = Number(totalRow.n ?? 0)
 
@@ -793,9 +833,7 @@ export class Store {
     }
   }
 
-  private membersForGroupIds(
-    ids: number[]
-  ): Map<number, GroupMember[]> {
+  private membersForGroupIds(ids: number[]): Map<number, GroupMember[]> {
     const map = new Map<number, GroupMember[]>()
     if (ids.length === 0) return map
     const placeholders = ids.map(() => "?").join(",")
@@ -821,19 +859,17 @@ export class Store {
         `SELECT id, key, title, author, genre, favorited, favorited_at, created_at, updated_at
          FROM groups WHERE id = ?1`
       )
-      .get(id) as
-      | {
-          id: number
-          key: string
-          title: string
-          author: string | null
-          genre: string | null
-          favorited: number
-          favorited_at: number | null
-          created_at: number
-          updated_at: number
-        }
-      | null
+      .get(id) as {
+      id: number
+      key: string
+      title: string
+      author: string | null
+      genre: string | null
+      favorited: number
+      favorited_at: number | null
+      created_at: number
+      updated_at: number
+    } | null
     if (!r) return null
     const items = this.db
       .query(
@@ -960,11 +996,13 @@ export class Store {
 
   pruneEmptyClusters(scope?: CharacterScope): void {
     if (scope) {
-      this.db.query(
-        `DELETE FROM character_clusters
+      this.db
+        .query(
+          `DELETE FROM character_clusters
          WHERE scope_type = ?1 AND scope_id = ?2
            AND id NOT IN (SELECT DISTINCT cluster_id FROM character_names)`
-      ).run(scope.type, scope.id)
+        )
+        .run(scope.type, scope.id)
     } else {
       this.db.exec(
         `DELETE FROM character_clusters
@@ -974,13 +1012,15 @@ export class Store {
   }
 
   listClusters(scope: CharacterScope): CharacterCluster[] {
-    const rows = this.db.query(
-      `SELECT c.id, c.hue, n.name
+    const rows = this.db
+      .query(
+        `SELECT c.id, c.hue, n.name
        FROM character_clusters c
        JOIN character_names n ON n.cluster_id = c.id
        WHERE c.scope_type = ?1 AND c.scope_id = ?2
        ORDER BY c.created_at, c.id, n.rowid`
-    ).all(scope.type, scope.id) as { id: number; hue: number; name: string }[]
+      )
+      .all(scope.type, scope.id) as { id: number; hue: number; name: string }[]
     const map = new Map<number, CharacterCluster>()
     const order: number[] = []
     for (const r of rows) {
@@ -1067,7 +1107,11 @@ export class Store {
     return hue
   }
 
-  mergeClusters(scope: CharacterScope, clusterIds: number[], hue: number): CharacterCluster[] {
+  mergeClusters(
+    scope: CharacterScope,
+    clusterIds: number[],
+    hue: number
+  ): CharacterCluster[] {
     const h = this.requireHue(hue)
     const uniq = [...new Set(clusterIds)]
     if (uniq.length < 2) throw new ExtractorError("invalid clusterIds", 400)
@@ -1076,52 +1120,74 @@ export class Store {
     this.db.transaction(() => {
       for (const id of uniq) {
         if (id === targetId) continue
-        this.db.query(
-          `UPDATE character_names SET cluster_id = ?1
+        this.db
+          .query(
+            `UPDATE character_names SET cluster_id = ?1
            WHERE cluster_id = ?2 AND scope_type = ?3 AND scope_id = ?4`
-        ).run(targetId, id, scope.type, scope.id)
+          )
+          .run(targetId, id, scope.type, scope.id)
       }
-      this.db.query(
-        `UPDATE character_clusters SET hue = ?1 WHERE id = ?2`
-      ).run(h, targetId)
+      this.db
+        .query(`UPDATE character_clusters SET hue = ?1 WHERE id = ?2`)
+        .run(h, targetId)
       this.pruneEmptyClusters(scope)
     })()
     return this.listClusters(scope)
   }
 
-  splitCharacter(scope: CharacterScope, clusterId: number, name: string): CharacterCluster[] {
+  splitCharacter(
+    scope: CharacterScope,
+    clusterId: number,
+    name: string
+  ): CharacterCluster[] {
     const c = this.getCluster(scope, clusterId)
-    if (!c.names.includes(name)) throw new ExtractorError("cluster not found", 404)
-    if (c.names.length < 2) throw new ExtractorError("cannot split singleton", 400)
+    if (!c.names.includes(name))
+      throw new ExtractorError("cluster not found", 404)
+    if (c.names.length < 2)
+      throw new ExtractorError("cannot split singleton", 400)
     const hue = pickHue(this.listClusters(scope).map((x) => x.hue))
     this.db.transaction(() => {
-      const r = this.db.query(
-        `INSERT INTO character_clusters (scope_type, scope_id, hue, created_at)
+      const r = this.db
+        .query(
+          `INSERT INTO character_clusters (scope_type, scope_id, hue, created_at)
          VALUES (?1, ?2, ?3, ?4)`
-      ).run(scope.type, scope.id, hue, this.now())
-      this.db.query(
-        `UPDATE character_names SET cluster_id = ?1
+        )
+        .run(scope.type, scope.id, hue, this.now())
+      this.db
+        .query(
+          `UPDATE character_names SET cluster_id = ?1
          WHERE scope_type = ?2 AND scope_id = ?3 AND name = ?4`
-      ).run(Number(r.lastInsertRowid), scope.type, scope.id, name)
+        )
+        .run(Number(r.lastInsertRowid), scope.type, scope.id, name)
     })()
     return this.listClusters(scope)
   }
 
-  recolorCluster(scope: CharacterScope, clusterId: number, hue: number): CharacterCluster[] {
+  recolorCluster(
+    scope: CharacterScope,
+    clusterId: number,
+    hue: number
+  ): CharacterCluster[] {
     const h = this.requireHue(hue)
     this.getCluster(scope, clusterId)
-    this.db.query(`UPDATE character_clusters SET hue = ?1 WHERE id = ?2`).run(h, clusterId)
+    this.db
+      .query(`UPDATE character_clusters SET hue = ?1 WHERE id = ?2`)
+      .run(h, clusterId)
     return this.listClusters(scope)
   }
 
   deleteGroupCascade(id: number): void {
     const sid = String(id)
-    this.db.query(
-      `DELETE FROM character_clusters WHERE scope_type = 'group' AND scope_id = ?1`
-    ).run(sid)
-    this.db.query(
-      `DELETE FROM character_names WHERE scope_type = 'group' AND scope_id = ?1`
-    ).run(sid)
+    this.db
+      .query(
+        `DELETE FROM character_clusters WHERE scope_type = 'group' AND scope_id = ?1`
+      )
+      .run(sid)
+    this.db
+      .query(
+        `DELETE FROM character_names WHERE scope_type = 'group' AND scope_id = ?1`
+      )
+      .run(sid)
     this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
     this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
   }
@@ -1234,9 +1300,7 @@ export class Store {
   /** 运行中更新中间进度（仅 running 行） */
   setJobResult(id: number, result: Record<string, unknown>): void {
     this.db
-      .query(
-        `UPDATE jobs SET result=?2 WHERE id=?1 AND status='running'`
-      )
+      .query(`UPDATE jobs SET result=?2 WHERE id=?1 AND status='running'`)
       .run(id, JSON.stringify(result))
   }
 
@@ -1374,8 +1438,7 @@ export class Store {
     const sortCol = SORT_COL[opts.sort]
     if (!sortCol) throw new Error(`invalid sort: ${opts.sort}`)
     // 默认 order：title→asc、tid/archived_at→desc
-    const order =
-      opts.order ?? (opts.sort === "title" ? "asc" : "desc")
+    const order = opts.order ?? (opts.sort === "title" ? "asc" : "desc")
     if (order !== "asc" && order !== "desc") {
       throw new Error(`invalid order: ${order}`)
     }
@@ -1427,16 +1490,14 @@ export class Store {
   getArchiveCursor(site: string): ArchiveCursor | null {
     const row = this.db
       .query("SELECT * FROM archive_cursors WHERE site = ?1")
-      .get(site) as
-      | {
-          site: string
-          next_mtid: string | null
-          mode: string
-          status: string
-          pages: number
-          updated_at: number
-        }
-      | null
+      .get(site) as {
+      site: string
+      next_mtid: string | null
+      mode: string
+      status: string
+      pages: number
+      updated_at: number
+    } | null
     if (!row) return null
     return {
       site: row.site,

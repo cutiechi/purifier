@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
-  characterHighlight,
-  normalizeCharacterName,
-} from "./character-highlight"
-import {
   LEGACY_SLOT_HUE,
+  characterHighlight,
   clampHue,
   flattenClusterMarks,
   isHue,
+  normalizeCharacterName,
   pickHue,
 } from "./character-highlight"
 

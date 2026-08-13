@@ -12,7 +12,10 @@ export function CharacterSwatch({
   return (
     <span
       aria-hidden
-      className={cn("character-swatch size-2.5 shrink-0 rounded-full", className)}
+      className={cn(
+        "character-swatch size-2.5 shrink-0 rounded-full",
+        className
+      )}
       style={{ ["--character-mark-h"]: String(clampHue(hue)) } as CSSProperties}
     />
   )

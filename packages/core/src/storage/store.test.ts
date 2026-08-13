@@ -4,7 +4,13 @@ import { mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openDatabase } from "./db"
-import { Store, computeStreaks, dayBefore, localDateStr, normalizeTag } from "./store"
+import {
+  Store,
+  computeStreaks,
+  dayBefore,
+  localDateStr,
+  normalizeTag,
+} from "./store"
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "purifier-db-"))
@@ -68,7 +74,11 @@ describe("openDatabase", () => {
       .query(
         "SELECT started_at, duration_s, estimated FROM reading_sessions ORDER BY started_at"
       )
-      .all() as { started_at: number; duration_s: number | null; estimated: number }[]
+      .all() as {
+      started_at: number
+      duration_s: number | null
+      estimated: number
+    }[]
     expect(rows).toEqual([
       { started_at: 1000, duration_s: null, estimated: 1 },
       { started_at: 5000, duration_s: null, estimated: 1 },
@@ -78,7 +88,9 @@ describe("openDatabase", () => {
     db2.close()
     const db3 = openDatabase(dir)
     const n = (
-      db3.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as { n: number }
+      db3.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as {
+        n: number
+      }
     ).n
     expect(n).toBe(2)
     db3.close()
@@ -103,7 +115,9 @@ describe("openDatabase", () => {
       .get() as { sql: string } | null
     expect(ddl?.sql).toMatch(/cluster_id/)
     expect(ddl?.sql).not.toMatch(/color_index/)
-    expect(ddl?.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*scope_type,\s*scope_id,\s*name/i)
+    expect(ddl?.sql).toMatch(
+      /PRIMARY\s+KEY\s*\(\s*scope_type,\s*scope_id,\s*name/i
+    )
 
     const idx = db
       .query(
@@ -111,6 +125,20 @@ describe("openDatabase", () => {
       )
       .get() as { name: string } | null
     expect(idx?.name).toBe("group_items_tid_unique")
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_character_names_cluster'"
+        )
+        .get()
+    ).toBeTruthy()
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_character_clusters_scope'"
+        )
+        .get()
+    ).toBeTruthy()
 
     db.close()
     rmSync(dir, { recursive: true, force: true })
@@ -816,11 +844,21 @@ test("exportBackup includes reading_sessions", () => {
   const dir = tempDir()
   const db = openDatabase(dir)
   const store = new Store(db)
-  store.recordSession({ site: "1", kind: "post", itemId: "a", title: "A", startedAt: 7, durationS: 9 })
+  store.recordSession({
+    site: "1",
+    kind: "post",
+    itemId: "a",
+    title: "A",
+    startedAt: 7,
+    durationS: 9,
+  })
   const backup = store.exportBackup()
   expect(Array.isArray(backup.reading_sessions)).toBe(true)
   expect(backup.reading_sessions.length).toBe(1)
-  expect(backup.reading_sessions[0]).toMatchObject({ item_id: "a", duration_s: 9 })
+  expect(backup.reading_sessions[0]).toMatchObject({
+    item_id: "a",
+    duration_s: 9,
+  })
   db.close()
   rmSync(dir, { recursive: true, force: true })
 })
@@ -832,13 +870,15 @@ describe("computeStreaks", () => {
       computeStreaks(["2026-08-10", "2026-08-11", "2026-08-12"], today)
     ).toEqual({ currentStreak: 3, longestStreak: 3 })
     // 今天还没读 → 以昨天为锚
-    expect(
-      computeStreaks(["2026-08-10", "2026-08-11"], today)
-    ).toEqual({ currentStreak: 2, longestStreak: 2 })
+    expect(computeStreaks(["2026-08-10", "2026-08-11"], today)).toEqual({
+      currentStreak: 2,
+      longestStreak: 2,
+    })
     // 今天和昨天都没有 → 0（历史最长仍算）
-    expect(
-      computeStreaks(["2026-08-01", "2026-08-09"], today)
-    ).toEqual({ currentStreak: 0, longestStreak: 1 })
+    expect(computeStreaks(["2026-08-01", "2026-08-09"], today)).toEqual({
+      currentStreak: 0,
+      longestStreak: 1,
+    })
   })
   test("longest run independent of current", () => {
     expect(
@@ -900,10 +940,28 @@ describe("getStats", () => {
        VALUES ('1','post','old2','Old2',?1,NULL,1)`
     ).run(at(2026, 8, 12, 6))
     // 今天真实段：post a 读 60s @10:00，book b 读 120s @22:00
-    store.recordSession({ site: "1", kind: "post", itemId: "a", title: "A", startedAt: at(2026, 8, 12, 10), durationS: 60 })
-    store.recordSession({ site: "2", kind: "book", itemId: "b", title: "B", startedAt: at(2026, 8, 12, 22), durationS: 120 })
+    store.recordSession({
+      site: "1",
+      kind: "post",
+      itemId: "a",
+      title: "A",
+      startedAt: at(2026, 8, 12, 10),
+      durationS: 60,
+    })
+    store.recordSession({
+      site: "2",
+      kind: "book",
+      itemId: "b",
+      title: "B",
+      startedAt: at(2026, 8, 12, 22),
+      durationS: 120,
+    })
     // I2：groups 无 site 列，带 site 过滤时仍全局计数
-    store.upsertGroup({ key: "k", title: "G", items: [{ tid: "g1", title: "GT" }] })
+    store.upsertGroup({
+      key: "k",
+      title: "G",
+      items: [{ tid: "g1", title: "GT" }],
+    })
     // inventory 的 site 作用域：items/favorites/tags 按 site 计数；groups/character_names 全局。
     // recordVisit 只写 items、不回填 reading_sessions（回填仅在 openDatabase 且会话表为空时触发）→ 不影响上面日期/时长断言
     store.recordVisit("1", "post", "h1", "H1", "/read/h1")
@@ -925,14 +983,30 @@ describe("getStats", () => {
     expect(all.summary.thisWeekS).toBe(180)
     // calendar：08-09 纯回填 estimated=1；08-12 混合（回填+真实）estimated=0、durationS=180
     const cal = Object.fromEntries(all.calendar.map((c) => [c.date, c]))
-    expect(cal["2026-08-09"]).toEqual({ date: "2026-08-09", durationS: 0, estimated: 1 })
-    expect(cal["2026-08-12"]).toEqual({ date: "2026-08-12", durationS: 180, estimated: 0 })
+    expect(cal["2026-08-09"]).toEqual({
+      date: "2026-08-09",
+      durationS: 0,
+      estimated: 1,
+    })
+    expect(cal["2026-08-12"]).toEqual({
+      date: "2026-08-12",
+      durationS: 180,
+      estimated: 0,
+    })
     // timeOfDay：下标 10=60，22=120
     expect(all.timeOfDay[10]).toBe(60)
     expect(all.timeOfDay[22]).toBe(120)
     // topItems：b(120) 在 a(60) 之前；title 取 max(started_at) 段
-    expect(all.topItems[0]).toMatchObject({ id: "b", durationS: 120, title: "B" })
-    expect(all.topItems[1]).toMatchObject({ id: "a", durationS: 60, title: "A" })
+    expect(all.topItems[0]).toMatchObject({
+      id: "b",
+      durationS: 120,
+      title: "B",
+    })
+    expect(all.topItems[1]).toMatchObject({
+      id: "a",
+      durationS: 60,
+      title: "A",
+    })
     // recentSessions 只含真实段
     expect(all.recentSessions.length).toBe(2)
     expect(all.recentSessions[0]).toMatchObject({ id: "b" })
@@ -972,12 +1046,8 @@ test("migrates character_names color_index to clusters", () => {
       PRIMARY KEY (scope_type, scope_id, name)
     );
   `)
-  raw.query(
-    `INSERT INTO character_names VALUES ('post','1','甲',0,1)`
-  ).run()
-  raw.query(
-    `INSERT INTO character_names VALUES ('post','1','乙',7,2)`
-  ).run()
+  raw.query(`INSERT INTO character_names VALUES ('post','1','甲',0,1)`).run()
+  raw.query(`INSERT INTO character_names VALUES ('post','1','乙',7,2)`).run()
   raw.close()
 
   const db = openDatabase(dir)

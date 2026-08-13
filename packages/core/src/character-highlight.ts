@@ -9,7 +9,12 @@ export type { CharacterCluster, CharacterMark, CharacterScope }
 export const LEGACY_SLOT_HUE = [85, 160, 220, 300, 30, 350] as const
 
 export function isHue(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 359
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 359
+  )
 }
 
 export function clampHue(hue: number): number {
@@ -66,8 +71,7 @@ export function characterHighlight(
     .filter((c) => c.name.length > 0)
     .slice()
     .sort(
-      (a, b) =>
-        b.name.length - a.name.length || a.name.localeCompare(b.name)
+      (a, b) => b.name.length - a.name.length || a.name.localeCompare(b.name)
     )
   if (!names.length) return html
 
