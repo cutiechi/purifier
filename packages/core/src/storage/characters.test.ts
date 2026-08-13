@@ -209,4 +209,50 @@ describe("characters", () => {
     expect(bak.character_names.length).toBe(1)
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test("mergeClusters moves names to min id and sets hue", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "甲")
+    const b = store.addCharacter(scope, "乙")
+    const out = store.mergeClusters(scope, [b.id, a.id], 10)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.id).toBe(Math.min(a.id, b.id))
+    expect(out[0]!.hue).toBe(10)
+    expect(out[0]!.names.sort()).toEqual(["乙", "甲"])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("splitCharacter assigns a new hue", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "林远")
+    store.addCharacter(scope, "少爷", a.id)
+    const out = store.splitCharacter(scope, a.id, "少爷")
+    expect(out).toHaveLength(2)
+    const orig = out.find((c) => c.names.includes("林远"))!
+    const neu = out.find((c) => c.names.includes("少爷"))!
+    expect(neu.id).not.toBe(orig.id)
+    expect(neu.hue).not.toBe(orig.hue)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("split singleton is 400", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "甲")
+    expect(() => store.splitCharacter(scope, a.id, "甲")).toThrow(ExtractorError)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("recolorCluster only changes that cluster", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "甲")
+    const b = store.addCharacter(scope, "乙")
+    store.recolorCluster(scope, a.id, 33)
+    expect(store.getCluster(scope, a.id).hue).toBe(33)
+    expect(store.getCluster(scope, b.id).hue).toBe(b.hue)
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

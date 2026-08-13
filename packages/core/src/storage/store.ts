@@ -1062,6 +1062,58 @@ export class Store {
     return changes
   }
 
+  requireHue(hue: number): number {
+    if (!isHue(hue)) throw new ExtractorError("invalid hue", 400)
+    return hue
+  }
+
+  mergeClusters(scope: CharacterScope, clusterIds: number[], hue: number): CharacterCluster[] {
+    const h = this.requireHue(hue)
+    const uniq = [...new Set(clusterIds)]
+    if (uniq.length < 2) throw new ExtractorError("invalid clusterIds", 400)
+    const clusters = uniq.map((id) => this.getCluster(scope, id))
+    const targetId = Math.min(...clusters.map((c) => c.id))
+    this.db.transaction(() => {
+      for (const id of uniq) {
+        if (id === targetId) continue
+        this.db.query(
+          `UPDATE character_names SET cluster_id = ?1
+           WHERE cluster_id = ?2 AND scope_type = ?3 AND scope_id = ?4`
+        ).run(targetId, id, scope.type, scope.id)
+      }
+      this.db.query(
+        `UPDATE character_clusters SET hue = ?1 WHERE id = ?2`
+      ).run(h, targetId)
+      this.pruneEmptyClusters(scope)
+    })()
+    return this.listClusters(scope)
+  }
+
+  splitCharacter(scope: CharacterScope, clusterId: number, name: string): CharacterCluster[] {
+    const c = this.getCluster(scope, clusterId)
+    if (!c.names.includes(name)) throw new ExtractorError("cluster not found", 404)
+    if (c.names.length < 2) throw new ExtractorError("cannot split singleton", 400)
+    const hue = pickHue(this.listClusters(scope).map((x) => x.hue))
+    this.db.transaction(() => {
+      const r = this.db.query(
+        `INSERT INTO character_clusters (scope_type, scope_id, hue, created_at)
+         VALUES (?1, ?2, ?3, ?4)`
+      ).run(scope.type, scope.id, hue, this.now())
+      this.db.query(
+        `UPDATE character_names SET cluster_id = ?1
+         WHERE scope_type = ?2 AND scope_id = ?3 AND name = ?4`
+      ).run(Number(r.lastInsertRowid), scope.type, scope.id, name)
+    })()
+    return this.listClusters(scope)
+  }
+
+  recolorCluster(scope: CharacterScope, clusterId: number, hue: number): CharacterCluster[] {
+    const h = this.requireHue(hue)
+    this.getCluster(scope, clusterId)
+    this.db.query(`UPDATE character_clusters SET hue = ?1 WHERE id = ?2`).run(h, clusterId)
+    return this.listClusters(scope)
+  }
+
   deleteGroupCascade(id: number): void {
     const sid = String(id)
     this.db.query(
