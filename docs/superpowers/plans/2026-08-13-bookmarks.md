@@ -1081,5 +1081,5 @@ git commit -m "docs: bookmarks API in AGENTS and stats inventory card"
 - `Bookmark`, `AddBookmarkResult`, `reason: "not_found" \| "full" \| "invalid_quote"`
 - Store: `addBookmark`, `listItemBookmarks`, `listBookmarks`, `updateBookmarkNote`, `deleteBookmark`
 - Hook: `useBookmarks`, `syncFromViewport`
-- UI: `ReadingSelectionToolbar`, `BookmarkList`
-- Locate: `scrollToQuote`, `scrollToProgress`
+- UI: `ReadingSelectionToolbar`（`onBookmark(quote, note)`；`mode: "select" | "bookmark"`）、`BookmarkList`（`staleId?: number`）
+- Locate: `scrollToQuote`（`behavior: "instant"`）、`scrollToProgress`
