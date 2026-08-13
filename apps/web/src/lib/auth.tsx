@@ -27,6 +27,8 @@ type AuthConfigResponse = {
 type AuthContextValue = {
   ready: boolean
   enabled: boolean
+  /** 服务端确认无会话（me 401 / callback 失败 / 登出）；false 不代表已登录 */
+  loggedOut: boolean
   user: AuthMe | null
   /** 登录按钮文案（来自 GET /api/auth/config 的 buttonText） */
   buttonText: string
@@ -45,6 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(false)
   const [buttonText, setButtonText] = useState("登录")
   const [user, setUser] = useState<AuthMe | null>(null)
+  /** 服务端确认无会话（me 401 / callback 失败 / 登出）；false 不代表已登录 */
+  const [loggedOut, setLoggedOut] = useState(false)
 
   // 启动拉一次 config；enabled 时再验 me（200 设用户，401 未登录）。
   // 拉取失败保持未 ready（AuthGate 转圈），不误判为公开站。
@@ -63,8 +67,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (meRes.ok) {
             const me = (await meRes.json()) as AuthMe
             setUser(me)
-          } else {
+            setLoggedOut(false)
+          } else if (meRes.status === 401) {
+            // 仅 401 视为未登录；5xx 等保持未知，站点照常可用
             setUser(null)
+            setLoggedOut(true)
           }
         }
         setReady(true)
@@ -98,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ url }),
         })
         if (!res.ok) {
+          setLoggedOut(true)
           const data = (await res.json().catch(() => null)) as {
             error?: string
           } | null
@@ -105,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         const data = (await res.json()) as { ok: true; user: AuthMe }
         setUser(data.user)
+        setLoggedOut(false)
         return { ok: true }
       } catch {
         return { error: "登录校验失败，请重试" }
@@ -116,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await fetch(api.authLogout, { method: "POST" })
     setUser(null)
+    setLoggedOut(true)
     navigate(routes.login)
   }, [navigate])
 
@@ -123,13 +133,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       enabled,
+      loggedOut,
       user,
       buttonText,
       login,
       logout,
       completeCallback,
     }),
-    [ready, enabled, user, buttonText, login, logout, completeCallback]
+    [ready, enabled, loggedOut, user, buttonText, login, logout, completeCallback]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -148,17 +159,19 @@ export function safeFrom(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
     return "/"
   }
-  if (raw.includes("://")) return "/"
+  // 反斜杠会被 WHATWG URL 解析当作正斜杠（/\\evil.com → //evil.com 跨源），一并拒绝
+  if (raw.includes("\\") || raw.includes("://")) return "/"
   return raw
 }
 
 /** 未 ready 转圈；enabled 未登录把业务页导向 /login；未开启时 /login 回首页 */
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { ready, enabled, user } = useAuth()
+  const { ready, enabled, loggedOut } = useAuth()
   const { pathname } = useLocation()
 
   if (!ready) return <Spinner />
-  if (enabled && !user && pathname !== routes.login) {
+  // 仅「确认未登录」（me 401）才拦到 /login；me 5xx 等未知态放行，避免误弹登录页
+  if (enabled && loggedOut && pathname !== routes.login) {
     return (
       <Navigate
         to={`${routes.login}?from=${encodeURIComponent(pathname)}`}
