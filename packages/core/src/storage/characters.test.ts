@@ -45,18 +45,40 @@ describe("characters", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("addCharacter color_index starts at 0 and increments", () => {
+  test("addCharacter creates cluster hue 85 then a different hue", () => {
     const { dir, store } = tempStore()
     const scope = { type: "post" as const, id: "1" }
-    expect(store.addCharacter(scope, "甲").colorIndex).toBe(0)
-    expect(store.addCharacter(scope, "乙").colorIndex).toBe(1)
-    const again = store.addCharacter(scope, "甲")
-    expect(again.colorIndex).toBe(0) // 幂等不改色
-    expect(store.listCharacters(scope)).toHaveLength(2)
+    const a = store.addCharacter(scope, "甲")
+    expect(a.hue).toBe(85)
+    expect(a.names).toEqual(["甲"])
+    const b = store.addCharacter(scope, "乙")
+    expect(b.hue).not.toBe(a.hue)
+    expect(store.addCharacter(scope, "甲").id).toBe(a.id) // 幂等
+    expect(store.listClusters(scope)).toHaveLength(2)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("removeCharacter and empty MAX resets", () => {
+  test("addCharacter with clusterId inherits hue", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "林远")
+    const b = store.addCharacter(scope, "少爷", a.id)
+    expect(b.id).toBe(a.id)
+    expect(b.hue).toBe(a.hue)
+    expect(b.names).toEqual(["林远", "少爷"])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("addCharacter cross-cluster name is 409", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    store.addCharacter(scope, "甲")
+    const b = store.addCharacter(scope, "乙")
+    expect(() => store.addCharacter(scope, "甲", b.id)).toThrow(ExtractorError)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("remove last name prunes empty cluster", () => {
     const { dir, store } = tempStore()
     const scope = { type: "book" as const, id: "c1" }
     store.addCharacter(scope, "甲")
@@ -64,7 +86,8 @@ describe("characters", () => {
     expect(store.removeCharacter(scope, "甲")).toBe(1)
     expect(store.removeCharacter(scope, "甲")).toBe(0)
     store.removeCharacter(scope, "乙")
-    expect(store.addCharacter(scope, "丙").colorIndex).toBe(0)
+    expect(store.listClusters(scope)).toEqual([])
+    expect(store.addCharacter(scope, "丙").hue).toBe(85)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -78,7 +101,7 @@ describe("characters", () => {
     const scope = { type: "group" as const, id: String(g.id) }
     store.addCharacter(scope, "甲")
     store.deleteGroup(g.id)
-    expect(store.listCharacters(scope)).toEqual([])
+    expect(store.listClusters(scope)).toEqual([])
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -92,7 +115,7 @@ describe("characters", () => {
     store.addCharacter({ type: "group", id: String(g.id) }, "甲")
     const r = store.removeGroupItems(g.id, ["1"])
     expect(r.deleted).toBe(true)
-    expect(store.listCharacters({ type: "group", id: String(g.id) })).toEqual(
+    expect(store.listClusters({ type: "group", id: String(g.id) })).toEqual(
       []
     )
     rmSync(dir, { recursive: true, force: true })
@@ -164,8 +187,8 @@ describe("characters", () => {
     expect(store.resolveCharacterScope("post", "1").type).toBe("group")
     expect(
       store
-        .listCharacters(store.resolveCharacterScope("post", "1"))
-        .map((c) => c.name)
+        .listClusters(store.resolveCharacterScope("post", "1"))
+        .flatMap((c) => c.names)
     ).toEqual(["组内"])
     store.removeGroupItems(g.id, ["1"])
     expect(store.resolveCharacterScope("post", "1")).toEqual({
@@ -173,7 +196,7 @@ describe("characters", () => {
       id: "1",
     })
     expect(
-      store.listCharacters({ type: "post", id: "1" }).map((c) => c.name)
+      store.listClusters({ type: "post", id: "1" }).flatMap((c) => c.names)
     ).toEqual(["独有"])
     rmSync(dir, { recursive: true, force: true })
   })

@@ -1,11 +1,12 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import type { SiteId } from "../extractor"
 import { ExtractorError } from "../extractor/types"
+import { isHue, pickHue } from "../character-highlight"
 import {
   ArchiveCursor,
   ArchiveCursorStatus,
   ArchivePost,
-  CharacterName,
+  CharacterCluster,
   CharacterScope,
   Group,
   GroupMember,
@@ -957,48 +958,99 @@ export class Store {
     return { type: "post", id }
   }
 
-  listCharacters(scope: CharacterScope): CharacterName[] {
-    const rows = this.db
-      .query(
-        `SELECT name, color_index FROM character_names
+  pruneEmptyClusters(scope?: CharacterScope): void {
+    if (scope) {
+      this.db.query(
+        `DELETE FROM character_clusters
          WHERE scope_type = ?1 AND scope_id = ?2
-         ORDER BY created_at, name`
+           AND id NOT IN (SELECT DISTINCT cluster_id FROM character_names)`
+      ).run(scope.type, scope.id)
+    } else {
+      this.db.exec(
+        `DELETE FROM character_clusters
+         WHERE id NOT IN (SELECT DISTINCT cluster_id FROM character_names)`
       )
-      .all(scope.type, scope.id) as { name: string; color_index: number }[]
-    return rows.map((r) => ({ name: r.name, colorIndex: r.color_index }))
+    }
   }
 
-  addCharacter(scope: CharacterScope, name: string): CharacterName {
+  listClusters(scope: CharacterScope): CharacterCluster[] {
+    const rows = this.db.query(
+      `SELECT c.id, c.hue, n.name
+       FROM character_clusters c
+       JOIN character_names n ON n.cluster_id = c.id
+       WHERE c.scope_type = ?1 AND c.scope_id = ?2
+       ORDER BY c.created_at, c.id, n.rowid`
+    ).all(scope.type, scope.id) as { id: number; hue: number; name: string }[]
+    const map = new Map<number, CharacterCluster>()
+    const order: number[] = []
+    for (const r of rows) {
+      let c = map.get(r.id)
+      if (!c) {
+        c = { id: r.id, hue: r.hue, names: [] }
+        map.set(r.id, c)
+        order.push(r.id)
+      }
+      c.names.push(r.name)
+    }
+    return order.map((id) => map.get(id)!)
+  }
+
+  getCluster(scope: CharacterScope, clusterId: number): CharacterCluster {
+    const all = this.listClusters(scope)
+    const hit = all.find((c) => c.id === clusterId)
+    if (!hit) throw new ExtractorError("cluster not found", 404)
+    return hit
+  }
+
+  addCharacter(
+    scope: CharacterScope,
+    name: string,
+    clusterId?: number
+  ): CharacterCluster {
     const existing = this.db
       .query(
-        `SELECT name, color_index FROM character_names
+        `SELECT cluster_id FROM character_names
          WHERE scope_type = ?1 AND scope_id = ?2 AND name = ?3`
       )
-      .get(scope.type, scope.id, name) as
-      | { name: string; color_index: number }
-      | null
+      .get(scope.type, scope.id, name) as { cluster_id: number } | null
     if (existing) {
-      return { name: existing.name, colorIndex: existing.color_index }
+      if (clusterId === undefined || clusterId === existing.cluster_id) {
+        return this.getCluster(scope, existing.cluster_id)
+      }
+      throw new ExtractorError("character belongs to another cluster", 409)
     }
-    const maxRow = this.db
+    if (clusterId !== undefined) {
+      this.getCluster(scope, clusterId)
+      this.db
+        .query(
+          `INSERT INTO character_names
+             (scope_type, scope_id, name, cluster_id, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5)`
+        )
+        .run(scope.type, scope.id, name, clusterId, this.now())
+      return this.getCluster(scope, clusterId)
+    }
+    const used = this.listClusters(scope).map((c) => c.hue)
+    const hue = pickHue(used)
+    const inserted = this.db
       .query(
-        `SELECT MAX(color_index) AS m FROM character_names
-         WHERE scope_type = ?1 AND scope_id = ?2`
+        `INSERT INTO character_clusters (scope_type, scope_id, hue, created_at)
+         VALUES (?1, ?2, ?3, ?4)`
       )
-      .get(scope.type, scope.id) as { m: number | null }
-    const colorIndex = (maxRow.m ?? -1) + 1
+      .run(scope.type, scope.id, hue, this.now())
+    const newId = Number(inserted.lastInsertRowid)
     this.db
       .query(
         `INSERT INTO character_names
-           (scope_type, scope_id, name, color_index, created_at)
+           (scope_type, scope_id, name, cluster_id, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)`
       )
-      .run(scope.type, scope.id, name, colorIndex, this.now())
-    return { name, colorIndex }
+      .run(scope.type, scope.id, name, newId, this.now())
+    return this.getCluster(scope, newId)
   }
 
   removeCharacter(scope: CharacterScope, name: string): number {
-    return Number(
+    const changes = Number(
       this.db
         .query(
           `DELETE FROM character_names
@@ -1006,15 +1058,18 @@ export class Store {
         )
         .run(scope.type, scope.id, name).changes ?? 0
     )
+    this.pruneEmptyClusters(scope)
+    return changes
   }
 
   deleteGroupCascade(id: number): void {
-    this.db
-      .query(
-        `DELETE FROM character_names
-         WHERE scope_type = 'group' AND scope_id = ?1`
-      )
-      .run(String(id))
+    const sid = String(id)
+    this.db.query(
+      `DELETE FROM character_clusters WHERE scope_type = 'group' AND scope_id = ?1`
+    ).run(sid)
+    this.db.query(
+      `DELETE FROM character_names WHERE scope_type = 'group' AND scope_id = ?1`
+    ).run(sid)
     this.db.query("DELETE FROM group_items WHERE group_id = ?1").run(id)
     this.db.query("DELETE FROM groups WHERE id = ?1").run(id)
   }
