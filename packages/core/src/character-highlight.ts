@@ -1,8 +1,10 @@
-export type {
+import type {
   CharacterCluster,
   CharacterMark,
   CharacterScope,
 } from "./storage/types"
+
+export type { CharacterCluster, CharacterMark, CharacterScope }
 
 export const LEGACY_SLOT_HUE = [85, 160, 220, 300, 30, 350] as const
 
