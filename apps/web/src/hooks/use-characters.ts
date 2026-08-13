@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import type {
-  CharacterName,
-  CharacterScope,
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  flattenClusterMarks,
+  type CharacterCluster,
+  type CharacterScope,
 } from "@workspace/core/character-highlight"
 import { api } from "@/lib/routes"
 
@@ -28,10 +29,12 @@ export function useCharacterHighlightEnabled() {
 }
 
 export function useCharacters(kind: "post" | "book", id: string) {
-  const [characters, setCharacters] = useState<CharacterName[]>([])
+  const [clusters, setClusters] = useState<CharacterCluster[]>([])
   const [scope, setScope] = useState<CharacterScope | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+
+  const marks = useMemo(() => flattenClusterMarks(clusters), [clusters])
 
   // 防止慢的旧请求（kind/id 已切换）覆盖新作用域：序号递增，过期响应直接丢弃
   const seqRef = useRef(0)
@@ -52,7 +55,7 @@ export function useCharacters(kind: "post" | "book", id: string) {
         return
       }
       setScope(json.scope)
-      setCharacters(json.characters ?? [])
+      setClusters(json.clusters ?? [])
     } catch (e) {
       if (seq === seqRef.current) {
         setError(e instanceof Error ? e.message : "加载人物失败")
@@ -67,24 +70,35 @@ export function useCharacters(kind: "post" | "book", id: string) {
   }, [reload])
 
   const add = useCallback(
-    async (name: string) => {
+    async (name: string, clusterId?: number) => {
+      const body: Record<string, unknown> = { kind, id, name }
+      if (clusterId !== undefined) body.clusterId = clusterId
       const res = await fetch(api.meCharacters, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind, id, name }),
+        body: JSON.stringify(body),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || "标记失败")
-      setCharacters(json.characters ?? [])
-      return json as { characters: CharacterName[] }
+      setClusters(json.clusters ?? [])
+      return json as { ok: boolean; cluster: CharacterCluster; clusters: CharacterCluster[] }
     },
     [kind, id]
   )
 
-  // 乐观删除本地列表；失败 reload 回滚（服务端权威列表，避免旧快照复活已删名字、丢弃并发新增）
+  // 乐观删除本地集群；失败 reload 回滚（服务端权威列表，避免旧快照复活已删名字、丢弃并发新增）。
+  // 最后一个称呼被删时集群被清掉，与 store pruneEmptyClusters 一致。
   const remove = useCallback(
     async (name: string) => {
-      setCharacters((c) => c.filter((x) => x.name !== name))
+      setClusters((prev) =>
+        prev
+          .map((c) =>
+            c.names.includes(name)
+              ? { ...c, names: c.names.filter((n) => n !== name) }
+              : c
+          )
+          .filter((c) => c.names.length > 0)
+      )
       const q = new URLSearchParams({ kind, id, name })
       const res = await fetch(`${api.meCharacters}?${q}`, { method: "DELETE" })
       const json = await res.json()
@@ -92,10 +106,47 @@ export function useCharacters(kind: "post" | "book", id: string) {
         await reload()
         throw new Error(json.error || "删除失败")
       }
-      return json as { removed: number }
+      return json as { ok: boolean; removed: number }
     },
     [kind, id, reload]
   )
 
-  return { characters, scope, error, loading, reload, add, remove }
+  // 集群级 PATCH：merge / split / recolor，成功以服务端权威 clusters 整体覆盖
+  const patchOp = useCallback(
+    async (op: string, body: Record<string, unknown>) => {
+      const res = await fetch(api.meCharacters, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, id, op, ...body }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || "操作失败")
+      setClusters(json.clusters ?? [])
+      return json as { ok: boolean; clusters: CharacterCluster[] }
+    },
+    [kind, id]
+  )
+
+  const merge = useCallback(
+    async (clusterIds: number[], hue: number) => {
+      return patchOp("merge", { clusterIds, hue })
+    },
+    [patchOp]
+  )
+
+  const split = useCallback(
+    async (clusterId: number, name: string) => {
+      return patchOp("split", { clusterId, name })
+    },
+    [patchOp]
+  )
+
+  const recolor = useCallback(
+    async (clusterId: number, hue: number) => {
+      return patchOp("recolor", { clusterId, hue })
+    },
+    [patchOp]
+  )
+
+  return { clusters, marks, scope, error, loading, reload, add, remove, merge, split, recolor }
 }

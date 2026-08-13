@@ -34,7 +34,7 @@ export function ContentBody({
   onCharacterClick,
 }: {
   html: string
-  characters?: { name: string; colorIndex: number }[]
+  characters?: { name: string; hue: number }[]
   highlightEnabled?: boolean
   onCharacterClick?: (name: string, rect: DOMRect) => void
 }) {
@@ -113,7 +113,7 @@ export function ArticleView({
   actions?: ReactNode
   footer?: ReactNode
   progress?: number
-  characters?: { name: string; colorIndex: number }[]
+  characters?: { name: string; hue: number }[]
   highlightEnabled?: boolean
   onCharacterClick?: (name: string, rect: DOMRect) => void
 }) {
