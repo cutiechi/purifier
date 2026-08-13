@@ -1,7 +1,7 @@
 # 正文选区书签
 
 日期：2026-08-13
-状态：brainstorming 已通过；待写实施计划
+状态：brainstorming 已通过；已按 `review.md` 修订；待写实施计划
 
 ## 背景
 
@@ -87,6 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
   ON bookmarks (created_at DESC);
 ```
 
+**不建 FOREIGN KEY。** 级联删除由 store 的 `purgeItem` / `clearHistory` 显式 `DELETE` 完成，与 `favorites` / `tags` 相同。`purgeItem` 在删 `items` 之前先删该书签。
+
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 自增主键 |
@@ -110,14 +112,21 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 
 不向 `GET /api/me/state` 塞书签列表；阅读页用「当前篇」GET。
 
+`GET /api/me/stats` 的 `inventory` 增加 `bookmarks`（书签行数）。有 `site` 时按站计数（表上有 `site` 列，与 `items`/`favorites` 相同）；省略 `site` 跨站。`StatsInventory`、`getStats`、统计页库存卡片一并加上。
+
 ## API
 
 全部 `/api/me/bookmarks*`，`NO_STORE_HEADERS`。错误体 `{ "error": "..." }`。
 
+同一个 `GET /api/me/bookmarks` 按 query **分流**，优先级写死：
+
+1. `kind` 与 `id` **同时有值** → **当前篇**语义：返回 `{ items }`（不分页），忽略 `q` / `page`。论坛帖不要带 `chapter`；书库**必须**带有限数字 `chapter`，否则 400。无记录 `{ items: [] }`。
+2. 只给了 `kind`、`id` 其中之一 → **400**。
+3. 否则 → **全局跨站列表**：`q` 搜摘录/备注/文章标题；可选 `kind` 过滤帖/书；`page` 分页。每页 **20**（与 store `PAGE_SIZE` / 前端 `ME_PAGE_SIZE` 相同），不另暴露 `limit`。返回 `{ items, nextPage?, total }`，按 `created_at` 新→旧。
+
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
-| `GET` | `/api/me/bookmarks` | 全局跨站列表。`q` 搜摘录/备注/文章标题；`kind`、`page`、`limit`（默认 50、上限 100）。返回 `{ items, nextPage?, total }`。按 `created_at` 新→旧。 |
-| `GET` | `/api/me/bookmarks?kind=&id=` | 当前篇书签，不分页。论坛帖不要带 `chapter`。书库**必须**带 `chapter`，否则 400（不返回全书所有章）。无记录 `{ items: [] }`。 |
+| `GET` | `/api/me/bookmarks` | 见上方分流。 |
 | `POST` | `/api/me/bookmarks` | body `{ kind, id, quote, site?, chapter?, note?, scrollProgress }`。`site` 默认 `"1"`。成功 `{ ok, bookmark }`。 |
 | `PATCH` | `/api/me/bookmarks/:id` | 只改 `note`（可清空）。不存在 404。 |
 | `DELETE` | `/api/me/bookmarks/:id` | `{ ok, removed }`。不存在 404。 |
@@ -126,11 +135,11 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 
 状态码：
 
-- 未访问过的条目：404。
-- `quote` / `note` 非法、`scrollProgress` 非有限数字、书库缺 `chapter`：400。
+- 未访问过的条目：**写**接口 404。
+- `quote` / `note` 非法、`scrollProgress` 非有限数字、书库缺 `chapter`、GET 只给了 `kind`/`id` 其一：400。
 - 该篇/该章已满 50：409。
 
-`GET /api/me/export` 的 JSON `version` 升到 **3**，增加 `bookmarks` 数组。旧备份（version 1/2）仍可按现有字段导出形状理解；本次不新做导入端点。
+`GET /api/me/export` 的 JSON `version` 升到 **3**，增加 `bookmarks` 数组。`exportBackup` 返回类型字面量从 `{ version: 2, ... }` 改为 `{ version: 3, ..., bookmarks: ... }`；现有 `expect(bak.version).toBe(2)` 的测试改为 `3`。本次不新做导入端点。
 
 `DELETE /api/me/history` 删 item 时级联删书签，无需新参数。
 
@@ -140,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 
 ### 选区浮条
 
-把现有 `CharacterSelectionToolbar` 扩成阅读选区浮条（可改名，职责仍是一个组件）：
+组件**改名**：`CharacterSelectionToolbar` → `ReadingSelectionToolbar`，文件 `apps/web/src/components/reading-selection-toolbar.tsx`。`ReadPage` / `BookPage` 的 import 与 JSX 同步改掉。
 
 - 选区落在 `.reading-body` 且非折叠即出现（不再要求先通过 `normalizeCharacterName`）。
 - 两个并列动作：**书签**、**人物**。
@@ -159,20 +168,26 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 ### 「我的 → 书签」`/bookmarks`
 
 - `ME_TABS` 增加「书签」；`useMeTabs` 的 `to` **不**走 `siteUrl`。
+- `NAV_ITEMS` 里「我的」的 `match` 加上 `p === routes.bookmarks`，否则书签页顶栏「我的」不高亮。
 - `apps/web/src/App.tsx` 注册路由。
-- 卡片主文案是摘录，次行备注、文章标题、站点、章号（若有）。
-- 点击进入 `readPath` / `bookPath`，并带 `bm=<bookmarkId>`，正文与该书签就绪后定位一次。
-- 可删除；搜索占位覆盖摘录、备注、标题。
+- **不复用** `MeListPage` / `MeItemCard`：主文案是摘录，结构与历史/收藏卡片（主标题=文章标题）差太多。独立 `BookmarksPage` + 书签卡片。
+- 卡片：摘录为主、次行备注 / 文章标题 / 站点 / 章号（若有）。
+- 点击用现有 helper 带上 `bm`（不新增独立 path 函数）：
+  - `readPath(tid, site?, bm?)` 增加可选第三参；
+  - `bookPath(cid, { site?, chapter?, bm? })` 的 `opts` 增加 `bm`。
+  有 `bm` 时写入 query `bm=<id>`（与 `site`/`chapter` 共存）。
+- 可删除；搜索覆盖摘录、备注、标题。
 
 ### 打开定位
 
 1. 正文 HTML 与目标书签都就绪后决策一次（按 `bm` id，换篇/换章重置）。
 2. `bm` 对应当前篇/章列表中的一条才定位；id 不存在或属于别的篇/章则忽略，改走普通进度恢复。
-3. 命中摘录：滚到 Range，**不**改 `read_progress`。
-4. 未命中：`scrollTo` 保存的 `scrollProgress`，该条 UI 标「原文可能已变」；不自动删除。
-5. 与 `useReadingProgress` 的恢复：URL 带有效 `bm` 时以书签定位为准，跳过该次进度恢复，避免两次抢滚动。
+3. 命中摘录：滚到 Range，**不**写 `items.read_progress`。
+4. 未命中：`scrollTo` 保存的 `scrollProgress`，该条 UI 标「原文可能已变」；不自动删除。同样不写 `read_progress`。
+5. **跳过进度恢复（页面层，方案 A）**：URL 带有效 `bm` 时，`ReadPage` / `BookPage` 把 `useReadingProgress` 的 `restore` 传 `null`，不把 `state.read_progress` 喂给 hook。hook 内不引入书签概念，也不加 `skipRestore`。
+6. **进度条 UI**：程序化滚动通常不触发 `scroll`，定位结束后（命中或 stale 回退）调用 hook 新增的 `syncFromViewport()`：按当前视口重算比例，只更新进度条 state，**不** debounce 写库。无效 `bm` 时不调用，走普通进度恢复（hook 自己会 `setProgress`）。
 
-进度条、收藏星标行为不变。
+进度条、收藏星标的**持久化**行为不变。
 
 ## 错误处理（前端）
 
@@ -186,8 +201,8 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 
 `packages/core`（`bun test`）：
 
-- store：创建/改备注/删除；item 不存在返回 false；每章/每篇上限 50；规范化 quote/note；论坛 `chapter NULL` vs 书库 chapter；删 item / 清历史级联；`exportBackup` version 3 含 bookmarks。
-- API：上述 400/404/409；GET 全局跨站；`kind+id+chapter` 过滤；PATCH 清空 note。
+- store：创建/改备注/删除；item 不存在返回 false；每章/每篇上限 50；规范化 quote/note；论坛 `chapter NULL` vs 书库 chapter；`purgeItem` / `clearHistory` 级联；`exportBackup` version 3 含 bookmarks；`getStats().inventory.bookmarks` 计数（含 `site` 过滤）。
+- API：上述 400/404/409；GET 分流（`kind`+`id` 当前篇忽略 page；只给其一 400；全局每页 20）；PATCH 清空 note。
 
 定位若抽成纯函数：测命中第一次出现、未命中回退比例。不测浮条像素布局。
 
@@ -195,16 +210,19 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 
 ## 改动路径
 
-- `packages/core/src/storage/db.ts` — 建表
-- `packages/core/src/storage/store.ts` — CRUD、级联、导出
+- `packages/core/src/storage/db.ts` — 建表（无 FK）
+- `packages/core/src/storage/store.ts` — CRUD、`purgeItem`/`clearHistory` 级联、`exportBackup` version 3、`getStats` inventory
+- `packages/core/src/storage/types.ts` — `StatsInventory.bookmarks`
 - `packages/core/src/storage/*.test.ts`
 - `apps/api/src/index.ts` — `/api/me/bookmarks*`
-- `apps/web/src/lib/routes.ts` — `routes.bookmarks`、`api.meBookmarks`、`ME_TABS`
+- `apps/web/src/lib/routes.ts` — `routes.bookmarks`、`api.meBookmarks`、`ME_TABS`、`NAV_ITEMS.match`、`readPath`/`bookPath` 的 `bm`
 - `apps/web/src/lib/hub-tabs.ts` — Me Tab 不带 site
 - `apps/web/src/App.tsx` — 路由
-- `apps/web/src/pages/BookmarksPage.tsx` — 新页
-- `apps/web/src/components/character-selection-toolbar.tsx`（或后继名）— 书签 | 人物
-- `apps/web/src/pages/ReadPage.tsx` / `BookPage.tsx` — 浮条、篇内列表、`bm` 定位
+- `apps/web/src/pages/BookmarksPage.tsx` — 新页（不复用 `MeListPage`）
+- `apps/web/src/components/reading-selection-toolbar.tsx` — 由 `character-selection-toolbar.tsx` 改名，书签 | 人物
+- `apps/web/src/hooks/use-reading-progress.ts` — `syncFromViewport()`（不感知书签）
+- `apps/web/src/pages/ReadPage.tsx` / `BookPage.tsx` — 浮条、篇内列表、有效 `bm` 时 `restore=null`、定位后 sync
+- `apps/web/src/pages/StatsPage.tsx` — inventory 书签卡片
 - `AGENTS.md` — API 表与导航
 
 ## 已确认的产品决策
@@ -215,3 +233,5 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_created
 - 篇内列表 + 「我的」独立书签页。
 - 论坛帖 + 书库章。
 - 「我的」功能优先，站点是卡片属性。
+- 全局书签列表每页 20，与历史/收藏一致。
+- 有效 `bm` 时页面层跳过进度恢复；定位后只同步进度条 UI，不写库。
