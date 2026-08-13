@@ -1497,7 +1497,7 @@ export class Store {
    * 导出本地数据快照（备份用）。archive 可能较大，一次 JSON 足够个人库量级。
    */
   exportBackup(): {
-    version: 1
+    version: 2
     exportedAt: number
     items: unknown[]
     favorites: unknown[]
@@ -1509,7 +1509,14 @@ export class Store {
       scope_type: string
       scope_id: string
       name: string
-      color_index: number
+      cluster_id: number
+      created_at: number
+    }>
+    character_clusters: Array<{
+      id: number
+      scope_type: string
+      scope_id: string
+      hue: number
       created_at: number
     }>
     reading_sessions: Array<{
@@ -1548,7 +1555,16 @@ export class Store {
       scope_type: string
       scope_id: string
       name: string
-      color_index: number
+      cluster_id: number
+      created_at: number
+    }>
+    const character_clusters = this.db
+      .query("SELECT * FROM character_clusters ORDER BY id")
+      .all() as Array<{
+      id: number
+      scope_type: string
+      scope_id: string
+      hue: number
       created_at: number
     }>
     const reading_sessions = this.db
@@ -1564,7 +1580,7 @@ export class Store {
       estimated: number
     }>
     return {
-      version: 1,
+      version: 2,
       exportedAt: this.now(),
       items,
       favorites,
@@ -1580,6 +1596,7 @@ export class Store {
         updated_at: r.updated_at,
       })),
       character_names,
+      character_clusters,
       reading_sessions,
     }
   }

@@ -210,6 +210,26 @@ describe("characters", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  test("exportBackup includes character_clusters version 2", () => {
+    const { dir, store } = tempStore()
+    store.addCharacter({ type: "post", id: "9" }, "甲")
+    const bak = store.exportBackup()
+    expect(bak.version).toBe(2)
+    expect(bak.character_clusters.length).toBe(1)
+    expect(bak.character_names[0]).toHaveProperty("cluster_id")
+    expect(bak.character_names[0]).not.toHaveProperty("color_index")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("inventory characters counts names not clusters", () => {
+    const { dir, store } = tempStore()
+    const scope = { type: "post" as const, id: "1" }
+    const a = store.addCharacter(scope, "林远")
+    store.addCharacter(scope, "少爷", a.id)
+    expect(store.getStats().inventory.characters).toBe(2)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   test("mergeClusters moves names to min id and sets hue", () => {
     const { dir, store } = tempStore()
     const scope = { type: "post" as const, id: "1" }
