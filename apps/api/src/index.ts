@@ -4,13 +4,33 @@
  */
 import { join, resolve, sep } from "node:path"
 import {
+  AuthError,
+  COOKIE_OAUTH_STATE,
+  COOKIE_OAUTH_VERIFIER,
+  COOKIE_SESSION,
   CONTENT_CACHE_HEADERS,
   DEFAULT_SITE,
   ExtractorError,
   LIST_CACHE_HEADERS,
   NO_STORE_HEADERS,
+  OAUTH_COOKIE_MAX_AGE_S,
+  OidcService,
+  SESSION_MAX_AGE_S,
   UpstreamTimeoutError,
   Store,
+  clearCookie,
+  emptyAuthMe,
+  isOidcPublicApi,
+  isSecureRequest,
+  parseAuthConfig,
+  parseCookieHeader,
+  serializeCookie,
+  sessionToAuthMe,
+  signSession,
+  verifySession,
+  type AuthConfig,
+  type SessionPayload,
+  type AuthMe,
   ArchiveAutoGroupJob,
   ArchiveBooksJob,
   ArchivePostsJob,
@@ -55,9 +75,24 @@ runner.register(new ArchiveAutoGroupJob(store))
 runner.register(new ArchiveBooksJob(store))
 runner.recoverOnStartup()
 
+let authConfig: AuthConfig
+try {
+  authConfig = parseAuthConfig(process.env)
+} catch (err) {
+  console.error("[auth]", err instanceof Error ? err.message : err)
+  process.exit(1)
+}
+if (!authConfig.enabled && authConfig.partial) {
+  console.warn("[auth] incomplete OIDC env; auth disabled")
+}
+const oidc = authConfig.enabled ? new OidcService(authConfig) : null
+
 function toErrorResponse(err: unknown): Response {
   if (err instanceof UpstreamTimeoutError) {
     return jsonError("upstream timeout", 504)
+  }
+  if (err instanceof AuthError) {
+    return jsonError(err.error, err.statusCode)
   }
   if (err instanceof ExtractorError) {
     return jsonError(err.message, err.statusCode)
@@ -75,6 +110,25 @@ function requireGet(req: Request): void {
   if (req.method !== "GET") {
     throw new ExtractorError("method not allowed", 405)
   }
+}
+
+/** Cookie 写入选项：Secure 跟随请求（x-forwarded-proto / https） */
+function cookieOpts(req: Request): { secure: boolean } {
+  return { secure: isSecureRequest(req) }
+}
+
+/** 读取并校验当前会话；未启用 OIDC 或无有效会话返回 null */
+function sessionFrom(req: Request): SessionPayload | null {
+  if (!authConfig.enabled) return null
+  const cookies = parseCookieHeader(req.headers.get("cookie"))
+  const raw = cookies[COOKIE_SESSION]
+  if (!raw) return null
+  return verifySession(raw, authConfig.secret)
+}
+
+function appendCookies(res: Response, parts: string[]): Response {
+  for (const p of parts) res.headers.append("Set-Cookie", p)
+  return res
 }
 
 function meKindParam(url: URL): ItemKind {
@@ -1417,6 +1471,14 @@ async function routeInner(req: Request): Promise<Response> {
   }
 
   try {
+    // OIDC 门锁：开启时所有 /api 非公开路由必须带有效会话
+    if (pathname.startsWith("/api")) {
+      const publicApi = isOidcPublicApi(req.method, pathname)
+      if (authConfig.enabled && !publicApi) {
+        const sess = sessionFrom(req)
+        if (!sess) throw new AuthError("unauthorized", 401)
+      }
+    }
     // /api/me/jobs 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
     const jobsSub = pathname.match(/^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop))?$/)
     if (jobsSub) {
@@ -1488,6 +1550,104 @@ async function routeInner(req: Request): Promise<Response> {
           { status: "ok", runtime: "bun" },
           { headers: NO_STORE_HEADERS }
         )
+      case "/api/auth/config":
+        requireGet(req)
+        return jsonOk(
+          { enabled: authConfig.enabled, buttonText: authConfig.buttonText },
+          NO_STORE_HEADERS
+        )
+      case "/api/auth/me": {
+        requireGet(req)
+        const enabled = authConfig.enabled
+        if (!enabled) return jsonOk(emptyAuthMe(), NO_STORE_HEADERS)
+        // 门锁已保证有会话（me 非公开路由，无 Cookie 时 401 而非空用户）
+        const sess = sessionFrom(req)
+        return jsonOk(sessionToAuthMe(sess!), NO_STORE_HEADERS)
+      }
+      case "/api/auth/authorize": {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        const enabled = authConfig.enabled
+        if (!enabled) throw new AuthError("oidc disabled", 400)
+        const { url, state, codeVerifier } = await oidc!.authorizationUrl()
+        return appendCookies(
+          jsonOk({ url }, NO_STORE_HEADERS),
+          [
+            serializeCookie(COOKIE_OAUTH_STATE, state, {
+              maxAge: OAUTH_COOKIE_MAX_AGE_S,
+              secure: cookieOpts(req).secure,
+              httpOnly: true,
+            }),
+            serializeCookie(COOKIE_OAUTH_VERIFIER, codeVerifier, {
+              maxAge: OAUTH_COOKIE_MAX_AGE_S,
+              secure: cookieOpts(req).secure,
+              httpOnly: true,
+            }),
+          ]
+        )
+      }
+      case "/api/auth/callback": {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        if (!authConfig.enabled) throw new AuthError("oidc disabled", 400)
+        const sessionSecret = authConfig.secret
+        const body: unknown = await req.json()
+        if (typeof body !== "object" || body === null || !("url" in body)) {
+          throw new AuthError("url mismatch", 400)
+        }
+        if (typeof body.url !== "string") {
+          throw new AuthError("url mismatch", 400)
+        }
+        const cookies = parseCookieHeader(req.headers.get("cookie"))
+        const state = cookies[COOKIE_OAUTH_STATE]
+        const codeVerifier = cookies[COOKIE_OAUTH_VERIFIER]
+        if (!state || !codeVerifier) throw new AuthError("invalid state", 400)
+        const user = await oidc!.exchange(body.url, state, codeVerifier)
+        const secure = cookieOpts(req).secure
+        const session = signSession(
+          {
+            sub: user.sub ?? "",
+            email: user.email ?? "",
+            name: user.name ?? "",
+          },
+          sessionSecret
+        )
+        return appendCookies(
+          jsonOk({ ok: true, user }, NO_STORE_HEADERS),
+          [
+            clearCookie(COOKIE_OAUTH_STATE, {
+              secure,
+              httpOnly: true,
+            }),
+            clearCookie(COOKIE_OAUTH_VERIFIER, {
+              secure,
+              httpOnly: true,
+            }),
+            serializeCookie(COOKIE_SESSION, session, {
+              maxAge: SESSION_MAX_AGE_S,
+              secure,
+              httpOnly: true,
+            }),
+          ]
+        )
+      }
+      case "/api/auth/logout": {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        const secure = cookieOpts(req).secure
+        return appendCookies(
+          jsonOk({ ok: true }, NO_STORE_HEADERS),
+          [
+            clearCookie(COOKIE_SESSION, { secure, httpOnly: true }),
+            // 防御性清理残留的 OAuth 流程 cookie
+            clearCookie(COOKIE_OAUTH_STATE, { secure, httpOnly: true }),
+            clearCookie(COOKIE_OAUTH_VERIFIER, { secure, httpOnly: true }),
+          ]
+        )
+      }
       case "/api/posts":
         requireGet(req)
         return await handlePosts(url)
