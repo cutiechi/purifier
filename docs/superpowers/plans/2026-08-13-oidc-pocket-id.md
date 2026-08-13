@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-oidc-pocket-id-design.md`
 
+**状态：** 已按 `docs/superpowers/plans/review.md` 修订（#1 bun add 无 --filter；#2 clearCookie 带 httpOnly；#3 jose fallback 改 dependencies；#4 门锁在 try 开始处；#5 fetch 只匹配同源 `/api/`）
+
 ## Global Constraints
 
 - Prettier：无分号、双引号、`printWidth: 80`、`trailingComma: "es5"`。
@@ -36,7 +38,7 @@
 | `packages/core/src/auth/paths.ts` | `isOidcPublicApi` |
 | `packages/core/src/auth/index.ts` | 再导出 |
 | `packages/core/src/auth/*.test.ts` | 对应测试 |
-| `packages/core/package.json` | `openid-client`；dev `jose`；export `./auth` |
+| `packages/core/package.json` | `openid-client`；`jose` 默认 dev（mock ID Token）；fallback 手写路径则改为 runtime dependency；export `./auth` |
 | `packages/core/src/index.ts` | `export * from "./auth"` |
 | `apps/api/src/index.ts` | 启动解析、门锁、`/api/auth/*`、`AuthError` 映射 |
 | `apps/web/src/lib/routes.ts` | `routes.login`、`api.auth*` |
@@ -232,7 +234,7 @@ EOF
   - `sessionToAuthMe(p: SessionPayload): AuthMe` → `enabled: true`
   - `parseCookieHeader(header: string \| null): Record<string, string>`
   - `serializeCookie(name: string, value: string, opts: { maxAge: number; secure: boolean; httpOnly?: boolean }): string`
-  - `clearCookie(name: string, opts: { secure: boolean }): string`（Max-Age=0）
+  - `clearCookie(name: string, opts: { secure: boolean; httpOnly?: boolean }): string`（Max-Age=0；默认 `httpOnly: true`，与 `serializeCookie` 一致）
   - `isSecureRequest(req: { url: string; headers: Headers }): boolean`
 
 - [ ] **Step 1: 写失败测试**
@@ -461,12 +463,13 @@ EOF
 
 - [ ] **Step 1: 安装依赖并写失败测试**
 
-在仓库根：
+Bun 的 `bun add` **没有** `--filter`（那是 pnpm）。在 core 包目录安装：
 
 ```bash
-bun add openid-client --filter @workspace/core
-bun add -d jose --filter @workspace/core
+cd packages/core && bun add openid-client && bun add -d jose
 ```
+
+然后回到仓库根，确认 `bun.lock` 已更新。`jose` 默认放 **devDependencies**（测试里签 mock ID Token）。若 Step 3 判定 `openid-client` 在 Bun 不可用、改 `jose` + `fetch` 手写，把 `jose` **挪到 `dependencies`**（运行时需要），并在该 task 的 commit message 写明。
 
 `oidc.test.ts` 用 `Bun.serve` 起 mock IdP：
 
@@ -504,7 +507,7 @@ Expected: FAIL（无 `OidcService`）
 
 JWKS 缺 key：清缓存、discover 一次、重试 grant；仍失败按上表。
 
-**实施第一小时：** 若 `import "openid-client"` 或 `discovery` 在 Bun 下抛错，按 spec 改 `jose` + `fetch` 手写（同一 `OidcService` 接口，测试不改）。把结论写进该 task 的 commit message。
+**实施第一小时：** 若 `import "openid-client"` 或 `discovery` 在 Bun 下抛错，按 spec 改 `jose` + `fetch` 手写（同一 `OidcService` 接口，测试不改），并把 `jose` 从 `devDependencies` 移到 `dependencies`。把结论写进该 task 的 commit message。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -603,7 +606,7 @@ function appendCookies(res: Response, parts: string[]): Response {
 }
 ```
 
-在 `routeInner` 的 `try` 里、jobs 子资源之前：
+在 `routeInner` 的 `try` 块**开始处**、**所有** API 路由分支（jobs / groups / bookmarks / `switch (pathname)`）之前：
 
 ```ts
 if (pathname.startsWith("/api")) {
@@ -760,7 +763,9 @@ window.fetch = async (input, init) => {
       : input instanceof URL
         ? input.href
         : input.url
-  const isApi = url.includes("/api/")
+  const isApi =
+    url.startsWith("/api/") ||
+    url.startsWith(`${window.location.origin}/api/`)
   if (
     res.status === 401 &&
     isApi &&
