@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
+import { LEGACY_SLOT_HUE } from "../character-highlight"
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS items (
@@ -103,11 +104,19 @@ CREATE TABLE IF NOT EXISTS archive_cursors (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS character_clusters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope_type TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  hue INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS character_names (
   scope_type  TEXT NOT NULL,
   scope_id    TEXT NOT NULL,
   name        TEXT NOT NULL,
-  color_index INTEGER NOT NULL,
+  cluster_id  INTEGER NOT NULL REFERENCES character_clusters(id) ON DELETE CASCADE,
   created_at  INTEGER NOT NULL,
   PRIMARY KEY (scope_type, scope_id, name)
 );
@@ -134,7 +143,83 @@ export function openDatabase(dataDir: string): Database {
   db.exec("PRAGMA foreign_keys = ON;")
   db.exec("PRAGMA busy_timeout = 5000;")
   db.exec(DDL)
-  // 1. 旧库补 read_progress（保留原幂等块，必须在 site 重建之前）
+  // 1. character_names color_index → clusters（旧库迁移）
+  //    旧库 character_names 有 color_index、无 cluster_id；CREATE TABLE IF NOT EXISTS 会跳过，
+  //    故按行迁移：每行建一个 character_clusters（hue 按 LEGACY_SLOT_HUE 映射），再指向它。
+  //    新库 DDL 已带 cluster_id，此块跳过。索引必须在其后无条件创建，新旧库都保证存在。
+  const charCols = db
+    .query("PRAGMA table_info(character_names)")
+    .all() as { name: string }[]
+  if (charCols.some((c) => c.name === "color_index")) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS character_clusters (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope_type TEXT NOT NULL,
+          scope_id TEXT NOT NULL,
+          hue INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE character_names_new (
+          scope_type TEXT NOT NULL,
+          scope_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          cluster_id INTEGER NOT NULL
+            REFERENCES character_clusters(id) ON DELETE CASCADE,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (scope_type, scope_id, name)
+        );
+      `)
+      const old = db
+        .query(
+          `SELECT scope_type, scope_id, name, color_index, created_at
+           FROM character_names`
+        )
+        .all() as Array<{
+        scope_type: string
+        scope_id: string
+        name: string
+        color_index: number
+        created_at: number
+      }>
+      const insC = db.query(
+        `INSERT INTO character_clusters (scope_type, scope_id, hue, created_at)
+         VALUES (?1, ?2, ?3, ?4)`
+      )
+      const insN = db.query(
+        `INSERT INTO character_names_new
+           (scope_type, scope_id, name, cluster_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)`
+      )
+      for (const row of old) {
+        const slot = ((row.color_index % 6) + 6) % 6
+        const hue = LEGACY_SLOT_HUE[slot]!
+        const r = insC.run(row.scope_type, row.scope_id, hue, row.created_at)
+        insN.run(
+          row.scope_type,
+          row.scope_id,
+          row.name,
+          Number(r.lastInsertRowid),
+          row.created_at
+        )
+      }
+      db.exec(`DROP TABLE character_names`)
+      db.exec(`ALTER TABLE character_names_new RENAME TO character_names`)
+      console.log(`migrated ${old.length} character_names rows to clusters`)
+    })()
+  }
+
+  // 索引必须在这段迁移之后无条件执行：新库迁移跳过仍需索引；旧库要等表重建完才有 cluster_id 列。
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_character_names_cluster
+     ON character_names (cluster_id)`
+  )
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_character_clusters_scope
+     ON character_clusters (scope_type, scope_id)`
+  )
+
+  // 2. 旧库补 read_progress（保留原幂等块，必须在 site 重建之前）
   const colsRp = db.query("PRAGMA table_info(items)").all() as {
     name: string
   }[]
@@ -145,7 +230,7 @@ export function openDatabase(dataDir: string): Database {
     })()
   }
 
-  // 2. 检测是否需要重建：site 列缺失，或 PK 不含 site
+  // 3. 检测是否需要重建：site 列缺失，或 PK 不含 site
   //    （半迁移库可能有 site 列但 PK 仍是 (kind,id)，只查列会漏判导致 ON CONFLICT(site,kind,id) 炸）
   const needRebuild = (() => {
     for (const table of ["items", "favorites", "tags"]) {
@@ -228,7 +313,7 @@ export function openDatabase(dataDir: string): Database {
     })()
   }
 
-  // 3. group_items.tid 全局唯一（一帖一组）
+  // 4. group_items.tid 全局唯一（一帖一组）
   //    不可逆迁移：先删重复（保留每组 tid 中 group_id 最小者），再建唯一索引。
   //    幂等：索引已存在则跳过。对真实 data/purifier.db 动手前可先跑
   //    SELECT tid, COUNT(*) AS n FROM group_items GROUP BY tid HAVING n > 1;
@@ -265,7 +350,7 @@ export function openDatabase(dataDir: string): Database {
     })()
   }
 
-  // 4. reading_sessions 回填：表为空且 items 非空时，按 first_seen_at / last_visited_at
+  // 5. reading_sessions 回填：表为空且 items 非空时，按 first_seen_at / last_visited_at
   //    补活跃日（duration_s NULL, estimated 1）。幂等：表非空跳过。不按 visit_count 插值。
   const sessionsEmpty = (
     db.query("SELECT COUNT(*) AS n FROM reading_sessions").get() as { n: number }

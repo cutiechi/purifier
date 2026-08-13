@@ -22,6 +22,7 @@ describe("openDatabase", () => {
     expect(rows.map((r) => r.name)).toEqual([
       "archive_cursors",
       "archive_posts",
+      "character_clusters",
       "character_names", // ← 按字母序插在 archive_posts 与 favorites 之间
       "favorites",
       "group_items",
@@ -100,7 +101,8 @@ describe("openDatabase", () => {
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='character_names'"
       )
       .get() as { sql: string } | null
-    expect(ddl?.sql).toMatch(/color_index/)
+    expect(ddl?.sql).toMatch(/cluster_id/)
+    expect(ddl?.sql).not.toMatch(/color_index/)
     expect(ddl?.sql).toMatch(/PRIMARY\s+KEY\s*\(\s*scope_type,\s*scope_id,\s*name/i)
 
     const idx = db
@@ -955,4 +957,51 @@ describe("getStats", () => {
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
+})
+
+test("migrates character_names color_index to clusters", () => {
+  const dir = mkdtempSync(join(tmpdir(), "purifier-char-mig-"))
+  const raw = new Database(join(dir, "purifier.db"))
+  raw.exec(`
+    CREATE TABLE character_names (
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color_index INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (scope_type, scope_id, name)
+    );
+  `)
+  raw.query(
+    `INSERT INTO character_names VALUES ('post','1','甲',0,1)`
+  ).run()
+  raw.query(
+    `INSERT INTO character_names VALUES ('post','1','乙',7,2)`
+  ).run()
+  raw.close()
+
+  const db = openDatabase(dir)
+  const cols = db.query("PRAGMA table_info(character_names)").all() as {
+    name: string
+  }[]
+  expect(cols.map((c) => c.name)).not.toContain("color_index")
+  expect(cols.map((c) => c.name)).toContain("cluster_id")
+  const clusters = db
+    .query("SELECT hue FROM character_clusters ORDER BY id")
+    .all() as { hue: number }[]
+  expect(clusters.map((c) => c.hue)).toEqual([85, 160]) // 0→85, 7%6=1→160
+  const n = (
+    db.query("SELECT COUNT(*) AS n FROM character_names").get() as { n: number }
+  ).n
+  expect(n).toBe(2)
+  expect(
+    db
+      .query(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_character_names_cluster'"
+      )
+      .get()
+  ).toBeTruthy()
+  db.close()
+  openDatabase(dir).close() // 幂等
+  rmSync(dir, { recursive: true, force: true })
 })
