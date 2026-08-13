@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, useParams, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
+import { BookmarkList } from "@/components/bookmark-list"
 import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
@@ -12,9 +13,11 @@ import {
   useCharacters,
   useCharacterHighlightEnabled,
 } from "@/hooks/use-characters"
+import { useBookmarks, type Bookmark } from "@/hooks/use-bookmarks"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { useReadingSession } from "@/hooks/use-reading-session"
 import { useSite } from "@/hooks/use-site"
+import { scrollToProgress, scrollToQuote } from "@/lib/bookmark-locate"
 import { api, bookPath } from "@/lib/routes"
 
 interface ChapterLink {
@@ -40,6 +43,7 @@ interface BookData {
 export default function BookPage() {
   const { cid = "" } = useParams<{ cid: string }>()
   const [params] = useSearchParams()
+  const navigate = useNavigate()
   const chapter = params.get("chapter") ?? undefined
   const site = useSite()
   const { settings } = useReadingSettings()
@@ -87,6 +91,34 @@ export default function BookPage() {
       setMutationError(e instanceof Error ? e.message : "删除失败")
     }
   }
+  // 浮条保存书签：409（该篇/章已满）等错误写入 mutationError 展示
+  const handleBookmark = async (quote: string, note: string) => {
+    const p = document.documentElement.scrollHeight - window.innerHeight
+    const scrollProgress = p <= 0 ? 0 : window.scrollY / p
+    try {
+      await addBookmark({ quote, note, scrollProgress })
+      setMutationError("")
+    } catch (e) {
+      const status = (e as { status?: number } | null)?.status
+      setMutationError(
+        status === 409
+          ? "该书签已满（50），请先删除旧的"
+          : e instanceof Error
+            ? e.message
+            : "保存书签失败"
+      )
+    }
+  }
+  const handleJumpBookmark = (item: Bookmark) => {
+    // 跳到 ?bm=<id>：复用定位 effect（保留 site/chapter，同章导航不重新抓内容）
+    navigate(
+      bookPath(cid, {
+        site,
+        chapter: isChapterBody ? chapter : undefined,
+        bm: String(item.id),
+      })
+    )
+  }
   const [loading, setLoading] = useState(true)
   const [book, setBook] = useState<BookData | null>(null)
   const [loadedKey, setLoadedKey] = useState("")
@@ -106,10 +138,39 @@ export default function BookPage() {
   // ready 按"书+章"（loadedKey）判定：换章时 content 尚未挂载前 ready=false，
   // 避免恢复决策/进度采样串到上一章；目录页恒不跟踪进度（review I4 配套）。
   const currentKey = `${site}:${cid}:${chapter ?? ""}`
-  const { progress } = useReadingProgress("book", cid, {
-    ready: (isChapterBody || isCool18Book) && loadedKey === currentKey,
+  const [staleId, setStaleId] = useState<number | undefined>(undefined)
+  const {
+    items: bookmarks,
+    loading: bookmarksLoading,
+    add: addBookmark,
+    updateNote: updateBookmarkNote,
+    remove: removeBookmark,
+  } = useBookmarks({
+    site,
+    kind: "book",
+    id: cid,
+    // chapter 仅 xbookcn 章传入；cool18 整本一页与目录页不传（后端存 NULL）
+    chapter: isChapterBody ? Number(chapter) : undefined,
+    enabled: (isChapterBody || isCool18Book) && loadedKey === currentKey,
+  })
+  const bmParam = params.get("bm")
+  const target = bmParam
+    ? bookmarks.find((b) => String(b.id) === bmParam)
+    : undefined
+  // 有 bm 时等书签就绪再决策恢复/定位；无效 bm（找不到）不 skip restore
+  const bookmarksReady = !bmParam || !bookmarksLoading
+  const skipRestore = Boolean(bmParam && target)
+  const { progress, syncFromViewport } = useReadingProgress("book", cid, {
+    ready:
+      (isChapterBody || isCool18Book) &&
+      loadedKey === currentKey &&
+      (!bmParam || !bookmarksLoading),
     stateReady: state !== null && state.id === cid, // 当前书籍的 state GET 已完成
-    restore: state?.id === cid ? state.read_progress : undefined,
+    restore: skipRestore
+      ? null
+      : state?.id === cid
+        ? state.read_progress
+        : undefined,
     chapter: isChapterBody ? chapter : undefined,
     restoreChapter: state?.id === cid ? state.lastChapter : null,
     site,
@@ -166,6 +227,49 @@ export default function BookPage() {
     fetchBook({ signal: controller.signal })
     return () => controller.abort()
   }, [fetchBook])
+
+  // 定位 effect（独立于进度 hook）：内容与书签都就绪且有有效 target 时决策一次
+  // （ref 按 bm+id+site+chapter 防重滚；换 bm/换章重新决策）。双 rAF 等字体与布局稳定后再滚。
+  const locateKey = bmParam ? `${bmParam}:${site}:${cid}:${chapter ?? ""}` : null
+  const locatedRef = useRef<string | null>(null)
+  const syncRef = useRef(syncFromViewport)
+  syncRef.current = syncFromViewport
+  useEffect(() => {
+    if (
+      !locateKey ||
+      !(isChapterBody || isCool18Book) ||
+      loadedKey !== currentKey ||
+      !bookmarksReady ||
+      !target
+    ) {
+      return
+    }
+    setStaleId(undefined) // 新决策清掉上一条 stale 标记（本次命中则不标）
+    const raf2 = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (locatedRef.current === locateKey) return // 本次 bm 已定位过
+        locatedRef.current = locateKey
+        const root = document.querySelector(".reading-body")
+        const hit =
+          root instanceof Element && scrollToQuote(root, target.quote)
+        if (!hit) {
+          scrollToProgress(target.scrollProgress)
+          setStaleId(target.id)
+        }
+        // scrollIntoView 后布局可能尚未稳定；再等一帧采样进度条，避免先显示旧 scrollY
+        requestAnimationFrame(() => syncRef.current())
+      })
+    )
+    return () => cancelAnimationFrame(raf2)
+  }, [
+    locateKey,
+    isChapterBody,
+    isCool18Book,
+    loadedKey,
+    currentKey,
+    bookmarksReady,
+    target,
+  ])
 
   const actions = (
     <ItemActions
@@ -230,17 +334,26 @@ export default function BookPage() {
               </div>
             )}
             {isCool18Book && (
-              <ArticleView
-                title={book.title}
-                meta={{ author: book.meta?.author }}
-                contentHtml={book.content}
-                sourceUrl={book.url}
-                progress={progress}
-                characters={marks}
-                highlightEnabled={enabled}
-                onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
-                actions={actions}
-              />
+              <>
+                <ArticleView
+                  title={book.title}
+                  meta={{ author: book.meta?.author }}
+                  contentHtml={book.content}
+                  sourceUrl={book.url}
+                  progress={progress}
+                  characters={marks}
+                  highlightEnabled={enabled}
+                  onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
+                  actions={actions}
+                />
+                <BookmarkList
+                  items={bookmarks}
+                  staleId={staleId}
+                  onJump={handleJumpBookmark}
+                  onUpdateNote={updateBookmarkNote}
+                  onRemove={removeBookmark}
+                />
+              </>
             )}
             {isToc && (
               <div className="flex flex-col gap-6">
@@ -311,56 +424,65 @@ export default function BookPage() {
               </div>
             )}
             {isChapterBody && (
-              <ArticleView
-                title={book.title}
-                meta={book.meta}
-                contentHtml={book.content}
-                sourceUrl={book.url}
-                progress={progress}
-                characters={marks}
-                highlightEnabled={enabled}
-                onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
-                actions={actions}
-                footer={
-                  (book.prevChapter !== undefined ||
-                    book.nextChapter !== undefined) && (
-                    <nav className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
-                      {book.prevChapter !== undefined ? (
+              <>
+                <ArticleView
+                  title={book.title}
+                  meta={book.meta}
+                  contentHtml={book.content}
+                  sourceUrl={book.url}
+                  progress={progress}
+                  characters={marks}
+                  highlightEnabled={enabled}
+                  onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
+                  actions={actions}
+                  footer={
+                    (book.prevChapter !== undefined ||
+                      book.nextChapter !== undefined) && (
+                      <nav className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
+                        {book.prevChapter !== undefined ? (
+                          <Link
+                            to={bookPath(cid, {
+                              site,
+                              chapter: String(book.prevChapter),
+                            })}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            ←上一章
+                          </Link>
+                        ) : (
+                          <span />
+                        )}
                         <Link
-                          to={bookPath(cid, {
-                            site,
-                            chapter: String(book.prevChapter),
-                          })}
-                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          to={bookPath(cid, { site })}
+                          className="inline-flex items-center rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                         >
-                          ←上一章
+                          返回书页
                         </Link>
-                      ) : (
-                        <span />
-                      )}
-                      <Link
-                        to={bookPath(cid, { site })}
-                        className="inline-flex items-center rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      >
-                        返回书页
-                      </Link>
-                      {book.nextChapter !== undefined ? (
-                        <Link
-                          to={bookPath(cid, {
-                            site,
-                            chapter: String(book.nextChapter),
-                          })}
-                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        >
-                          下一章→
-                        </Link>
-                      ) : (
-                        <span />
-                      )}
-                    </nav>
-                  )
-                }
-              />
+                        {book.nextChapter !== undefined ? (
+                          <Link
+                            to={bookPath(cid, {
+                              site,
+                              chapter: String(book.nextChapter),
+                            })}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            下一章→
+                          </Link>
+                        ) : (
+                          <span />
+                        )}
+                      </nav>
+                    )
+                  }
+                />
+                <BookmarkList
+                  items={bookmarks}
+                  staleId={staleId}
+                  onJump={handleJumpBookmark}
+                  onUpdateNote={updateBookmarkNote}
+                  onRemove={removeBookmark}
+                />
+              </>
             )}
           </>
         )}
@@ -369,7 +491,9 @@ export default function BookPage() {
         clusters={clusters}
         onAdd={(n, cid) => void handleAdd(n, cid)}
         onRemove={(n) => void handleRemove(n)}
-        onBookmark={() => {}}
+        onBookmark={
+          isToc ? () => {} : (quote, note) => void handleBookmark(quote, note)
+        }
       />
       {markPopup && (
         <CharacterMarkPopover
