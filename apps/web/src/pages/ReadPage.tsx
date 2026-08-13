@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useParams } from "react-router-dom"
+import {
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
+import { BookmarkList } from "@/components/bookmark-list"
 import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
-import { CharacterSelectionToolbar } from "@/components/character-selection-toolbar"
+import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { useReadingSettings } from "@/components/reading-settings"
@@ -11,12 +16,14 @@ import {
   useCharacters,
   useCharacterHighlightEnabled,
 } from "@/hooks/use-characters"
+import { useBookmarks, type Bookmark } from "@/hooks/use-bookmarks"
 import { useReadingProgress } from "@/hooks/use-reading-progress"
 import { useReadingSession } from "@/hooks/use-reading-session"
 import { useSite } from "@/hooks/use-site"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
-import { api } from "@/lib/routes"
+import { scrollToProgress, scrollToQuote } from "@/lib/bookmark-locate"
+import { api, readPath } from "@/lib/routes"
 
 interface ContentData {
   title: string
@@ -29,6 +36,8 @@ interface ContentData {
 
 export default function ReadPage() {
   const { tid = "" } = useParams<{ tid: string }>()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const site = useSite()
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("post", tid)
@@ -75,16 +84,64 @@ export default function ReadPage() {
       setMutationError(e instanceof Error ? e.message : "删除失败")
     }
   }
+  // 浮条保存书签：409（该篇/章已满）等错误写入 mutationError 展示
+  const handleBookmark = async (quote: string, note: string) => {
+    const p = document.documentElement.scrollHeight - window.innerHeight
+    const scrollProgress = p <= 0 ? 0 : window.scrollY / p
+    try {
+      await addBookmark({ quote, note, scrollProgress })
+      setMutationError("")
+    } catch (e) {
+      const status = (e as { status?: number } | null)?.status
+      setMutationError(
+        status === 409
+          ? "该书签已满（50），请先删除旧的"
+          : e instanceof Error
+            ? e.message
+            : "保存书签失败"
+      )
+    }
+  }
+  const handleJumpBookmark = (item: Bookmark) => {
+    // 跳到 ?bm=<id>：复用定位 effect（同篇导航不重新抓内容）
+    navigate(readPath(tid, site, String(item.id)))
+  }
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
   const [loadedTid, setLoadedTid] = useState("")
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
   const [refreshNotice, setRefreshNotice] = useState("")
-  const { progress } = useReadingProgress("post", tid, {
-    ready: loadedTid === tid, // 当前 tid 内容已挂载（按 id 区分，避免串用上一篇）
+  const [staleId, setStaleId] = useState<number | undefined>(undefined)
+  const {
+    items: bookmarks,
+    loading: bookmarksLoading,
+    error: bookmarksError,
+    add: addBookmark,
+    updateNote: updateBookmarkNote,
+    remove: removeBookmark,
+  } = useBookmarks({
+    site,
+    kind: "post",
+    id: tid,
+    enabled: loadedTid === tid, // 内容已挂载才请求（换帖期间不发）
+  })
+  const bmParam = searchParams.get("bm")
+  const target = bmParam
+    ? bookmarks.find((b) => String(b.id) === bmParam)
+    : undefined
+  // 有 bm 时等书签就绪再决策恢复/定位；无效 bm（找不到）不 skip restore
+  const bookmarksReady = !bmParam || !bookmarksLoading
+  const skipRestore = Boolean(bmParam && target)
+  const { progress, syncFromViewport } = useReadingProgress("post", tid, {
+    // 当前 tid 内容已挂载（按 id 区分，避免串用上一篇）；有 bm 时还须书签就绪
+    ready: loadedTid === tid && (!bmParam || !bookmarksLoading),
     stateReady: state !== null && state.id === tid, // 当前文章的 state GET 已完成
-    restore: state?.id === tid ? state.read_progress : undefined,
+    restore: skipRestore
+      ? null
+      : state?.id === tid
+        ? state.read_progress
+        : undefined,
   })
   useReadingSession({
     site,
@@ -141,6 +198,33 @@ export default function ReadPage() {
     fetchContent({ signal: controller.signal })
     return () => controller.abort()
   }, [fetchContent])
+
+  // 定位 effect（独立于进度 hook）：内容与书签都就绪且有有效 target 时决策一次
+  // （ref 按 bm+id+site 防重滚；换 bm/换帖重新决策）。双 rAF 等字体与布局稳定后再滚。
+  const locateKey = bmParam ? `${bmParam}:${site}:${tid}` : null
+  const locatedRef = useRef<string | null>(null)
+  const syncRef = useRef(syncFromViewport)
+  syncRef.current = syncFromViewport
+  useEffect(() => {
+    if (!locateKey || loadedTid !== tid || !bookmarksReady || !target) return
+    const raf2 = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (locatedRef.current === locateKey) return // 本次 bm 已定位过
+        locatedRef.current = locateKey
+        setStaleId(undefined) // 换 bm 新决策：清掉上一条 stale 标记（列表增删重跑 effect 不清）
+        const root = document.querySelector(".reading-body")
+        const hit =
+          root instanceof Element && scrollToQuote(root, target.quote)
+        if (!hit) {
+          scrollToProgress(target.scrollProgress)
+          setStaleId(target.id)
+        }
+        // scrollIntoView 后布局可能尚未稳定；再等一帧采样进度条，避免先显示旧 scrollY
+        requestAnimationFrame(() => syncRef.current())
+      })
+    )
+    return () => cancelAnimationFrame(raf2)
+  }, [locateKey, loadedTid, tid, bookmarksReady, target])
 
   return (
     <PageShell showBack maxWidth={settings.maxWidth}>
@@ -226,13 +310,26 @@ export default function ReadPage() {
                 </>
               }
             />
+            {bookmarksError && (
+              <p className="mt-3 text-xs text-destructive">
+                {bookmarksError}
+              </p>
+            )}
+            <BookmarkList
+              items={bookmarks}
+              staleId={staleId}
+              onJump={handleJumpBookmark}
+              onUpdateNote={updateBookmarkNote}
+              onRemove={removeBookmark}
+            />
           </>
         )}
       </AsyncBody>
-      <CharacterSelectionToolbar
+      <ReadingSelectionToolbar
         clusters={clusters}
         onAdd={(n, cid) => void handleAdd(n, cid)}
         onRemove={(n) => void handleRemove(n)}
+        onBookmark={(quote, note) => void handleBookmark(quote, note)}
       />
       {markPopup && (
         <CharacterMarkPopover

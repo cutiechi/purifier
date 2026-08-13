@@ -37,7 +37,7 @@ apps/web/src/pages/                   # 页面级组件
 apps/web/src/components/              # 共享 UI 组件
 packages/core/src/extractor/extractor.ts  # Cool18Extractor
 packages/core/src/extractor/types.ts      # Extractor 接口与数据模型
-packages/core/src/storage/                # SQLite（历史/收藏/标签/jobs/job_logs/archive_posts）与磁盘内容缓存
+packages/core/src/storage/                # SQLite（历史/收藏/书签/标签/jobs/job_logs/archive_posts）与磁盘内容缓存
 packages/core/src/jobs/                   # JobRunner / JobHandler 任务执行
 packages/core/src/upstream.ts             # 代理请求、超时、缓存头
 packages/typescript-config/               # base / react-library 配置
@@ -55,52 +55,62 @@ packages/typescript-config/               # base / react-library 配置
 - 正文安全清洗在 `Cool18Extractor.extractPreHtml`：剥标签、转义文本，只保留 `/read/:tid` 与 `/book/:cid` 站内链接。
 - 测试位于 `packages/core`（`bun test`，经根目录 `bun run test` 触发）；改动后用 `bun run test`、`bun run typecheck` 和 `bun run build` 验证。
 
+## 前端路由
+
+| 页面      | 路由         |
+| --------- | ------------ |
+| Bookmarks | `/bookmarks` |
+
 ## API 约定
 
-| 路径                                     | 参数                                                        | 行为                                                                                                    |
-| ---------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`                        | 无                                                          | `{ status: "ok", runtime: "bun" }`                                                                      |
-| `GET /api/posts`                         | `tid`、`site`（默认 `1`）                                   | 帖子正文 + 章节链接 + 元信息 + 跟帖树                                                                   |
-| `GET /api/posts`                         | `mtid`、`site`（默认 `1`）                                  | 首页分页列表 `{ links, nextMtid }`                                                                      |
-| `GET /api/books`                         | `cid`、`chapter`、`site`（默认 `1`）                        | 书库内容 `{ title, content, meta, url }`；`chapter` 为章节号时返回章节正文页，否则返回目录页            |
-| `GET /api/browse`                        | `type` 或 `q`、`page`、`site`（默认 `1`）                   | 分类 / 关键词列表 `{ category, links, nextPage }`                                                       |
-| `GET /api/categories`                    | `site`（默认 `1`）                                          | `{ links: CategoryLink[] }`                                                                             |
-| `GET /api/featured`                      | `site`（默认 `1`）                                          | `{ links }` 精华热贴                                                                                    |
-| `GET /api/picks`                         | `site`（默认 `1`）                                          | `{ sections }` 扫文推荐分组                                                                             |
-| `GET /api/comments`                      | `site`（默认 `1`）                                          | `{ posts }` 评论榜                                                                                      |
-| `GET /api/trending`                      | `site`（默认 `1`）                                          | `{ posts }` 人气榜                                                                                      |
-| `GET /api/me/history`                    | `q`、`kind`、`page`、`site?`                                | 阅读历史 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                   |
-| `DELETE /api/me/history`                 | `all=1` 或 `kind`+`id` 或 body `{ items }`；均可带 `site`   | 清空全部 / 删单条 / 批量（清空本页）；连带清收藏与标签；`all=1` 省略 `site` 跨站清空，单条/批量默认 `1` |
-| `GET /api/me/favorites`                  | `q`、`kind`、`page`、`site?`                                | 收藏列表 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                   |
-| `PUT/DELETE /api/me/favorites`           | `kind`、`id` 走 query；body `{ site? }`（默认 `1`）         | 加 / 取消收藏 `{ ok }`；`PUT` 对象不存在 404                                                            |
-| `GET /api/me/tags`                       | `site?`                                                     | `{ tags: TagCount[] }` 全部标签及计数；省略 `site` 跨站统计，带 `site` 只统计该站                       |
-| `PUT /api/me/tags`                       | body `{ kind, id, tags, site? }`（默认 `1`）                | 整体替换标签 `{ ok, tags }`；对象不存在 404                                                             |
-| `DELETE /api/me/tags`                    | `tag`、`site?`                                              | 全局删除该标签 `{ ok, removed }`（从所有对象上移除）；省略 `site` 跨站删除，带 `site` 只删该站          |
-| `GET /api/me/items`                      | `tag`、`q`、`kind`、`page`、`site?`                         | 按标签精确筛选 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                             |
-| `GET /api/me/state`                      | `kind`、`id`、`site`（默认 `1`）                            | 条目收藏/标签/访问状态；无记录返回 200 空状态                                                           |
-| `PUT /api/me/progress`                   | body `{ kind, id, progress, site?, chapter? }`              | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                              |
-| `DELETE /api/me/cache`                   | 无                                                          | 清空内容缓存 `{ cleared: n }`                                                                           |
-| `GET /api/me/groups`                     | `q`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters` | 无 page/limit 时 `{ groups }` 全量；有 page 或 limit 时 `{ items, nextPage?, total }` 分页；v1 仅论坛 |
-| `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }` | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空；tid 已在其它组 409                                    |
-| `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
-| `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |
-| `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                          | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                            |
-| `GET /api/me/characters`                 | `kind`、`id`                                               | `{ scope, clusters: [{ id, hue, names }] }`；`kind=post` 且 tid 已在分组时 scope 指向该组                |
-| `PUT /api/me/characters`                 | body `{ kind, id, name, clusterId? }`                      | 新增角色（幂等）`{ ok, cluster, clusters }`；`name` 规范化（trim、禁换行/Tab、1-32 字符）后为空 400；跨组同名 409 |
-| `PATCH /api/me/characters`               | body `{ kind, id, op: merge\|split\|recolor, ... }`        | `{ ok, clusters }`                                                                                      |
-| `DELETE /api/me/characters`              | `kind`、`id`、`name`                                       | 删除角色 `{ ok, removed }`                                                                              |
-| `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items, nextPage?, total }` 任务列表                                                                      |
-| `POST /api/me/jobs`                      | body `{ type, payload? }`                                   | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                               |
-| `DELETE /api/me/jobs`                    | 无                                                           | 清空已结束任务 `{ ok, removed }`                                                                               |
-| `GET /api/me/jobs/:id`                   | 无                                                           | `{ job }`；不存在 404                                                                                       |
-| `DELETE /api/me/jobs/:id`                | 无                                                           | `{ ok }`；不存在 404、运行中 409                                                                                |
-| `GET /api/me/jobs/:id/logs`              | `limit`（默认 200 上限 1000）、`offset`、`level`、`order`            | `{ items }` 日志                                                                                          |
-| `POST /api/me/jobs/:id/stop`             | 无                                                           | `{ ok }`；不存在 404、非运行中 409                                                                               |
-| `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 tid）、`order` | `{ items, nextPage?, total }` 归档目录                                                                      |
-| `GET /api/me/archive/status`             | `site`（默认 1）                                            | `{ total, maxTid, cursor }` 归档库规模与续跑游标                                                            |
-| `GET /api/me/export`                     | 无                                                          | 下载 JSON 备份（version: 2；items/favorites/tags/groups/archive_posts/character_names/character_clusters/cursors/reading_sessions）           |
-| `POST /api/me/sessions`                  | body `{ site?, kind, id, title, startedAt, durationS }`    | 记一段阅读会话 `{ ok }`；`id` 走 `assertSafeId`，`durationS<3` 丢弃、`>300` clamp，`startedAt>now+5m` 400 |
-| `GET /api/me/stats`                      | `site?`                                                     | `{ summary, calendar, timeOfDay, topItems, recentSessions, inventory }`；省略 `site` 跨站 |
+| 路径                                     | 参数                                                                                                            | 行为                                                                                                                                          |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                        | 无                                                                                                              | `{ status: "ok", runtime: "bun" }`                                                                                                            |
+| `GET /api/posts`                         | `tid`、`site`（默认 `1`）                                                                                       | 帖子正文 + 章节链接 + 元信息 + 跟帖树                                                                                                         |
+| `GET /api/posts`                         | `mtid`、`site`（默认 `1`）                                                                                      | 首页分页列表 `{ links, nextMtid }`                                                                                                            |
+| `GET /api/books`                         | `cid`、`chapter`、`site`（默认 `1`）                                                                            | 书库内容 `{ title, content, meta, url }`；`chapter` 为章节号时返回章节正文页，否则返回目录页                                                  |
+| `GET /api/browse`                        | `type` 或 `q`、`page`、`site`（默认 `1`）                                                                       | 分类 / 关键词列表 `{ category, links, nextPage }`                                                                                             |
+| `GET /api/categories`                    | `site`（默认 `1`）                                                                                              | `{ links: CategoryLink[] }`                                                                                                                   |
+| `GET /api/featured`                      | `site`（默认 `1`）                                                                                              | `{ links }` 精华热贴                                                                                                                          |
+| `GET /api/picks`                         | `site`（默认 `1`）                                                                                              | `{ sections }` 扫文推荐分组                                                                                                                   |
+| `GET /api/comments`                      | `site`（默认 `1`）                                                                                              | `{ posts }` 评论榜                                                                                                                            |
+| `GET /api/trending`                      | `site`（默认 `1`）                                                                                              | `{ posts }` 人气榜                                                                                                                            |
+| `GET /api/me/history`                    | `q`、`kind`、`page`、`site?`                                                                                    | 阅读历史 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                                                         |
+| `DELETE /api/me/history`                 | `all=1` 或 `kind`+`id` 或 body `{ items }`；均可带 `site`                                                       | 清空全部 / 删单条 / 批量（清空本页）；连带清收藏与标签；`all=1` 省略 `site` 跨站清空，单条/批量默认 `1`                                       |
+| `GET /api/me/favorites`                  | `q`、`kind`、`page`、`site?`                                                                                    | 收藏列表 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                                                         |
+| `PUT/DELETE /api/me/favorites`           | `kind`、`id` 走 query；body `{ site? }`（默认 `1`）                                                             | 加 / 取消收藏 `{ ok }`；`PUT` 对象不存在 404                                                                                                  |
+| `GET /api/me/tags`                       | `site?`                                                                                                         | `{ tags: TagCount[] }` 全部标签及计数；省略 `site` 跨站统计，带 `site` 只统计该站                                                             |
+| `PUT /api/me/tags`                       | body `{ kind, id, tags, site? }`（默认 `1`）                                                                    | 整体替换标签 `{ ok, tags }`；对象不存在 404                                                                                                   |
+| `DELETE /api/me/tags`                    | `tag`、`site?`                                                                                                  | 全局删除该标签 `{ ok, removed }`（从所有对象上移除）；省略 `site` 跨站删除，带 `site` 只删该站                                                |
+| `GET /api/me/items`                      | `tag`、`q`、`kind`、`page`、`site?`                                                                             | 按标签精确筛选 `{ items, nextPage? }`；省略 `site` 跨站，带 `site` 只列该站                                                                   |
+| `GET /api/me/state`                      | `kind`、`id`、`site`（默认 `1`）                                                                                | 条目收藏/标签/访问状态；无记录返回 200 空状态                                                                                                 |
+| `PUT /api/me/progress`                   | body `{ kind, id, progress, site?, chapter? }`                                                                  | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                                                                    |
+| `DELETE /api/me/cache`                   | 无                                                                                                              | 清空内容缓存 `{ cleared: n }`                                                                                                                 |
+| `GET /api/me/groups`                     | `q`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters`                                          | 无 page/limit 时 `{ groups }` 全量；有 page 或 limit 时 `{ items, nextPage?, total }` 分页；v1 仅论坛                                         |
+| `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }`                                                     | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空；tid 已在其它组 409                                                                      |
+| `DELETE /api/me/groups/:id`              | 无                                                                                                              | 删分组（级联成员）`{ ok }`                                                                                                                    |
+| `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                                                                        | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                                                             |
+| `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                                                                              | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                                                                  |
+| `GET /api/me/characters`                 | `kind`、`id`                                                                                                    | `{ scope, clusters: [{ id, hue, names }] }`；`kind=post` 且 tid 已在分组时 scope 指向该组                                                     |
+| `PUT /api/me/characters`                 | body `{ kind, id, name, clusterId? }`                                                                           | 新增角色（幂等）`{ ok, cluster, clusters }`；`name` 规范化（trim、禁换行/Tab、1-32 字符）后为空 400；跨组同名 409                             |
+| `PATCH /api/me/characters`               | body `{ kind, id, op: merge\|split\|recolor, ... }`                                                             | `{ ok, clusters }`                                                                                                                            |
+| `DELETE /api/me/characters`              | `kind`、`id`、`name`                                                                                            | 删除角色 `{ ok, removed }`                                                                                                                    |
+| `GET /api/me/bookmarks`                  | `kind`+`id`（书可加 `chapter`）或 `q`/`kind`/`page`                                                             | 当前篇不分页 `{ items }`；否则跨站分页 `{ items, nextPage?, total }`                                                                          |
+| `POST /api/me/bookmarks`                 | body `{ kind, id, quote, site?, chapter?, note?, scrollProgress }`                                              | `{ ok, bookmark }`；无 item 404、满 50 条 409                                                                                                 |
+| `PATCH /api/me/bookmarks/:id`            | body `{ note }`                                                                                                 | 改备注                                                                                                                                        |
+| `DELETE /api/me/bookmarks/:id`           | 无                                                                                                              | `{ ok, removed }`                                                                                                                             |
+| `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`                                                         | `{ items, nextPage?, total }` 任务列表                                                                                                        |
+| `POST /api/me/jobs`                      | body `{ type, payload? }`                                                                                       | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                                                         |
+| `DELETE /api/me/jobs`                    | 无                                                                                                              | 清空已结束任务 `{ ok, removed }`                                                                                                              |
+| `GET /api/me/jobs/:id`                   | 无                                                                                                              | `{ job }`；不存在 404                                                                                                                         |
+| `DELETE /api/me/jobs/:id`                | 无                                                                                                              | `{ ok }`；不存在 404、运行中 409                                                                                                              |
+| `GET /api/me/jobs/:id/logs`              | `limit`（默认 200 上限 1000）、`offset`、`level`、`order`                                                       | `{ items }` 日志                                                                                                                              |
+| `POST /api/me/jobs/:id/stop`             | 无                                                                                                              | `{ ok }`；不存在 404、非运行中 409                                                                                                            |
+| `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 tid）、`order` | `{ items, nextPage?, total }` 归档目录                                                                                                        |
+| `GET /api/me/archive/status`             | `site`（默认 1）                                                                                                | `{ total, maxTid, cursor }` 归档库规模与续跑游标                                                                                              |
+| `GET /api/me/export`                     | 无                                                                                                              | 下载 JSON 备份（version: 3；items/favorites/tags/bookmarks/groups/archive_posts/character_names/character_clusters/cursors/reading_sessions） |
+| `POST /api/me/sessions`                  | body `{ site?, kind, id, title, startedAt, durationS }`                                                         | 记一段阅读会话 `{ ok }`；`id` 走 `assertSafeId`，`durationS<3` 丢弃、`>300` clamp，`startedAt>now+5m` 400                                     |
+| `GET /api/me/stats`                      | `site?`                                                                                                         | `{ summary, calendar, timeOfDay, topItems, recentSessions, inventory }`（inventory 含 bookmarks）；省略 `site` 跨站                           |
 
 错误处理：
 
@@ -116,15 +126,15 @@ packages/typescript-config/               # base / react-library 配置
 
 ## 环境变量
 
-| 变量                         | 默认值                  | 说明                                         |
-| ---------------------------- | ----------------------- | -------------------------------------------- |
-| `PORT`                       | `3001`                  | API 端口；Docker 内为 `3000`                 |
-| `HOSTNAME`                   | `0.0.0.0`               | 监听地址                                     |
-| `WEB_DIST`                   | `apps/web/dist`         | SPA 静态目录；存在时才托管                   |
-| `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data` |
-| `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy`           |
+| 变量                         | 默认值                  | 说明                                                                                           |
+| ---------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `PORT`                       | `3001`                  | API 端口；Docker 内为 `3000`                                                                   |
+| `HOSTNAME`                   | `0.0.0.0`               | 监听地址                                                                                       |
+| `WEB_DIST`                   | `apps/web/dist`         | SPA 静态目录；存在时才托管                                                                     |
+| `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data`                                                   |
+| `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy`                                                             |
 | `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致（镜像需含 tzdata，见 Dockerfile runner 阶段） |
-| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                            |
+| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                                                                              |
 
 ## 常见改动路径
 

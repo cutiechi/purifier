@@ -125,6 +125,23 @@ export interface ArchivePost {
   archived_at: number
 }
 
+export interface Bookmark {
+  id: number
+  site: SiteId
+  kind: ItemKind
+  itemId: string
+  title: string
+  chapter: number | null
+  quote: string
+  note: string
+  scrollProgress: number
+  createdAt: number
+}
+
+export type AddBookmarkResult =
+  | { ok: true; bookmark: Bookmark }
+  | { ok: false; reason: "not_found" | "full" | "invalid_quote" }
+
 /** 全站归档游标：续跑 / 状态展示 */
 export type ArchiveCursorStatus = "idle" | "running" | "interrupted" | "done"
 
@@ -206,6 +223,7 @@ export interface StatsInventory {
   tags: number
   groups: number
   characters: number
+  bookmarks: number
 }
 
 export interface StatsResult {

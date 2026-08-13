@@ -1,7 +1,7 @@
 # 正文选区书签
 
 日期：2026-08-13
-状态：brainstorming 已通过；已按 `review.md` 修订；待写实施计划
+状态：brainstorming 已通过；已按 `review.md` 修订；计划见 docs/superpowers/plans/2026-08-13-bookmarks.md
 
 ## 背景
 

@@ -43,6 +43,7 @@ type StatsResult = {
     tags: number
     groups: number
     characters: number
+    bookmarks: number
   }
 }
 
@@ -224,12 +225,13 @@ export default function StatsPage() {
 
             <section>
               <SectionLabel>库存</SectionLabel>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <StatCard value={String(data.inventory.history)} label="历史" />
                 <StatCard value={String(data.inventory.favorites)} label="收藏" />
                 <StatCard value={String(data.inventory.tags)} label="标签" />
                 <StatCard value={String(data.inventory.groups)} label="分组" />
                 <StatCard value={String(data.inventory.characters)} label="角色" />
+                <StatCard value={String(data.inventory.bookmarks)} label="书签" />
               </div>
             </section>
           </div>

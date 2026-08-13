@@ -3,9 +3,16 @@ import type { SiteId } from "../extractor"
 import { ExtractorError } from "../extractor/types"
 import { isHue, pickHue } from "../character-highlight"
 import {
+  BOOKMARKS_PER_SCOPE_CAP,
+  normalizeBookmarkNote,
+  normalizeBookmarkQuote,
+} from "../bookmarks"
+import {
+  AddBookmarkResult,
   ArchiveCursor,
   ArchiveCursorStatus,
   ArchivePost,
+  Bookmark,
   CharacterCluster,
   CharacterScope,
   Group,
@@ -42,6 +49,20 @@ interface RawItemRow {
   favorited: number
   read_progress?: number | null
   last_chapter?: number | null
+}
+
+/** bookmarks × items 联表行（mapBookmark 的输入） */
+interface BookmarkRow {
+  id: number
+  site: string
+  kind: string
+  item_id: string
+  title: string
+  chapter: number | null
+  quote: string
+  note: string
+  scroll_progress: number
+  created_at: number
 }
 
 /** trim → 折叠连续空白 → 按码点截断 24 字符 → 空返回 null */
@@ -361,7 +382,7 @@ export class Store {
       localDateStr(this.now())
     )
 
-    // inventory：items/favorites/tags 按 site；groups/character_names 无 site 列 → 全局
+    // inventory：items/favorites/tags/bookmarks 按 site；groups/character_names 无 site 列 → 全局
     const countSite = (table: string): number =>
       site
         ? (
@@ -404,6 +425,7 @@ export class Store {
           n: number
         }
       ).n,
+      bookmarks: countSite("bookmarks"),
     }
 
     const summary: StatsSummary = {
@@ -477,8 +499,13 @@ export class Store {
     return removed
   }
 
-  /** 在事务内删除单条 items + favorites + tags（不另开事务） */
+  /** 在事务内删除单条 items + favorites + tags + bookmarks（不另开事务） */
   private purgeItem(site: SiteId, kind: ItemKind, id: string): void {
+    this.db
+      .query(
+        "DELETE FROM bookmarks WHERE site = ?1 AND kind = ?2 AND item_id = ?3"
+      )
+      .run(site, kind, id)
     this.db
       .query("DELETE FROM tags WHERE site = ?1 AND kind = ?2 AND id = ?3")
       .run(site, kind, id)
@@ -490,13 +517,16 @@ export class Store {
       .run(site, kind, id)
   }
 
-  /** 清空历史（items + favorites + tags）；site 省略跨站全清；返回删除的 items 数 */
+  /** 清空历史（items + favorites + tags + bookmarks）；site 省略跨站全清；返回删除的 items 数 */
   clearHistory(site?: SiteId): number {
     // 计数与删除同事务：避免 count-then-delete 之间并发写入导致返回值失真
     return this.db.transaction(() => {
       const row = this.db
         .query("SELECT COUNT(*) AS n FROM items WHERE ?1 IS NULL OR site = ?1")
         .get(site ?? null) as { n: number }
+      this.db
+        .query("DELETE FROM bookmarks WHERE ?1 IS NULL OR site = ?1")
+        .run(site ?? null)
       this.db
         .query("DELETE FROM tags WHERE ?1 IS NULL OR site = ?1")
         .run(site ?? null)
@@ -508,6 +538,147 @@ export class Store {
         .run(site ?? null)
       return Number(row.n ?? 0)
     })()
+  }
+
+  /** 书签；items 中不存在返回 not_found；quote 规范化后为空返回 invalid_quote；超出上限返回 full */
+  addBookmark(input: {
+    site: SiteId
+    kind: ItemKind
+    id: string
+    quote: string
+    note?: string
+    chapter?: number | null
+    scrollProgress: number
+  }): AddBookmarkResult {
+    const exists = this.db
+      .query("SELECT 1 FROM items WHERE site = ?1 AND kind = ?2 AND id = ?3")
+      .get(input.site, input.kind, input.id)
+    if (!exists) return { ok: false, reason: "not_found" }
+    const quote = normalizeBookmarkQuote(input.quote)
+    if (quote === null) return { ok: false, reason: "invalid_quote" }
+    const chapter = input.chapter ?? null
+    const count = this.db
+      .query(
+        "SELECT COUNT(*) AS n FROM bookmarks WHERE site = ?1 AND kind = ?2 AND item_id = ?3 AND chapter IS ?4"
+      )
+      .get(input.site, input.kind, input.id, chapter) as { n: number }
+    if (Number(count.n) >= BOOKMARKS_PER_SCOPE_CAP)
+      return { ok: false, reason: "full" }
+    const res = this.db
+      .query(
+        `INSERT INTO bookmarks (site, kind, item_id, chapter, quote, note, scroll_progress, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+      )
+      .run(
+        input.site,
+        input.kind,
+        input.id,
+        chapter,
+        quote,
+        normalizeBookmarkNote(input.note ?? ""),
+        Math.max(0, Math.min(1, input.scrollProgress)),
+        this.now()
+      )
+    return { ok: true, bookmark: this.getBookmark(Number(res.lastInsertRowid))! }
+  }
+
+  /** 单篇/单章书签列表，最近收藏在前；chapter 默认 null（帖与整本 book） */
+  listItemBookmarks(
+    site: SiteId,
+    kind: ItemKind,
+    id: string,
+    chapter?: number | null
+  ): Bookmark[] {
+    const rows = this.db
+      .query(
+        `${this.bookmarkSelectSql()}
+         WHERE b.site = ?1 AND b.kind = ?2 AND b.item_id = ?3 AND b.chapter IS ?4
+         ORDER BY b.created_at DESC`
+      )
+      .all(site, kind, id, chapter ?? null) as BookmarkRow[]
+    return rows.map((r) => this.mapBookmark(r))
+  }
+
+  /** 跨站书签列表；q 匹配 quote / note / 标题（NOCASE），kind 可选；每页 PAGE_SIZE */
+  listBookmarks(query: {
+    q?: string
+    kind?: string
+    page?: number
+  }): { items: Bookmark[]; nextPage: number | undefined; total: number } {
+    const q = query.q ?? ""
+    const kind = query.kind || null
+    const page = Math.max(1, query.page ?? 1)
+    const where = `WHERE (?1 = '' OR b.quote LIKE '%' || ?1 || '%' COLLATE NOCASE
+              OR b.note LIKE '%' || ?1 || '%' COLLATE NOCASE
+              OR i.title LIKE '%' || ?1 || '%' COLLATE NOCASE)
+         AND (?2 IS NULL OR b.kind = ?2)`
+    const totalRow = this.db
+      .query(
+        `SELECT COUNT(*) AS n FROM bookmarks b
+         JOIN items i ON i.site = b.site AND i.kind = b.kind AND b.item_id = i.id
+         ${where}`
+      )
+      .get(q, kind) as { n: number }
+    const total = Number(totalRow?.n ?? 0)
+    const rows = this.db
+      .query(
+        `${this.bookmarkSelectSql()}
+         ${where}
+         ORDER BY b.created_at DESC, b.id DESC
+         LIMIT ?3 OFFSET ?4`
+      )
+      .all(q, kind, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE) as BookmarkRow[]
+    const items = rows.map((r) => this.mapBookmark(r))
+    const hasMore = items.length > PAGE_SIZE
+    return {
+      items: hasMore ? items.slice(0, PAGE_SIZE) : items,
+      nextPage: hasMore ? page + 1 : undefined,
+      total,
+    }
+  }
+
+  /** 改写书签备注（规范化后落库）；不存在返回 false */
+  updateBookmarkNote(id: number, note: string): boolean {
+    const res = this.db
+      .query("UPDATE bookmarks SET note = ?2 WHERE id = ?1")
+      .run(id, normalizeBookmarkNote(note))
+    return Number(res.changes) > 0
+  }
+
+  /** 删除书签；不存在返回 false */
+  deleteBookmark(id: number): boolean {
+    const res = this.db.query("DELETE FROM bookmarks WHERE id = ?1").run(id)
+    return Number(res.changes) > 0
+  }
+
+  /** bookmarks × items 联表公共 SELECT（行交给 mapBookmark） */
+  private bookmarkSelectSql(): string {
+    return `SELECT b.id, b.site, b.kind, b.item_id, i.title, b.chapter, b.quote, b.note,
+                   b.scroll_progress, b.created_at
+            FROM bookmarks b
+            JOIN items i ON i.site = b.site AND i.kind = b.kind AND b.item_id = i.id`
+  }
+
+  private getBookmark(id: number): Bookmark | null {
+    const row = this.db
+      .query(`${this.bookmarkSelectSql()} WHERE b.id = ?1`)
+      .get(id) as BookmarkRow | null
+    return row ? this.mapBookmark(row) : null
+  }
+
+  private mapBookmark(row: BookmarkRow): Bookmark {
+    return {
+      id: row.id,
+      site: row.site,
+      kind: row.kind as ItemKind,
+      itemId: row.item_id,
+      title: row.title,
+      chapter: row.chapter,
+      quote: row.quote,
+      note: row.note,
+      scrollProgress: row.scroll_progress,
+      createdAt: row.created_at,
+    }
   }
 
   /** 整体替换标签；对象不存在返回 null（API 层映射 404）；返回实际落库的标签 */
@@ -1558,11 +1729,12 @@ export class Store {
    * 导出本地数据快照（备份用）。archive 可能较大，一次 JSON 足够个人库量级。
    */
   exportBackup(): {
-    version: 2
+    version: 3
     exportedAt: number
     items: unknown[]
     favorites: unknown[]
     tags: unknown[]
+    bookmarks: Bookmark[]
     groups: Group[]
     archive_posts: ArchivePost[]
     archive_cursors: ArchiveCursor[]
@@ -1640,12 +1812,16 @@ export class Store {
       duration_s: number | null
       estimated: number
     }>
+    const bookmarks = this.db
+      .query(`${this.bookmarkSelectSql()} ORDER BY b.id`)
+      .all() as BookmarkRow[]
     return {
-      version: 2,
+      version: 3,
       exportedAt: this.now(),
       items,
       favorites,
       tags,
+      bookmarks: bookmarks.map((r) => this.mapBookmark(r)),
       groups,
       archive_posts,
       archive_cursors: cursors.map((r) => ({

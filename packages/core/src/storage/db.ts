@@ -133,6 +133,22 @@ CREATE TABLE IF NOT EXISTS reading_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON reading_sessions (started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_item    ON reading_sessions (site, kind, item_id);
+
+CREATE TABLE IF NOT EXISTS bookmarks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
+  item_id TEXT NOT NULL,
+  chapter INTEGER,
+  quote TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  scroll_progress REAL NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_item
+  ON bookmarks (site, kind, item_id, chapter, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_created
+  ON bookmarks (created_at DESC);
 `
 
 /** 打开（必要时创建）SQLite 库并确保表结构存在 */

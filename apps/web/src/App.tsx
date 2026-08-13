@@ -17,6 +17,7 @@ const MePage = lazy(() => import("@/pages/MePage"))
 const HistoryPage = lazy(() => import("@/pages/HistoryPage"))
 const FavoritesPage = lazy(() => import("@/pages/FavoritesPage"))
 const TagsPage = lazy(() => import("@/pages/TagsPage"))
+const BookmarksPage = lazy(() => import("@/pages/BookmarksPage"))
 const GroupPage = lazy(() => import("@/pages/GroupPage"))
 const JobsPage = lazy(() => import("@/pages/JobsPage"))
 const ArchivePage = lazy(() => import("@/pages/ArchivePage"))
@@ -164,6 +165,14 @@ export function App() {
             element={
               <RouteBoundary>
                 <TagsPage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/bookmarks"
+            element={
+              <RouteBoundary>
+                <BookmarksPage />
               </RouteBoundary>
             }
           />

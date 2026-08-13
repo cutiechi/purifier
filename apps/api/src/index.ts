@@ -942,6 +942,146 @@ async function handleProgressWrite(req: Request): Promise<Response> {
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
 }
 
+/**
+ * 书签 GET 分流：
+ * - 带 kind+id：单篇/单章书签列表（site 缺省 "1"，chapter 可选）
+ * - 其余（无 id）：跨站全局列表（不读 site），q 搜索 + kind 可选过滤，每页 20
+ */
+function handleBookmarksGet(url: URL): Response {
+  const kind = url.searchParams.get("kind")
+  const id = url.searchParams.get("id")
+  const hasKind = kind !== null && kind !== ""
+  const hasId = id !== null && id !== ""
+  if (hasId && !hasKind) {
+    return jsonError("kind and id must be provided together", 400)
+  }
+  if (hasKind && hasId) {
+    if (kind !== "post" && kind !== "book") {
+      return jsonError("invalid kind", 400)
+    }
+    const site = url.searchParams.get("site") ?? "1"
+    const chapterRaw = url.searchParams.get("chapter")
+    let chapter: number | null = null
+    if (chapterRaw !== null && chapterRaw !== "") {
+      const n = Number(chapterRaw)
+      if (!Number.isFinite(n)) return jsonError("invalid chapter", 400)
+      chapter = n
+    }
+    const items = store.listItemBookmarks(site, kind, id, chapter)
+    return jsonOk({ items }, NO_STORE_HEADERS)
+  }
+  const q = url.searchParams.get("q") ?? ""
+  const listKind = url.searchParams.get("kind") ?? ""
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get("page") || "1", 10) || 1
+  )
+  if (listKind && listKind !== "post" && listKind !== "book") {
+    return jsonError("invalid kind", 400)
+  }
+  return jsonOk(
+    store.listBookmarks({
+      q,
+      kind: listKind || undefined,
+      page,
+    }),
+    NO_STORE_HEADERS
+  )
+}
+
+/** POST /api/me/bookmarks：收藏一条帖子/整本/章节 */
+async function handleBookmarkPost(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") {
+    return jsonError("invalid json body", 400)
+  }
+  const kind = "kind" in body ? body.kind : undefined
+  const id = "id" in body ? body.id : undefined
+  const quote = "quote" in body ? body.quote : undefined
+  const site = "site" in body ? body.site : undefined
+  const chapter = "chapter" in body ? body.chapter : undefined
+  const note = "note" in body ? body.note : undefined
+  const scrollProgress =
+    "scrollProgress" in body ? body.scrollProgress : undefined
+  if (kind !== "post" && kind !== "book") {
+    return jsonError("invalid kind", 400)
+  }
+  if (typeof id !== "string" || !/^[A-Za-z0-9]+$/.test(id)) {
+    return jsonError("invalid id", 400)
+  }
+  if (typeof quote !== "string") {
+    return jsonError("quote must be a string", 400)
+  }
+  if (typeof scrollProgress !== "number" || !Number.isFinite(scrollProgress)) {
+    return jsonError("scrollProgress must be a finite number", 400)
+  }
+  let chapterNum: number | null | undefined
+  if (chapter !== undefined) {
+    if (typeof chapter !== "number" || !Number.isFinite(chapter)) {
+      return jsonError("chapter must be a finite number", 400)
+    }
+    chapterNum = chapter
+  }
+  if (note !== undefined && typeof note !== "string") {
+    return jsonError("note must be a string", 400)
+  }
+  const siteId = typeof site === "string" ? site : "1"
+  const result = store.addBookmark({
+    site: siteId,
+    kind,
+    id,
+    quote,
+    chapter: chapterNum,
+    note,
+    scrollProgress,
+  })
+  if (result.ok === false) {
+    if (result.reason === "not_found") {
+      return jsonError("item not found", 404)
+    }
+    if (result.reason === "full") {
+      return jsonError("bookmark limit reached", 409)
+    }
+    return jsonError("invalid quote", 400)
+  }
+  return jsonOk({ ok: true, bookmark: result.bookmark }, NO_STORE_HEADERS)
+}
+
+/** PATCH /api/me/bookmarks/:id：改写备注（note 必填 string，含 ""） */
+async function handleBookmarkPatch(
+  req: Request,
+  id: number
+): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object" || !("note" in body)) {
+    return jsonError("invalid json body", 400)
+  }
+  const note = body.note
+  if (typeof note !== "string") {
+    return jsonError("note must be a string", 400)
+  }
+  const changed = store.updateBookmarkNote(id, note)
+  if (!changed) return jsonError("item not found", 404)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+/** DELETE /api/me/bookmarks/:id：删除书签 */
+function handleBookmarkDelete(id: number): Response {
+  const removed = store.deleteBookmark(id)
+  if (!removed) return jsonError("item not found", 404)
+  return jsonOk({ ok: true, removed: 1 }, NO_STORE_HEADERS)
+}
+
 /** 全局删除某一标签（所有对象上的该标签行）；可带 ?site= 只删该站 */
 function handleTagDelete(url: URL): Response {
   const tag = url.searchParams.get("tag")?.trim()
@@ -1334,6 +1474,13 @@ async function routeInner(req: Request): Promise<Response> {
       if (req.method === "PUT") return await handleGroupUpsert(req)
       throw new ExtractorError("method not allowed", 405)
     }
+    const bookmarkOne = pathname.match(/^\/api\/me\/bookmarks\/(\d+)$/)
+    if (bookmarkOne) {
+      const id = Number(bookmarkOne[1])
+      if (req.method === "PATCH") return await handleBookmarkPatch(req, id)
+      if (req.method === "DELETE") return handleBookmarkDelete(id)
+      throw new ExtractorError("method not allowed", 405)
+    }
     switch (pathname) {
       case "/api/health":
         requireGet(req)
@@ -1421,6 +1568,11 @@ async function routeInner(req: Request): Promise<Response> {
       case "/api/me/export":
         requireGet(req)
         return handleMeExport()
+      case "/api/me/bookmarks": {
+        if (req.method === "GET") return handleBookmarksGet(url)
+        if (req.method === "POST") return await handleBookmarkPost(req)
+        throw new ExtractorError("method not allowed", 405)
+      }
       case "/api/me/progress":
         if (req.method === "PUT") return await handleProgressWrite(req)
         throw new ExtractorError("method not allowed", 405)
