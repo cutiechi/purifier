@@ -50,15 +50,17 @@ function mapGrantError(err: unknown): AuthError {
     return new AuthError("invalid_grant", 400)
   }
   const code = (err as { code?: unknown }).code
+  // 稳定错误码覆盖 JWT claim 值比对 / 时间戳校验；验签失败与必需 claim 缺失
+  // 共用 OAUTH_INVALID_RESPONSE 码，只能靠消息文本区分，保留这两条文本匹配
   if (
     code === JWT_CLAIM_COMPARISON_ERROR ||
     code === JWT_TIMESTAMP_CHECK_ERROR ||
-    code === KEY_SELECTION_ERROR ||
     text.includes("signature verification failed") ||
     text.includes("claim missing")
   ) {
     return new AuthError("unauthorized", 401)
   }
+  // 其余（含 JWKS 刷新后仍失败的 KEY_SELECTION_ERROR）按规格映射 502
   return new AuthError("oidc upstream", 502)
 }
 

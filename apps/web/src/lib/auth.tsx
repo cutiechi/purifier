@@ -235,7 +235,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (enabled && loggedOut && pathname !== routes.login) {
     return (
       <Navigate
-        to={`${routes.login}?from=${encodeURIComponent(pathname)}`}
+        to={`${routes.login}?from=${encodeURIComponent(
+          pathname + window.location.search
+        )}`}
         replace
       />
     )

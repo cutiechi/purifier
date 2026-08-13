@@ -27,6 +27,7 @@ afterEach(() => {
 
 async function startIdp(options: {
   missingKeyOnce?: boolean
+  missingKey?: boolean
   allowCodeReuse?: boolean
   wrongKey?: boolean
 } = {}): Promise<Idp> {
@@ -57,7 +58,8 @@ async function startIdp(options: {
       if (url.pathname === "/jwks") {
         jwksFetches++
         const key =
-          options.missingKeyOnce === true && jwksFetches === 1
+          options.missingKey === true ||
+          (options.missingKeyOnce === true && jwksFetches === 1)
             ? undefined
             : { ...publicJwk, kid: "k1", alg: "RS256", use: "sig" }
         return Response.json({ keys: key === undefined ? [] : [key] })
@@ -65,7 +67,16 @@ async function startIdp(options: {
       if (url.pathname === "/token" && req.method === "POST") {
         const body = new URLSearchParams(await req.text())
         const code = body.get("code")
-        if (code !== "good") {
+        const clientId = body.get("client_id")
+        const clientSecret = body.get("client_secret")
+        const codeVerifier = body.get("code_verifier")
+        // 忠实模拟机密客户端 IdP：client_secret_post 鉴权 + PKCE code_verifier
+        if (
+          code !== "good" ||
+          clientId !== CLIENT_ID ||
+          clientSecret !== CLIENT_SECRET ||
+          !codeVerifier
+        ) {
           return Response.json({ error: "invalid_grant" }, { status: 400 })
         }
         if (usedCodes.has(code) && options.allowCodeReuse !== true) {
@@ -236,6 +247,19 @@ describe("OidcService", () => {
     const me = await service.exchange(callback.href, state, codeVerifier)
     expect(me.sub).toBe("user-123")
     expect(idp.discoveryCount()).toBe(2)
+  })
+
+  test("maps a JWKS that never contains the signing key to 502", async () => {
+    const idp = await startIdp({ missingKey: true, allowCodeReuse: true })
+    const service = new OidcService(idp.config)
+    const { state, codeVerifier } = await service.authorizationUrl()
+    const callback = callbackUrl(state)
+    callback.searchParams.set("iss", idp.issuer)
+    await expectAuthError(
+      service.exchange(callback.href, state, codeVerifier),
+      "oidc upstream",
+      502
+    )
   })
 
   test("exchange maps an id_token signed by an unknown key to 401", async () => {

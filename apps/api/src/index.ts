@@ -1560,9 +1560,11 @@ async function routeInner(req: Request): Promise<Response> {
         requireGet(req)
         const enabled = authConfig.enabled
         if (!enabled) return jsonOk(emptyAuthMe(), NO_STORE_HEADERS)
-        // 门锁已保证有会话（me 非公开路由，无 Cookie 时 401 而非空用户）
+        // 门锁已保证有会话（me 非公开路由，无 Cookie 时 401）；仍显式校验
+        // 一次，校验失败按 401 处理，避免不可达的 null 断言崩溃
         const sess = sessionFrom(req)
-        return jsonOk(sessionToAuthMe(sess!), NO_STORE_HEADERS)
+        if (!sess) throw new AuthError("unauthorized", 401)
+        return jsonOk(sessionToAuthMe(sess), NO_STORE_HEADERS)
       }
       case "/api/auth/authorize": {
         if (req.method !== "POST") {
@@ -1593,7 +1595,13 @@ async function routeInner(req: Request): Promise<Response> {
         }
         if (!authConfig.enabled) throw new AuthError("oidc disabled", 400)
         const sessionSecret = authConfig.secret
-        const body: unknown = await req.json()
+        let body: unknown
+        try {
+          body = await req.json()
+        } catch {
+          // 非 JSON body 视为畸形输入（公开端点，按 400 处理而非 500）
+          throw new AuthError("url mismatch", 400)
+        }
         if (typeof body !== "object" || body === null || !("url" in body)) {
           throw new AuthError("url mismatch", 400)
         }
@@ -1608,9 +1616,10 @@ async function routeInner(req: Request): Promise<Response> {
         const secure = cookieOpts(req).secure
         const session = signSession(
           {
+            // exchange 保证 sub 必有（否则抛 401）；email/name 缺省按 null 存
             sub: user.sub ?? "",
-            email: user.email ?? "",
-            name: user.name ?? "",
+            email: user.email,
+            name: user.name,
           },
           sessionSecret
         )
