@@ -116,6 +116,7 @@ export default function ReadPage() {
   const {
     items: bookmarks,
     loading: bookmarksLoading,
+    error: bookmarksError,
     add: addBookmark,
     updateNote: updateBookmarkNote,
     remove: removeBookmark,
@@ -206,11 +207,11 @@ export default function ReadPage() {
   syncRef.current = syncFromViewport
   useEffect(() => {
     if (!locateKey || loadedTid !== tid || !bookmarksReady || !target) return
-    setStaleId(undefined) // 新决策清掉上一条 stale 标记（本次命中则不标）
     const raf2 = requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (locatedRef.current === locateKey) return // 本次 bm 已定位过
         locatedRef.current = locateKey
+        setStaleId(undefined) // 换 bm 新决策：清掉上一条 stale 标记（列表增删重跑 effect 不清）
         const root = document.querySelector(".reading-body")
         const hit =
           root instanceof Element && scrollToQuote(root, target.quote)
@@ -309,6 +310,11 @@ export default function ReadPage() {
                 </>
               }
             />
+            {bookmarksError && (
+              <p className="mt-3 text-xs text-destructive">
+                {bookmarksError}
+              </p>
+            )}
             <BookmarkList
               items={bookmarks}
               staleId={staleId}
