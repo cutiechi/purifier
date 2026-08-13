@@ -5,6 +5,13 @@ import {
   colorSlot,
   normalizeCharacterName,
 } from "./character-highlight"
+import {
+  LEGACY_SLOT_HUE,
+  clampHue,
+  flattenClusterMarks,
+  isHue,
+  pickHue,
+} from "./character-highlight"
 
 describe("normalizeCharacterName", () => {
   test("trims and rejects newlines/tabs/empty/overlong", () => {
@@ -72,4 +79,46 @@ describe("characterHighlight", () => {
     expect(colorSlot(6)).toBe(0)
     expect(COLOR_COUNT).toBe(6)
   })
+})
+
+test("pickHue empty is 85", () => {
+  expect(pickHue([])).toBe(85)
+})
+
+test("pickHue maximizes min circular distance", () => {
+  expect(pickHue([85])).toBe(265)
+  const a = pickHue([85, 265])
+  expect(a).not.toBe(85)
+  expect(a).not.toBe(265)
+})
+
+test("pickHue dedupes used", () => {
+  expect(pickHue([85, 85])).toBe(pickHue([85]))
+})
+
+test("isHue and clampHue", () => {
+  expect(isHue(0)).toBe(true)
+  expect(isHue(359)).toBe(true)
+  expect(isHue(360)).toBe(false)
+  expect(isHue(1.5)).toBe(false)
+  expect(isHue("1")).toBe(false)
+  expect(clampHue(400)).toBe(40)
+  expect(clampHue(-1)).toBe(359)
+})
+
+test("flattenClusterMarks copies hue onto each name", () => {
+  expect(
+    flattenClusterMarks([
+      { id: 1, hue: 85, names: ["林远", "少爷"] },
+      { id: 2, hue: 160, names: ["乙"] },
+    ])
+  ).toEqual([
+    { name: "林远", hue: 85 },
+    { name: "少爷", hue: 85 },
+    { name: "乙", hue: 160 },
+  ])
+})
+
+test("LEGACY_SLOT_HUE maps v1 slots", () => {
+  expect(LEGACY_SLOT_HUE).toEqual([85, 160, 220, 300, 30, 350])
 })

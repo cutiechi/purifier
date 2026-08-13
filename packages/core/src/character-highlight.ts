@@ -1,4 +1,45 @@
-export type { CharacterName, CharacterScope } from "./storage/types"
+export type {
+  CharacterCluster,
+  CharacterMark,
+  CharacterScope,
+} from "./storage/types"
+
+export const LEGACY_SLOT_HUE = [85, 160, 220, 300, 30, 350] as const
+
+export function isHue(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 359
+}
+
+export function clampHue(hue: number): number {
+  if (!Number.isFinite(hue)) return 85
+  return ((Math.round(hue) % 360) + 360) % 360
+}
+
+export function pickHue(used: number[]): number {
+  const uniq = [...new Set(used)]
+  if (uniq.length === 0) return 85
+  let best = 0
+  let bestScore = -1
+  for (let h = 0; h < 360; h++) {
+    let minD = 360
+    for (const u of uniq) {
+      const raw = Math.abs(h - u)
+      const d = Math.min(raw, 360 - raw)
+      if (d < minD) minD = d
+    }
+    if (minD > bestScore) {
+      bestScore = minD
+      best = h
+    }
+  }
+  return best
+}
+
+export function flattenClusterMarks(
+  clusters: CharacterCluster[]
+): CharacterMark[] {
+  return clusters.flatMap((c) => c.names.map((name) => ({ name, hue: c.hue })))
+}
 
 export const COLOR_COUNT = 6
 

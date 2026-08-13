@@ -145,9 +145,15 @@ export interface CharacterScope {
   id: string
 }
 
-export interface CharacterName {
+export interface CharacterCluster {
+  id: number
+  hue: number
+  names: string[]
+}
+
+export interface CharacterMark {
   name: string
-  colorIndex: number
+  hue: number
 }
 
 export interface ReadingSessionInput {
