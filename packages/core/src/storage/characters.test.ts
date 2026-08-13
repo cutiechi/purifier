@@ -208,11 +208,11 @@ describe("characters", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("exportBackup includes character_clusters version 2", () => {
+  test("exportBackup includes character_clusters version 3", () => {
     const { dir, store } = tempStore()
     store.addCharacter({ type: "post", id: "9" }, "甲")
     const bak = store.exportBackup()
-    expect(bak.version).toBe(2)
+    expect(bak.version).toBe(3)
     expect(bak.character_clusters.length).toBe(1)
     expect(bak.character_names[0]).toHaveProperty("cluster_id")
     expect(bak.character_names[0]).not.toHaveProperty("color_index")

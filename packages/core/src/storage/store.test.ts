@@ -28,6 +28,7 @@ describe("openDatabase", () => {
     expect(rows.map((r) => r.name)).toEqual([
       "archive_cursors",
       "archive_posts",
+      "bookmarks",
       "character_clusters",
       "character_names", // ← 按字母序插在 archive_posts 与 favorites 之间
       "favorites",
@@ -853,6 +854,8 @@ test("exportBackup includes reading_sessions", () => {
     durationS: 9,
   })
   const backup = store.exportBackup()
+  expect(backup.version).toBe(3)
+  expect(Array.isArray(backup.bookmarks)).toBe(true)
   expect(Array.isArray(backup.reading_sessions)).toBe(true)
   expect(backup.reading_sessions.length).toBe(1)
   expect(backup.reading_sessions[0]).toMatchObject({
@@ -969,6 +972,13 @@ describe("getStats", () => {
     store.addFavorite("1", "post", "h1")
     store.setTags("1", "post", "h1", ["x"])
     store.setTags("2", "post", "h2", ["y"])
+    store.addBookmark({
+      site: "1",
+      kind: "post",
+      id: "h1",
+      quote: "q",
+      scrollProgress: 0,
+    })
 
     const all = store.getStats()
     expect(all.summary.totalDurationS).toBe(180)
@@ -1010,11 +1020,12 @@ describe("getStats", () => {
     // recentSessions 只含真实段
     expect(all.recentSessions.length).toBe(2)
     expect(all.recentSessions[0]).toMatchObject({ id: "b" })
-    // inventory：h1(1)/h2(2) 两个 item，h1 收藏 1 条，tag x/y 各 1 个 → 全局计数
+    // inventory：h1(1)/h2(2) 两个 item，h1 收藏 1 条，tag x/y 各 1 个，h1 书签 1 条 → 全局计数
     expect(all.inventory.history).toBe(2)
     expect(all.inventory.favorites).toBe(1)
     expect(all.inventory.tags).toBe(2)
     expect(all.inventory.groups).toBe(1)
+    expect(all.inventory.bookmarks).toBe(1)
 
     // site 过滤：site=2 只剩 b 的 120s
     const onlyBooks = store.getStats({ site: "2" })
@@ -1028,6 +1039,7 @@ describe("getStats", () => {
     expect(onlyBooks.inventory.history).toBe(1)
     expect(onlyBooks.inventory.favorites).toBe(0)
     expect(onlyBooks.inventory.tags).toBe(1)
+    expect(onlyBooks.inventory.bookmarks).toBe(0)
     db.close()
     rmSync(dir, { recursive: true, force: true })
   })
