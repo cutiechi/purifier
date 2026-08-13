@@ -45,11 +45,16 @@ export default function BookPage() {
   const { settings } = useReadingSettings()
   const { state, reload } = useItemState("book", cid)
   const {
-    characters,
+    clusters,
+    marks,
     error: charactersError,
+    loading: charactersLoading,
     reload: reloadCharacters,
     add,
     remove,
+    merge,
+    split,
+    recolor,
   } = useCharacters("book", cid)
   const { enabled, setEnabled } = useCharacterHighlightEnabled()
   const [markPopup, setMarkPopup] = useState<{
@@ -57,13 +62,19 @@ export default function BookPage() {
     rect: DOMRect
   } | null>(null)
   const [mutationError, setMutationError] = useState("")
-  // PUT/DELETE 失败时展示错误；成功后清除（add 成功才更新名单，remove 失败已回滚）
-  const handleAdd = async (name: string) => {
+  // PUT/DELETE 失败时展示错误；成功后清除（add 成功才更新名单，remove 失败已回滚）。
+  // 跨组同名 PUT 409 → 引导去面板合并。
+  const handleAdd = async (name: string, clusterId?: number) => {
     try {
-      await add(name)
+      await add(name, clusterId)
       setMutationError("")
     } catch (e) {
-      setMutationError(e instanceof Error ? e.message : "标记失败")
+      const msg = e instanceof Error ? e.message : "标记失败"
+      setMutationError(
+        e instanceof Error && e.message === "character belongs to another cluster"
+          ? "该称呼已属于其他人，请到面板合并"
+          : msg
+      )
     }
   }
   const handleRemove = async (name: string) => {
@@ -164,10 +175,31 @@ export default function BookPage() {
       refreshing={refreshing}
       characterSlot={
         <CharacterPanel
-          characters={characters}
+          clusters={clusters}
           enabled={enabled}
           setEnabled={setEnabled}
           onRemove={(n) => void handleRemove(n)}
+          onSplit={(clusterId, n) => {
+            void split(clusterId, n)
+              .then(() => setMutationError(""))
+              .catch((e) =>
+                setMutationError(e instanceof Error ? e.message : "拆分失败")
+              )
+          }}
+          onMerge={(clusterIds, hue) => {
+            void merge(clusterIds, hue)
+              .then(() => setMutationError(""))
+              .catch((e) =>
+                setMutationError(e instanceof Error ? e.message : "合并失败")
+              )
+          }}
+          onRecolor={(clusterId, hue) => {
+            void recolor(clusterId, hue)
+              .then(() => setMutationError(""))
+              .catch((e) =>
+                setMutationError(e instanceof Error ? e.message : "改色失败")
+              )
+          }}
           error={charactersError}
           mutationError={mutationError}
           onRetry={() => {
@@ -202,7 +234,7 @@ export default function BookPage() {
                 contentHtml={book.content}
                 sourceUrl={book.url}
                 progress={progress}
-                characters={characters}
+                characters={marks}
                 highlightEnabled={enabled}
                 onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
                 actions={actions}
@@ -283,7 +315,7 @@ export default function BookPage() {
                 contentHtml={book.content}
                 sourceUrl={book.url}
                 progress={progress}
-                characters={characters}
+                characters={marks}
                 highlightEnabled={enabled}
                 onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
                 actions={actions}
@@ -332,16 +364,17 @@ export default function BookPage() {
         )}
       </AsyncBody>
       <CharacterSelectionToolbar
-        characters={characters}
-        onAdd={(n) => void handleAdd(n)}
+        clusters={clusters}
+        onAdd={(n, cid) => void handleAdd(n, cid)}
         onRemove={(n) => void handleRemove(n)}
       />
       {markPopup && (
         <CharacterMarkPopover
           name={markPopup.name}
           rect={markPopup.rect}
-          colorIndex={
-            characters.find((c) => c.name === markPopup.name)?.colorIndex
+          hue={clusters.find((c) => c.names.includes(markPopup.name))?.hue}
+          clusterNames={
+            clusters.find((c) => c.names.includes(markPopup.name))?.names
           }
           onRemove={() => {
             void handleRemove(markPopup.name)

@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { colorSlot } from "@workspace/core/character-highlight"
-import { cn } from "@workspace/ui/lib/utils"
+import { CharacterSwatch } from "@/components/character-swatch"
 
 const GAP = 8
 const EDGE = 8
@@ -12,20 +11,24 @@ const EDGE = 8
 export function CharacterMarkPopover({
   name,
   rect,
-  colorIndex,
+  hue,
+  clusterNames,
   onRemove,
   onClose,
 }: {
   name: string
   rect: DOMRect
-  /** 提供时渲染色点（color_index % 6 对应 .character-mark--N 色） */
-  colorIndex?: number
+  /** 提供时渲染色点（组色相） */
+  hue?: number
+  /** 该称呼所在组的全部称呼（含自身），用于展示「同组」提示 */
+  clusterNames?: string[]
   onRemove: () => void
   onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // 先给占位坐标让浮条挂载，useLayoutEffect 在绘制前测宽高并重定位
   const [pos, setPos] = useState({ top: 0, left: 0 })
+  const siblings = (clusterNames ?? []).filter((n) => n !== name)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -65,21 +68,21 @@ export function CharacterMarkPopover({
       className="fixed z-50 flex items-center gap-2 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-md"
       style={{ top: pos.top, left: pos.left }}
     >
-      {colorIndex !== undefined && (
-        <span
-          aria-hidden
-          className={cn(
-            "size-2.5 shrink-0 rounded-full",
-            `character-mark--${colorSlot(colorIndex)}`
-          )}
-          style={{ background: "var(--character-mark-bg)" }}
-        />
-      )}
-      <span
-        className="max-w-40 truncate text-sm font-medium text-foreground"
-        title={name}
-      >
-        {name}
+      <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
+        <span className="flex items-center gap-2">
+          <CharacterSwatch hue={hue ?? 85} />
+          <span
+            className="max-w-40 truncate text-sm font-medium text-foreground"
+            title={name}
+          >
+            {name}
+          </span>
+        </span>
+        {siblings.length > 0 && (
+          <span className="max-w-48 truncate pl-[18px] text-xs text-muted-foreground">
+            同组：{siblings.join(" / ")}
+          </span>
+        )}
       </span>
       <button
         type="button"

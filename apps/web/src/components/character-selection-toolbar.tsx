@@ -5,8 +5,9 @@ import {
   useRef,
   useState,
 } from "react"
-import type { CharacterName } from "@workspace/core/character-highlight"
 import { normalizeCharacterName } from "@workspace/core/character-highlight"
+import type { CharacterCluster } from "@workspace/core/character-highlight"
+import { CharacterSwatch } from "@/components/character-swatch"
 
 interface Anchor {
   name: string
@@ -26,14 +27,16 @@ function isInReadingBody(node: Node | null): boolean {
  * 选区浮条：mouseup/touchend 时检查正文选区，合法则浮在选区上方。
  * 仅在 .reading-body 内的选区触发；normalizeCharacterName 失败（含换行/制表符、
  * 空、超长）则不显示。Esc / 滚动 / 点空白关闭。
+ * 选区已在某组：只提供「取消标记」；否则「标记为人物」（新组）+
+ * 下方限高列表可挂靠到已有组（继承 hue）。
  */
 export function CharacterSelectionToolbar({
-  characters,
+  clusters,
   onAdd,
   onRemove,
 }: {
-  characters: CharacterName[]
-  onAdd: (name: string) => void
+  clusters: CharacterCluster[]
+  onAdd: (name: string, clusterId?: number) => void
   onRemove: (name: string) => void
 }) {
   const [anchor, setAnchor] = useState<Anchor | null>(null)
@@ -117,28 +120,50 @@ export function CharacterSelectionToolbar({
 
   if (!anchor) return null
 
-  const exists = characters.some((c) => c.name === anchor.name)
+  const exists = clusters.some((c) => c.names.includes(anchor.name))
   const act = () => {
     const name = anchor.name
     setAnchor(null)
     if (exists) onRemove(name)
     else onAdd(name)
   }
+  const attach = (clusterId: number) => {
+    const name = anchor.name
+    setAnchor(null)
+    onAdd(name, clusterId)
+  }
 
   return (
     <div
       ref={barRef}
-      className="fixed z-50 rounded-lg border border-border bg-popover px-1.5 py-1 shadow-md"
+      className="fixed z-50 flex max-h-72 flex-col rounded-lg border border-border bg-popover px-1.5 py-1 shadow-md"
       style={{ top: pos.top, left: pos.left }}
     >
       <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={act}
-        className="rounded-md px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        className="shrink-0 rounded-md px-2 py-1 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent"
       >
         {exists ? "取消标记" : "标记为人物"}
       </button>
+      {!exists && clusters.length > 0 && (
+        <ul className="mt-1 flex max-h-48 flex-col overflow-y-auto border-t border-border pt-1">
+          {clusters.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => attach(c.id)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-foreground transition-colors hover:bg-accent"
+              >
+                <CharacterSwatch hue={c.hue} />
+                <span className="min-w-0 flex-1 truncate">{c.names.join(" / ")}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
