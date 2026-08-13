@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -49,6 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthMe | null>(null)
   /** 服务端确认无会话（me 401 / callback 失败 / 登出）；false 不代表已登录 */
   const [loggedOut, setLoggedOut] = useState(false)
+  /** fetch 401 包装闭包读取的最新 enabled（闭包不随 state 更新） */
+  const enabledRef = useRef(enabled)
 
   // 启动拉一次 config；enabled 时再验 me（200 设用户，401 未登录）。
   // 拉取失败保持未 ready（AuthGate 转圈），不误判为公开站。
@@ -82,6 +85,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void load()
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // 同步最新 enabled 到 ref，供下方 fetch 包装闭包读取
+  useEffect(() => {
+    enabledRef.current = enabled
+  }, [enabled])
+
+  // 全局 401 拦截：enabled 时同源 /api/ 请求 401 视为会话失效 → 清用户并跳登录页。
+  // keepalive 上报（sendBeacon/keepalive fetch）与页面隐藏（pagehide → visibilityState
+  // 已是 hidden）都不跳转，避免卸载中的回调触发导航。
+  useEffect(() => {
+    const orig = window.fetch
+    // bun 的 typeof fetch 在函数对象上带 preconnect 命名空间属性（浏览器端无），保留避免覆盖
+    const preconnect = orig.preconnect
+    const origFetch = orig.bind(window)
+    window.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const res = await origFetch(input, init)
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url
+        const isApi =
+          url.startsWith("/api/") ||
+          url.startsWith(`${window.location.origin}/api/`)
+        if (
+          res.status === 401 &&
+          isApi &&
+          !init?.keepalive &&
+          document.visibilityState === "visible"
+        ) {
+          if (!enabledRef.current) {
+            const cfg = await origFetch(api.authConfig)
+            if (cfg.ok) {
+              const data = (await cfg.json()) as { enabled: boolean }
+              enabledRef.current = data.enabled
+              setEnabled(data.enabled)
+            }
+          }
+          if (enabledRef.current) {
+            setUser(null)
+            const path = window.location.pathname
+            if (path !== routes.login) {
+              window.location.assign(
+                `${routes.login}?from=${encodeURIComponent(path + window.location.search)}`
+              )
+            }
+          }
+        }
+        return res
+      },
+      { preconnect }
+    )
+    return () => {
+      window.fetch = orig
     }
   }, [])
 

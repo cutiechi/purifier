@@ -10,6 +10,7 @@ import {
 import { ModeToggle } from "@/components/mode-toggle"
 import { readingMaxWidthClass } from "@/components/reading-settings"
 import { useSite } from "@/hooks/use-site"
+import { useAuth } from "@/lib/auth"
 import { DEFAULT_SITE, NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -32,6 +33,7 @@ export function SiteHeader({
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const site = useSite()
+  const { enabled, user, logout } = useAuth()
   const [open, setOpen] = useState(false)
   // 一级导航固定，不再按站过滤整项
   const items = NAV_ITEMS
@@ -102,6 +104,20 @@ export function SiteHeader({
           >
             <IconSearch size={18} />
           </Link>
+          {enabled && user ? (
+            <>
+              <span className="hidden max-w-40 truncate px-2 text-[13px] text-muted-foreground sm:inline">
+                {user.name || user.email || user.sub?.slice(0, 8)}
+              </span>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="inline-flex h-11 items-center justify-center rounded-xl px-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                退出
+              </button>
+            </>
+          ) : null}
           <ModeToggle />
           <button
             type="button"
