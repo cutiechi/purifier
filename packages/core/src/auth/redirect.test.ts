@@ -44,6 +44,15 @@ describe("assertQueryIss", () => {
     )
   })
 
+  test("malformed iss throws", () => {
+    expect(() =>
+      assertQueryIss(
+        new URL("https://purifier.example/login?iss=garbage"),
+        "https://id.example.com"
+      )
+    ).toThrow(AuthError)
+  })
+
   test("mismatch throws", () => {
     expect(() =>
       assertQueryIss(

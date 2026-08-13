@@ -37,7 +37,13 @@ export function assertCallbackUrl(configured: string, incoming: string): URL {
 export function assertQueryIss(callbackUrl: URL, issuer: string): void {
   const iss = callbackUrl.searchParams.get("iss")
   if (iss === null) return
-  if (normalizeIssuer(iss) !== normalizeIssuer(issuer)) {
+  let normalizedIss: string
+  try {
+    normalizedIss = normalizeIssuer(iss)
+  } catch {
+    throw new AuthError("invalid iss", 400)
+  }
+  if (normalizedIss !== normalizeIssuer(issuer)) {
     throw new AuthError("invalid iss", 400)
   }
 }
