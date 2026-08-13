@@ -16,6 +16,7 @@
  * | History     | `/history`                   |
  * | Favorites   | `/favorites`                 |
  * | Tags        | `/tags?tag=&q=&kind=&page=`  |
+ * | Bookmarks   | `/bookmarks`                 |
  * | Group       | `/groups`                    |
  * | Archive     | `/archive`                   |
  * | Jobs        | `/jobs`                      |
@@ -42,6 +43,7 @@ export const routes = {
   history: "/history",
   favorites: "/favorites",
   tags: "/tags",
+  bookmarks: "/bookmarks",
   groups: "/groups",
   /** 全站目录（原归档） */
   archive: "/archive",
@@ -70,6 +72,7 @@ export const ME_TABS: {
   { href: routes.history, label: "历史", sites: ["1", "2"] },
   { href: routes.favorites, label: "收藏", sites: ["1", "2"] },
   { href: routes.tags, label: "标签", sites: ["1", "2"] },
+  { href: routes.bookmarks, label: "书签", sites: ["1", "2"] },
 ]
 
 /** 目录页栏目（归档整理视图；书库站无分组） */
@@ -94,6 +97,7 @@ export const api = {
   meHistory: "/api/me/history",
   meFavorites: "/api/me/favorites",
   meTags: "/api/me/tags",
+  meBookmarks: "/api/me/bookmarks",
   meItems: "/api/me/items",
   meState: "/api/me/state",
   meProgress: "/api/me/progress",
@@ -119,20 +123,22 @@ export function siteUrl(path: string, site?: SiteId): string {
   return `${path}?site=${site}`
 }
 
-export function readPath(tid: string, site?: SiteId): string {
+export function readPath(tid: string, site?: SiteId, bm?: string): string {
   const p = new URLSearchParams()
   withSite(p, site)
+  if (bm) p.set("bm", bm)
   const qs = p.toString()
   return `/read/${encodeURIComponent(tid)}${qs ? `?${qs}` : ""}`
 }
 
 export function bookPath(
   cid: string,
-  opts?: { site?: SiteId; chapter?: string }
+  opts?: { site?: SiteId; chapter?: string; bm?: string }
 ): string {
   const p = new URLSearchParams()
   withSite(p, opts?.site)
   if (opts?.chapter) p.set("chapter", opts.chapter)
+  if (opts?.bm) p.set("bm", opts.bm)
   const qs = p.toString()
   return `/book/${encodeURIComponent(cid)}${qs ? `?${qs}` : ""}`
 }
@@ -247,7 +253,8 @@ export const NAV_ITEMS = [
       p === routes.me ||
       p === routes.history ||
       p === routes.favorites ||
-      p === routes.tags,
+      p === routes.tags ||
+      p === routes.bookmarks,
   },
   {
     href: routes.stats,

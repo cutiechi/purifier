@@ -24,18 +24,15 @@ export function useDiscoverTabs(activePath: string): SectionTab[] {
 }
 
 export function useMeTabs(activePath: string): SectionTab[] {
-  const site = useSite()
   return useMemo(() => {
-    return ME_TABS.filter((t) =>
-      (t.sites as readonly SiteId[]).includes(site)
-    ).map((t) => ({
-      to: siteUrl(t.href, site),
+    return ME_TABS.map((t) => ({
+      to: t.href,
       label: t.label,
       active:
         activePath === t.href ||
         (t.href === "/tags" && activePath.startsWith("/tags")),
     }))
-  }, [site, activePath])
+  }, [activePath])
 }
 
 /** 目录（归档/分组）：按站过滤；书库站无分组，只显示「目录」 */
