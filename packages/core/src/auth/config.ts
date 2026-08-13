@@ -18,30 +18,36 @@ export function parseAuthConfig(
   const secret = read("AUTH_SECRET")
   const buttonText = read("OIDC_BUTTON_TEXT") ?? DEFAULT_BUTTON_TEXT
 
-  const present = [issuer, clientId, clientSecret, redirectUri, secret].filter(
-    (v): v is string => v !== undefined
-  )
-  if (present.length === 0) {
-    return { enabled: false, partial: false, buttonText }
-  }
-  if (present.length < 5) {
-    return { enabled: false, partial: true, buttonText }
-  }
+  const presentCount = [issuer, clientId, clientSecret, redirectUri, secret].filter(
+    (v) => v !== undefined
+  ).length
 
-  const [oIssuer, oClientId, oClientSecret, oRedirectUri, oSecret] = present
-  if (oSecret.length < AUTH_SECRET_MIN) {
-    throw new AuthError("AUTH_SECRET too short", 500)
+  if (
+    issuer !== undefined &&
+    clientId !== undefined &&
+    clientSecret !== undefined &&
+    redirectUri !== undefined &&
+    secret !== undefined
+  ) {
+    if (secret.length < AUTH_SECRET_MIN) {
+      throw new AuthError("AUTH_SECRET too short", 500)
+    }
+    return {
+      enabled: true,
+      issuer: normalizeIssuer(issuer),
+      clientId,
+      clientSecret,
+      redirectUri,
+      secret,
+      buttonText,
+      partial: false,
+    }
   }
 
   return {
-    enabled: true,
-    issuer: normalizeIssuer(oIssuer),
-    clientId: oClientId,
-    clientSecret: oClientSecret,
-    redirectUri: oRedirectUri,
-    secret: oSecret,
+    enabled: false,
+    partial: presentCount > 0,
     buttonText,
-    partial: false,
   }
 }
 
