@@ -22,6 +22,15 @@ test("addBookmark round-trip; missing item is not_found", () => {
     })
   ).toEqual({ ok: false, reason: "not_found" })
   store.recordVisit("1", "post", "t1", "Title", "/read/t1")
+  expect(
+    store.addBookmark({
+      site: "1",
+      kind: "post",
+      id: "t1",
+      quote: "   ",
+      scrollProgress: 0,
+    })
+  ).toEqual({ ok: false, reason: "invalid_quote" })
   const added = store.addBookmark({
     site: "1",
     kind: "post",
@@ -37,6 +46,21 @@ test("addBookmark round-trip; missing item is not_found", () => {
   expect(added.bookmark.scrollProgress).toBe(1)
   expect(added.bookmark.chapter).toBeNull()
   expect(store.listItemBookmarks("1", "post", "t1")).toHaveLength(1)
+
+  // 码点截断：quote 截到 200 码点、note 截到 80 码点（"😀" 1 码点 = 2 个 UTF-16 单元，验证按码点而非按单元截断）
+  const truncated = store.addBookmark({
+    site: "1",
+    kind: "post",
+    id: "t1",
+    quote: "😀".repeat(250),
+    note: "n".repeat(100),
+    scrollProgress: 0,
+  })
+  expect(truncated.ok).toBe(true)
+  if (!truncated.ok) return
+  expect(truncated.bookmark.quote).toBe("😀".repeat(200))
+  expect(truncated.bookmark.note).toBe("n".repeat(80))
+  expect(Array.from(truncated.bookmark.quote)).toHaveLength(200)
   rmSync(dir, { recursive: true, force: true })
 })
 
