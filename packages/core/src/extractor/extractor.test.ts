@@ -188,6 +188,56 @@ describe("extractPreHtml 清洗加固", () => {
     expect(res.content).not.toContain("/read/999")
     expect(res.content).toContain("点我")
   })
+
+  test("纯相对链接（index.php?...）视为站内链接（上游新格式）", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，含站内相对链接 <a href="index.php?app=forum&act=threadview&tid=777">内链</a> 的测试内容，结尾处还有不少文字`
+      )
+    )
+    expect(res.content).toContain("/read/777")
+  })
+
+  test("extractGoldLinks 接受纯相对 URL（上游首页新格式）", () => {
+    const html = `<!DOCTYPE html>
+<html>
+<body>
+<div id="d_gold_list" class="main_right_margin">
+  <table width="998px" border="0">
+    <tr>
+      <td width=33% class='gold_td'><a href="index.php?app=forum&act=threadview&tid=14604341">精华帖一</a></td>
+      <td width=33% class='gold_td'><a href="index.php?app=forum&act=threadview&tid=14604144">精华帖二</a></td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>`
+    const links = ex.extractGoldLinks(html)
+    expect(links.map((l) => l.tid)).toEqual(["14604341", "14604144"])
+  })
+
+  test("extractCmtRankPosts 接受纯相对 URL（上游评论榜新格式）", () => {
+    const html = `<!DOCTYPE html>
+<html>
+<body>
+<table class="rank-table" aria-label="《禁忌书屋》评论榜">
+  <tbody>
+    <tr>
+      <td class="rank-col">1</td>
+      <td class="title-col"><a href="index.php?action=search&act=threadsearch&app=forum&uid=1">蛋伤</a></td>
+      <td><a href="index.php?app=forum&act=threadview&tid=14555162">【毫末生】第七卷</a></td>
+      <td>2026-04-10</td>
+      <td>377 评</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>`
+    const posts = ex.extractCmtRankPosts(html)
+    expect(posts).toEqual([
+      { rank: 1, title: "【毫末生】第七卷", tid: "14555162", comments: 377 },
+    ])
+  })
 })
 
 describe("软 404 检测", () => {

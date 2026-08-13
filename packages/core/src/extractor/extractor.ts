@@ -883,11 +883,13 @@ export class Cool18Extractor implements Extractor {
    * 仅同站（站内相对路径或 cool18.com）URL 才抽取站内 id，
    * 防外站 tid=/cid= 参数误判为站内链。
    * //host/... 是协议相对外链，不能因 startsWith("/") 误判为站内。
+   * 纯相对（index.php?...）是站内相对路径：无 scheme、不以 // 开头即接受。
    */
   private static isSameSiteHref(href: string): boolean {
     return (
       (href.startsWith("/") && !href.startsWith("//")) ||
-      /cool18\.com/i.test(href)
+      /cool18\.com/i.test(href) ||
+      (!href.startsWith("//") && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href))
     )
   }
 
