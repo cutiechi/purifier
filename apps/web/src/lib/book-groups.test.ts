@@ -11,6 +11,7 @@ test("normalizeTitleKey 去书名号包裹并小写", () => {
   expect(normalizeTitleKey("【马屌少年】")).toBe("马屌少年")
   expect(normalizeTitleKey("［马屌少年］")).toBe("马屌少年")
   expect(normalizeTitleKey("[马屌少年]")).toBe("马屌少年")
+  expect(normalizeTitleKey("「马屌少年」")).toBe("马屌少年")
   expect(normalizeTitleKey("马屌少年")).toBe("马屌少年")
   expect(normalizeTitleKey("  马屌少年  ")).toBe("马屌少年")
 })
@@ -63,6 +64,34 @@ test("同名多章合并为一组，单条为 single", () => {
     expect(result[0].author).toBe("小明")
   }
   expect(result[1].type).toBe("single")
+})
+
+test("全角书名号「」与半角【】同书并组（上游标题格式不一致）", () => {
+  const items = [
+    { tid: "14045416", title: "【女友陈瑶的秘密】（１－３０完结） 作者：接班人" },
+    { tid: "14047315", title: "【女友陈瑶的秘密】（5-7） 作者：接班人" },
+    { tid: "14070611", title: "「女友陈瑶的秘密」（8-10）作者：「接班人」" },
+    { tid: "14112626", title: "【女友陈瑶的秘密】（30 终章） 作者：接班人" },
+  ]
+  const result = groupBooks(
+    items,
+    (it) => it.title,
+    (it) => it.tid
+  )
+  expect(result).toHaveLength(1)
+  expect(result[0].type).toBe("group")
+  if (result[0].type === "group") {
+    expect(result[0].key).toBe("女友陈瑶的秘密")
+    expect(result[0].title).toBe("女友陈瑶的秘密")
+    // 全角引号作者应剥壳后并入
+    expect(result[0].author).toBe("接班人")
+    expect(result[0].items.map((i) => i.tid)).toEqual([
+      "14045416",
+      "14047315",
+      "14070611",
+      "14112626",
+    ])
+  }
 })
 
 test("空标题项一律 single，不并组", () => {

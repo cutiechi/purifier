@@ -26,7 +26,7 @@ export function stripTrailingChapterMarker(title: string): string {
 
 export function normalizeTitleKey(title: string): string {
   return stripTrailingChapterMarker(
-    title.replace(/^[《【［[]+|[》】］\]]+$/g, "")
+    title.replace(/^[「《【〖［[]+|[」》】〗］\]]+$/g, "")
   )
     .trim()
     .toLowerCase()
