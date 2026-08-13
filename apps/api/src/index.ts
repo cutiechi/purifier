@@ -945,14 +945,14 @@ async function handleProgressWrite(req: Request): Promise<Response> {
 /**
  * 书签 GET 分流：
  * - 带 kind+id：单篇/单章书签列表（site 缺省 "1"，chapter 可选）
- * - 不带：跨站全局列表（不读 site），q 搜索 + kind 可选过滤，每页 20
+ * - 其余（无 id）：跨站全局列表（不读 site），q 搜索 + kind 可选过滤，每页 20
  */
 function handleBookmarksGet(url: URL): Response {
   const kind = url.searchParams.get("kind")
   const id = url.searchParams.get("id")
   const hasKind = kind !== null && kind !== ""
   const hasId = id !== null && id !== ""
-  if (hasKind !== hasId) {
+  if (hasId && !hasKind) {
     return jsonError("kind and id must be provided together", 400)
   }
   if (hasKind && hasId) {
