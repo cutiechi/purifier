@@ -59,7 +59,7 @@ function HistoryToolbar({
     if (items.length === 0) return
     const ok = await confirm({
       title: `清空本页 ${items.length} 条？`,
-      description: "相关收藏与标签也会一并移除。",
+      description: "相关收藏、标签与书签也会一并移除。",
       confirmLabel: "清空本页",
       destructive: true,
     })
