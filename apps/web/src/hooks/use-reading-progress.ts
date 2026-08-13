@@ -133,5 +133,10 @@ export function useReadingProgress(
     }
   }, [opts.ready, kind, id, chapter, site])
 
-  return { progress }
+  const syncFromViewport = () => {
+    const p = computeProgress()
+    setProgress(p ?? 0)
+  }
+
+  return { progress, syncFromViewport }
 }
