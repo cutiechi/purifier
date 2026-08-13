@@ -322,6 +322,8 @@ Expected: FAIL
 
 `serializeCookie`：`Path=/; SameSite=Lax; Max-Age=`；`httpOnly !== false` 时 `HttpOnly`；`secure` 时 `Secure`。值用 `encodeURIComponent`。
 
+`clearCookie`：调用 `serializeCookie(name, "", { maxAge: 0, secure, httpOnly: opts.httpOnly !== false })`。
+
 `isSecureRequest`：`x-forwarded-proto` 逗号第一段 trim 为 `https`，或 `new URL(req.url).protocol === "https:"`。
 
 - [ ] **Step 4: 跑测试确认通过**
