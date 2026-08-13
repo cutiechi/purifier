@@ -12,6 +12,8 @@ Purifier 是一个 Cool18 净化阅读应用，Bun workspace 单仓，Turbo 编�
 
 上游内容来自 cool18，抓取结果经过清洗后由 API 返回 JSON，前端只渲染安全 HTML 和站内链接。
 
+OIDC 只锁谁能进实例，登录者共享同一 SQLite。
+
 ## 常用命令
 
 | 命令                | 作用                                     |
@@ -65,7 +67,12 @@ packages/typescript-config/               # base / react-library 配置
 
 | 路径                                     | 参数                                                                                                            | 行为                                                                                                                                          |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`                        | 无                                                                                                              | `{ status: "ok", runtime: "bun" }`                                                                                                            |
+| `GET /api/health`                        | 无                                                                                                               | `{ status: "ok", runtime: "bun" }`                                                                                                            |
+| `GET /api/auth/config`                   | 无                                                                                                               | `{ enabled, buttonText }`                                                                                                                     |
+| `GET /api/auth/me`                       | 无                                                                                                               | `AuthMe`；OIDC 开且未登录 401；关则 `enabled: false` 且 claim 为 null                                                                                    |
+| `POST /api/auth/authorize`               | 无                                                                                                               | `{ url }` + PKCE Cookie；未开 400 `oidc disabled`                                                                                                |
+| `POST /api/auth/callback`                | body `{ url }`                                                                                                  | 成功设会话                                                                                                                                         |
+| `POST /api/auth/logout`                  | 无                                                                                                               | 清 Cookie `{ ok }`                                                                                                                             |
 | `GET /api/posts`                         | `tid`、`site`（默认 `1`）                                                                                       | 帖子正文 + 章节链接 + 元信息 + 跟帖树                                                                                                         |
 | `GET /api/posts`                         | `mtid`、`site`（默认 `1`）                                                                                      | 首页分页列表 `{ links, nextMtid }`                                                                                                            |
 | `GET /api/books`                         | `cid`、`chapter`、`site`（默认 `1`）                                                                            | 书库内容 `{ title, content, meta, url }`；`chapter` 为章节号时返回章节正文页，否则返回目录页                                                  |
@@ -119,6 +126,10 @@ packages/typescript-config/               # base / react-library 配置
 - 上游非 2xx 返回 `502`。
 - 其余未知错误返回 `500`。
 - 错误体统一为 `{ "error": "..." }`。
+- `AuthError` 使用其 `statusCode` 与 `error` 字符串。
+- 400：`oidc disabled`、`url mismatch`、`invalid state`、`invalid iss`、`invalid_grant`。
+- 401：`unauthorized`（会话或 ID Token）。
+- 502：`oidc upstream`。
 
 列表响应使用 `LIST_CACHE_HEADERS`（`s-maxage=60`），正文响应使用 `CONTENT_CACHE_HEADERS`（`s-maxage=300`）。
 
@@ -134,7 +145,13 @@ packages/typescript-config/               # base / react-library 配置
 | `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data`                                                   |
 | `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理，Bun 下走原生 `proxy`                                                             |
 | `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致（镜像需含 tzdata，见 Dockerfile runner 阶段） |
-| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                                                                              |
+| `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                                                                                  |
+| `OIDC_ISSUER`                | 无                       | OIDC 发行方（Pocket ID）URL；与其它 4 项任一缺失则关闭 OIDC 并启动告警                                               |
+| `OIDC_CLIENT_ID`             | 无                       | OIDC 客户端 ID                                                                                    |
+| `OIDC_CLIENT_SECRET`         | 无                       | OIDC 客户端密钥                                                                                     |
+| `OIDC_REDIRECT_URI`          | 无                       | OIDC 回调地址；须与 Pocket ID Client 注册一致                                                             |
+| `AUTH_SECRET`                | 无                       | 会话签名密钥（HMAC，≥32 字符，过短启动退出）；轮换会使全部会话失效                                                          |
+| `OIDC_BUTTON_TEXT`           | `使用 Pocket ID 登录`       | 登录按钮文案（可选）                                                                                     |
 
 ## 常见改动路径
 
@@ -144,6 +161,7 @@ packages/typescript-config/               # base / react-library 配置
 - 改动任务（jobs）系统：任务执行在 `packages/core/src/jobs/`（`runner.ts` / `handler.ts` / `handlers/`），数据表在 `packages/core/src/storage/db.ts`（`jobs` / `job_logs` / `archive_posts`），API 在 `apps/api/src/index.ts` 的 `/api/me/jobs*` 分支；测试在对应目录 `*.test.ts`。
 - 新增上游站点：在 `packages/core/src/extractor/sites.ts` 的 `SITES` 注册表中加一行，实现 `Extractor` 接口；API 经 `resolveSite(site)` 按 `site` 参数解析对应站点，解析方法仍返回定义好的模型。
 - 调整正文清洗：只改 `Cool18Extractor.extractPreHtml`，并保持输出为清洗后 HTML。
+- 鉴权在 `packages/core/src/auth/` 与 `apps/api` 的 `/api/auth*`。
 
 ## 验证
 

@@ -69,14 +69,28 @@ docker run -p 3000:3000 -v purifier-data:/data purifier:latest
 
 ## 环境变量
 
-| 变量                         | 默认值                        | 说明                        |
-| ---------------------------- | ----------------------------- | --------------------------- |
-| `PORT`                       | `3001`（Docker 内 `3000`）    | API 监听端口                |
-| `HOSTNAME`                   | `0.0.0.0`                     | 监听地址                    |
-| `WEB_DIST`                   | `apps/web/dist`               | Vite 构建产物目录           |
-| `DATA_DIR`                   | `./data`（Docker 内 `/data`） | SQLite 库与内容缓存目录     |
-| `HTTPS_PROXY` / `HTTP_PROXY` | 无                            | 上游请求使用的代理          |
-| `API_PROXY`                  | `http://127.0.0.1:3001`       | Vite dev 的 `/api` 代理目标 |
+| 变量                           | 默认值                        | 说明                                       |
+| ---------------------------- | -------------------------- | ---------------------------------------- |
+| `PORT`                       | `3001`（Docker 内 `3000`）    | API 监听端口                                 |
+| `HOSTNAME`                   | `0.0.0.0`                  | 监听地址                                     |
+| `WEB_DIST`                   | `apps/web/dist`            | Vite 构建产物目录                              |
+| `DATA_DIR`                   | `./data`（Docker 内 `/data`） | SQLite 库与内容缓存目录                          |
+| `HTTPS_PROXY` / `HTTP_PROXY` | 无                          | 上游请求使用的代理                                |
+| `API_PROXY`                  | `http://127.0.0.1:3001`    | Vite dev 的 `/api` 代理目标                   |
+| `OIDC_ISSUER`                | 无                          | OIDC 发行方（Pocket ID）URL；与其它 4 项任一缺失则关闭并告警 |
+| `OIDC_CLIENT_ID`             | 无                          | OIDC 客户端 ID                              |
+| `OIDC_CLIENT_SECRET`         | 无                          | OIDC 客户端密钥                               |
+| `OIDC_REDIRECT_URI`          | 无                          | OIDC 回调地址；须与 Pocket ID Client 注册一致       |
+| `AUTH_SECRET`                | 无                          | 会话签名密钥（HMAC，≥32 字符，过短启动退出）；轮换使全部会话失效     |
+| `OIDC_BUTTON_TEXT`           | `使用 Pocket ID 登录`          | 登录按钮文案（可选）                               |
+
+## OIDC 登录（可选）
+
+配置 `OIDC_ISSUER`、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_REDIRECT_URI` 与 `AUTH_SECRET`（可选 `OIDC_BUTTON_TEXT`）后开启 Pocket ID 登录门锁：未登录访问 `/api` 返回 401，前端引导到登录页。变量只配一部分时 OIDC 保持关闭并打印告警，行为与未配置一致。
+
+- Pocket ID 后台新建 Client 时，回调地址只填 `OIDC_REDIRECT_URI`（本地开发为 `http://localhost:3000/login`），不需要额外路径。
+- OIDC 只锁谁能进实例，登录者共享同一 SQLite；不建用户表。
+- 反向代理（Nginx / Caddy 等）终止 TLS 时需透传 `X-Forwarded-Proto: https`，否则会话 Cookie 不会按安全请求下发。
 
 ## API
 
