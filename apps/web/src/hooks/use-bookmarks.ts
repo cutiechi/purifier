@@ -79,6 +79,8 @@ export function useBookmarks(opts: {
 
   const add = useCallback(
     async (input: { quote: string; note: string; scrollProgress: number }) => {
+      // 快照调用时作用域：POST 期间切换篇/章后，过期成功响应不得插入新作用域列表
+      const key = scopeKey
       const res = await fetch(api.meBookmarks, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -97,6 +99,7 @@ export function useBookmarks(opts: {
         // 409（已满）/400 等抛给页面：status 用于分流展示文案
         throw httpError(json.error || "保存书签失败", res.status)
       }
+      if (scopeRef.current !== key) return
       setItems((prev) => [json.bookmark, ...prev])
     },
     [kind, id, site, chapter]
@@ -112,8 +115,10 @@ export function useBookmarks(opts: {
     if (!res.ok) {
       throw httpError(json.error || "修改备注失败", res.status)
     }
+    // 与 store 的 normalizeBookmarkNote 一致：trim + 80 码元截断后再写入本地状态
+    const clean = Array.from(note.trim()).slice(0, 80).join("")
     setItems((prev) =>
-      prev.map((b) => (b.id === bookmarkId ? { ...b, note } : b))
+      prev.map((b) => (b.id === bookmarkId ? { ...b, note: clean } : b))
     )
   }, [])
 
