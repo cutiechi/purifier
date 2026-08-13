@@ -85,8 +85,9 @@ packages/typescript-config/               # base / react-library 配置
 | `DELETE /api/me/groups/:id`              | 无                                                          | 删分组（级联成员）`{ ok }`                                                                              |
 | `DELETE /api/me/groups/:id/items`        | body `{ items:[{tid}] }`                                    | 移除成员；组空自动删组 `{ ok, removed, deleted }`                                                       |
 | `PUT/DELETE /api/me/groups/:id/favorite` | 无                                                          | 收藏 / 取消收藏整个分组 `{ ok }`；不存在 404                                                            |
-| `GET /api/me/characters`                 | `kind`、`id`                                               | 角色列表 `{ scope, characters }`；`kind=post` 且 tid 已在分组时 scope 指向该组                            |
-| `PUT /api/me/characters`                 | body `{ kind, id, name }`                                  | 新增角色（幂等）`{ ok, character, characters }`；`name` 规范化（trim、禁换行/Tab、1-32 字符）后为空 400    |
+| `GET /api/me/characters`                 | `kind`、`id`                                               | `{ scope, clusters: [{ id, hue, names }] }`；`kind=post` 且 tid 已在分组时 scope 指向该组                |
+| `PUT /api/me/characters`                 | body `{ kind, id, name, clusterId? }`                      | 新增角色（幂等）`{ ok, cluster, clusters }`；`name` 规范化（trim、禁换行/Tab、1-32 字符）后为空 400；跨组同名 409 |
+| `PATCH /api/me/characters`               | body `{ kind, id, op: merge\|split\|recolor, ... }`        | `{ ok, clusters }`                                                                                      |
 | `DELETE /api/me/characters`              | `kind`、`id`、`name`                                       | 删除角色 `{ ok, removed }`                                                                              |
 | `GET /api/me/jobs`                       | `type`、`status`、`limit`（默认 20 上限 100）、`offset`              | `{ items, nextPage?, total }` 任务列表                                                                      |
 | `POST /api/me/jobs`                      | body `{ type, payload? }`                                   | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                               |
@@ -97,7 +98,7 @@ packages/typescript-config/               # base / react-library 配置
 | `POST /api/me/jobs/:id/stop`             | 无                                                           | `{ ok }`；不存在 404、非运行中 409                                                                               |
 | `GET /api/me/archive`                    | `site`（默认 1）、`q`、`page`、`limit`（默认 50 上限 100）、`sort`（title\|tid\|archived_at 默认 tid）、`order` | `{ items, nextPage?, total }` 归档目录                                                                      |
 | `GET /api/me/archive/status`             | `site`（默认 1）                                            | `{ total, maxTid, cursor }` 归档库规模与续跑游标                                                            |
-| `GET /api/me/export`                     | 无                                                          | 下载 JSON 备份（items/favorites/tags/groups/archive_posts/character_names/cursors/reading_sessions）                         |
+| `GET /api/me/export`                     | 无                                                          | 下载 JSON 备份（version: 2；items/favorites/tags/groups/archive_posts/character_names/character_clusters/cursors/reading_sessions）           |
 | `POST /api/me/sessions`                  | body `{ site?, kind, id, title, startedAt, durationS }`    | 记一段阅读会话 `{ ok }`；`id` 走 `assertSafeId`，`durationS<3` 丢弃、`>300` clamp，`startedAt>now+5m` 400 |
 | `GET /api/me/stats`                      | `site?`                                                     | `{ summary, calendar, timeOfDay, topItems, recentSessions, inventory }`；省略 `site` 跨站 |
 

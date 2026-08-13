@@ -37,7 +37,7 @@ import {
   type JobLog,
   type JobStatus,
 } from "@workspace/core"
-import { normalizeCharacterName } from "@workspace/core/character-highlight"
+import { normalizeCharacterName, isHue } from "@workspace/core/character-highlight"
 
 // Dev: 3001 (Vite on 3000 proxies /api). Prod Docker sets PORT=3000 + WEB_DIST.
 const PORT = Number(process.env.PORT || 3001)
@@ -720,8 +720,8 @@ function handleCharactersGet(url: URL): Response {
     url.searchParams.get("id")
   )
   const scope = store.resolveCharacterScope(kind, id)
-  const characters = store.listCharacters(scope)
-  return jsonOk({ scope, characters }, NO_STORE_HEADERS)
+  const clusters = store.listClusters(scope)
+  return jsonOk({ scope, clusters }, NO_STORE_HEADERS)
 }
 
 async function handleCharactersPut(req: Request): Promise<Response> {
@@ -744,10 +744,17 @@ async function handleCharactersPut(req: Request): Promise<Response> {
   }
   const name = normalizeCharacterName(nameRaw)
   if (!name) throw new ExtractorError("invalid name", 400)
+  let clusterId: number | undefined
+  if ("clusterId" in body && body.clusterId !== undefined && body.clusterId !== null) {
+    if (typeof body.clusterId !== "number" || !Number.isInteger(body.clusterId)) {
+      throw new ExtractorError("invalid clusterId", 400)
+    }
+    clusterId = body.clusterId
+  }
   const scope = store.resolveCharacterScope(kind, id)
-  const character = store.addCharacter(scope, name)
-  const characters = store.listCharacters(scope)
-  return jsonOk({ ok: true, character, characters }, NO_STORE_HEADERS)
+  const cluster = store.addCharacter(scope, name, clusterId)
+  const clusters = store.listClusters(scope)
+  return jsonOk({ ok: true, cluster, clusters }, NO_STORE_HEADERS)
 }
 
 function handleCharactersDelete(url: URL): Response {
@@ -761,6 +768,63 @@ function handleCharactersDelete(url: URL): Response {
   const scope = store.resolveCharacterScope(kind, id)
   const removed = store.removeCharacter(scope, name)
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
+}
+
+async function handleCharactersPatch(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  if (!body || typeof body !== "object") {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  const { kind, id } = parseMeKindId(
+    "kind" in body ? body.kind : undefined,
+    "id" in body ? body.id : undefined
+  )
+  const op = "op" in body ? body.op : undefined
+  const scope = store.resolveCharacterScope(kind, id)
+  if (op === "merge") {
+    const ids = "clusterIds" in body ? body.clusterIds : undefined
+    const hue = "hue" in body ? body.hue : undefined
+    if (!Array.isArray(ids) || !isHue(hue)) {
+      throw new ExtractorError("invalid merge", 400)
+    }
+    const clusterIds = ids.map((x) => {
+      if (typeof x !== "number" || !Number.isInteger(x)) {
+        throw new ExtractorError("invalid clusterIds", 400)
+      }
+      return x
+    })
+    const clusters = store.mergeClusters(scope, clusterIds, hue)
+    return jsonOk({ ok: true, clusters }, NO_STORE_HEADERS)
+  }
+  // clusterIds 为 [] 时 Array.isArray 为 true，store.mergeClusters 因 uniq.length < 2 抛 400。
+  if (op === "split") {
+    const clusterId = "clusterId" in body ? body.clusterId : undefined
+    const nameRaw = "name" in body ? body.name : undefined
+    if (typeof clusterId !== "number" || !Number.isInteger(clusterId)) {
+      throw new ExtractorError("invalid clusterId", 400)
+    }
+    if (typeof nameRaw !== "string") throw new ExtractorError("invalid name", 400)
+    const name = normalizeCharacterName(nameRaw)
+    if (!name) throw new ExtractorError("invalid name", 400)
+    const clusters = store.splitCharacter(scope, clusterId, name)
+    return jsonOk({ ok: true, clusters }, NO_STORE_HEADERS)
+  }
+  if (op === "recolor") {
+    const clusterId = "clusterId" in body ? body.clusterId : undefined
+    const hue = "hue" in body ? body.hue : undefined
+    if (typeof clusterId !== "number" || !Number.isInteger(clusterId)) {
+      throw new ExtractorError("invalid clusterId", 400)
+    }
+    if (!isHue(hue)) throw new ExtractorError("invalid hue", 400)
+    const clusters = store.recolorCluster(scope, clusterId, hue)
+    return jsonOk({ ok: true, clusters }, NO_STORE_HEADERS)
+  }
+  throw new ExtractorError("invalid op", 400)
 }
 
 async function handleFavoriteWrite(
@@ -1319,6 +1383,7 @@ async function routeInner(req: Request): Promise<Response> {
       case "/api/me/characters": {
         if (req.method === "GET") return handleCharactersGet(url)
         if (req.method === "PUT") return await handleCharactersPut(req)
+        if (req.method === "PATCH") return await handleCharactersPatch(req)
         if (req.method === "DELETE") return handleCharactersDelete(url)
         throw new ExtractorError("method not allowed", 405)
       }
