@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView } from "@/components/article-view"
 import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
-import { CharacterSelectionToolbar } from "@/components/character-selection-toolbar"
+import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { PostCard, PostList } from "@/components/post-card"
@@ -365,10 +365,11 @@ export default function BookPage() {
           </>
         )}
       </AsyncBody>
-      <CharacterSelectionToolbar
+      <ReadingSelectionToolbar
         clusters={clusters}
         onAdd={(n, cid) => void handleAdd(n, cid)}
         onRemove={(n) => void handleRemove(n)}
+        onBookmark={() => {}}
       />
       {markPopup && (
         <CharacterMarkPopover
