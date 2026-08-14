@@ -541,6 +541,7 @@ export default function JobsPage() {
             onNext={() =>
               nextPage !== undefined && update({ page: nextPage })
             }
+            onPage={(n) => update({ page: n })}
             disabled={loading}
           />
         )}
