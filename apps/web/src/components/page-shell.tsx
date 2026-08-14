@@ -1,6 +1,6 @@
 import { type ReactNode } from "react"
 import { SiteHeader } from "@/components/site-header"
-import { readingMaxWidthClass } from "@/components/reading-settings"
+import { pageWidthClass, type PageWidth } from "@/components/reading-settings"
 import { cn } from "@workspace/ui/lib/utils"
 
 export function PageShell({
@@ -12,11 +12,9 @@ export function PageShell({
   children: ReactNode
   showBack?: boolean
   className?: string
-  maxWidth?: "normal" | "wide"
+  maxWidth?: PageWidth
 }) {
-  const widthClass = maxWidth
-    ? readingMaxWidthClass(maxWidth)
-    : "max-w-3xl"
+  const widthClass = pageWidthClass(maxWidth ?? "normal")
 
   return (
     <div className="relative min-h-svh bg-background">
@@ -27,6 +25,8 @@ export function PageShell({
       />
       <SiteHeader showBack={showBack} maxWidth={maxWidth} />
       <main
+        id="main"
+        tabIndex={-1}
         className={cn(
           "relative mx-auto w-full px-3.5 py-5 sm:px-5 sm:py-8",
           widthClass,

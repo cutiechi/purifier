@@ -176,7 +176,7 @@ export default function ArchivePage() {
   }
 
   return (
-    <PageShell>
+    <PageShell maxWidth="xwide">
       <PageHeader
         title="目录"
         description={

@@ -8,7 +8,7 @@ import {
   IconSearch,
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
-import { readingMaxWidthClass } from "@/components/reading-settings"
+import { pageWidthClass, type PageWidth } from "@/components/reading-settings"
 import { useSite } from "@/hooks/use-site"
 import { useAuth } from "@/lib/auth"
 import { DEFAULT_SITE, NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
@@ -27,9 +27,9 @@ export function SiteHeader({
   maxWidth,
 }: {
   showBack?: boolean
-  maxWidth?: "normal" | "wide"
+  maxWidth?: PageWidth
 }) {
-  const widthClass = readingMaxWidthClass(maxWidth ?? "normal")
+  const widthClass = pageWidthClass(maxWidth ?? "normal")
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const site = useSite()

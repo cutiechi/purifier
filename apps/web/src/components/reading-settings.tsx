@@ -64,9 +64,13 @@ const FONT_VAR: Record<ReadingFont, string> = {
   mono: "var(--font-mono)",
 }
 
-const MAXWIDTH_CLASS: Record<ReadingMaxWidth, string> = {
+/** 页面栏宽（含宽屏档）；与阅读偏好 ReadingMaxWidth 分离，不进存储/面板 */
+export type PageWidth = "normal" | "wide" | "xwide"
+
+const PAGE_WIDTH_CLASS: Record<PageWidth, string> = {
   normal: "max-w-3xl",
   wide: "max-w-4xl",
+  xwide: "max-w-5xl",
 }
 
 export function ReadingSettingsProvider({ children }: { children: ReactNode }) {
@@ -118,7 +122,6 @@ export function useReadingSettings(): ReadingSettingsContextValue {
   return ctx
 }
 
-// 供 PageShell / SiteHeader 对齐栏宽用（Phase 2 Task 2.1）
-export function readingMaxWidthClass(maxWidth: ReadingMaxWidth): string {
-  return MAXWIDTH_CLASS[maxWidth]
+export function pageWidthClass(maxWidth: PageWidth): string {
+  return PAGE_WIDTH_CLASS[maxWidth]
 }
