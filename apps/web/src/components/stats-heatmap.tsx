@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cn } from "@workspace/ui/lib/utils"
 import { formatDuration } from "@/lib/format"
 
@@ -29,6 +29,8 @@ const keyOf = (d: Date) =>
  */
 export function StatsHeatmap({ days }: { days: Day[] }) {
   const [hover, setHover] = useState<Day | null>(null)
+  const [selected, setSelected] = useState<Day | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const byDate = new Map(days.map((d) => [d.date, d]))
   const today = new Date()
   const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate())
@@ -44,12 +46,32 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
   const flat: (Day | null)[] = [...Array(pad).fill(null), ...all]
   const weeks: (Day | null)[][] = []
   for (let i = 0; i < flat.length; i += 7) weeks.push(flat.slice(i, i + 7))
+  // 挂载/周数变化时滚到最近一周（365 天从最旧画起，最新在右端）
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollLeft = el.scrollWidth
+  }, [weeks.length])
+  // selected 优先，hover 仅桌面预览
+  const shown = selected ?? hover
   return (
     <div className="flex flex-col gap-1.5">
       <div
+        ref={scrollRef}
         className="flex gap-[3px] overflow-x-auto"
-        role="img"
-        aria-label="近一年阅读热力图"
+        role="group"
+        aria-label="近一年阅读热力图，左右方向键切换所选日期"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+          e.preventDefault()
+          const base = shown?.date ?? keyOf(todayMid)
+          const d = new Date(base + "T00:00:00")
+          d.setDate(d.getDate() + (e.key === "ArrowRight" ? 1 : -1))
+          const nextKey = keyOf(d)
+          setSelected(
+            byDate.get(nextKey) ?? { date: nextKey, durationS: 0, estimated: 0 }
+          )
+        }}
       >
         {weeks.map((week, wi) => (
           <div key={wi} className="flex flex-col gap-[3px]">
@@ -62,6 +84,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
                   title={`${c.date} · ${formatDuration(c.durationS)}`}
                   onMouseEnter={() => setHover(c)}
                   onMouseLeave={() => setHover(null)}
+                  onClick={() => setSelected(c)}
                   className={cn(
                     "h-2.5 w-2.5 rounded-[2px]",
                     LEVEL_BG[level(c.durationS)],
@@ -73,10 +96,10 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
           </div>
         ))}
       </div>
-      {hover && (
+      {shown && (
         <p className="text-xs text-muted-foreground">
-          {hover.date} · {formatDuration(hover.durationS)}
-          {hover.estimated === 1 ? "（历史活跃日，无时长）" : ""}
+          {shown.date} · {formatDuration(shown.durationS)}
+          {shown.estimated === 1 ? "（历史活跃日，无时长）" : ""}
         </p>
       )}
     </div>
