@@ -45,20 +45,31 @@ const library = useAsyncList(`${api.categories}?site=2`, pick)
 
 两个纵向堆叠的区块，固定顺序 **论坛 → 书库**。每块结构：
 
-1. 小标题头（`论坛` / `书库`）—— 用与 `CategoryGrid` 内 `题材`/`其它` 一致的 muted `<h2>` 风格（`text-xs font-semibold tracking-wide text-muted-foreground`，带 `mb-3`）。
+1. 小标题头—— 文案取自常量 `SITES[id].label`（`routes.ts:27-30`），不写字面量 `论坛`/`书库`；样式沿用 `CategoryGrid` 内 `题材`/`其它` 的 muted `<h2>`（`text-xs font-semibold tracking-wide text-muted-foreground`，带 `mb-3`）。
 2. 一个 `AsyncBody` 包着 `CategoryGrid`（含 spinner / 错误重试 / 空态）。
 
-区块顺序固定，不随 `?site=` 变化。
+两块的 `useAsyncList` 请求串用站点键：论坛 `?site=${DEFAULT_SITE}`（`"1"`）、书库 `?site=2`。区块顺序固定，不随 `?site=` 变化。
 
 ### 页头描述
 
-合并口径，基于两站结果：
+合并口径，**只统计成功加载（非 loading、非 error）的站**，保证页头文案与页面实际可见内容一致（部分失败时仍能反映已展示的卡片）：
 
-- 两站均加载完且有题材：`共 {两站题材总数} 个题材`。
-- 无题材但有入口：`共 {两站入口总数} 个入口`。
-- 未加载 / 两站均空：静态 `书屋栏目与题材`。
+```ts
+// 判定顺序（伪代码）
+if (forum.loading || library.loading) return "书屋栏目与题材"
+if (forum.error && library.error) return "书屋栏目与题材"
+// 此后至少一站成功
+const loaded = [forum, library].filter((s) => !s.error)
+const typeCount = loaded.flatMap((s) => s.items).filter((i) => i.kind === "type").length
+const entryCount = loaded.flatMap((s) => s.items).length
+if (typeCount > 0) return `共 ${typeCount} 个题材`
+if (entryCount > 0) return `共 ${entryCount} 个入口`
+return "书屋栏目与题材"
+```
 
-题材总数 = 两站 `kind === "type"` 数量之和。
+> 说明：`useAsyncList` 失败时会 `setItems([])`（`use-async-list.ts:40-42`），故失败站对计数自然贡献 0；上面先用 `s.error` 排除，避免把「失败」误当成「加载完且为空」。
+
+**题材口径**：`题材 = kind === "type"`，**含书库的「有声」入口**（`xbookcn.ts:330-338` 标 `kind: "type"`）。这与单站现状口径一致；合并后数字变大、语义更显眼，特此注明。
 
 ### 移除项
 
@@ -80,6 +91,7 @@ const library = useAsyncList(`${api.categories}?site=2`, pick)
 - 不合并两站分类为单一网格（用户已选分区堆叠，语义清晰）。
 - 不改 API 形态（无需新增「一次返回两站」的端点；两次轻量列表请求足够）。
 - 不改 `CategoryGrid` 组件（其内部按 kind 分组逻辑继续复用）。
+- 不处理「两个区块各出一个 `题材` h2」的重复标题问题：这是单站现状已有的行为，真正修复需调整 `CategoryGrid` 内部 heading 层级，超出本次单文件范围；仅包 `<section>` 只属装饰、不解题。
 - 不动其它页面的站点 Tab 逻辑。
 
 ## 验证
@@ -87,4 +99,7 @@ const library = useAsyncList(`${api.categories}?site=2`, pick)
 - `bun run typecheck`（前端类型检查通过）。
 - `bun run build`（构建通过）。
 - 手动：访问 `/categories`，确认同时显示 论坛 与 书库 两个区块，无切换 Tab；点论坛题材跳 `/browse?type=...`（site 1），点书库题材跳 `/browse?type=...&site=2`。
-- 手动：断网或上游不可达时，单站区块各自报错并保留重试。
+- 手动：断网或上游不可达时，单站区块各自报错并保留重试；此时页头按「成功加载的站」统计（如论坛成功则显示 `共 N 个题材`，不回退静态文案）。
+- 手动：两站均失败 → 页头静态文案 + 两个错误框各自可重试。
+- 手动：带 `?site=2` 进入 `/categories`（残留参数被忽略，两区块照常展示，无切换 Tab）。
+- 手动：从 `/browse?site=2` 导航到分类页，再点论坛分类，确认落到 site 1 的 browse。
