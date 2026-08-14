@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
-import { PageSiteTabs } from "@/components/page-site-tabs"
-import { SectionTabs } from "@/components/section-tabs"
 import {
   FilterTabs,
   ListMeta,
@@ -16,7 +14,6 @@ import { PostList } from "@/components/post-card"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { groupBooks } from "@/lib/book-groups"
-import { useAllTabs } from "@/lib/hub-tabs"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
@@ -70,7 +67,6 @@ export default function ArchivePage() {
         : o
     )
   }, [isBooks])
-  const sectionTabs = useAllTabs(routes.archive)
   const q = parseQuery(searchParams)
   const page = parsePage(searchParams)
 
@@ -200,9 +196,6 @@ export default function ArchivePage() {
           </Link>
         }
       />
-      <PageSiteTabs sites={["1", "2"]} />
-      <SectionTabs items={sectionTabs} />
-
       <SearchForm
         value={draftQ}
         onChange={setDraftQ}
