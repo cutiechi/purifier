@@ -1,6 +1,7 @@
 import type { MergedSearchItem } from "@workspace/core"
 import type { MeListItem } from "@/components/me-item-card"
 
+// 与 groupMeListItems 的 Pick 约束同形（book-groups.ts），修改时两处同步
 export type SearchItem = Pick<MeListItem, "kind" | "site" | "id" | "title">
 
 /** MergedSearchItem → groupMeListItems 入参形状（分组逻辑复用，不新写） */

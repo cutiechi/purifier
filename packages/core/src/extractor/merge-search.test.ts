@@ -19,21 +19,29 @@ function page(
 
 describe("searchSortKey", () => {
   test("剥外层装饰与作者后缀", () => {
-    expect(searchSortKey("【马屌少年】（2）作者：小明『都市』")).toBe("马屌少年")
+    expect(
+      searchSortKey("【马屌少年】（2）作者：小明『都市』")
+    ).toBe("马屌少年")
   })
 
   test("剥尾随章节标记（完）", () => {
-    expect(searchSortKey("马屌少年（完）作者：小明")).toBe("马屌少年")
+    expect(
+      searchSortKey("马屌少年（完）作者：小明")
+    ).toBe("马屌少年")
   })
 
-  test("正文数字保留（第2部 < 第10部，Collator numeric 序）", () => {
-    const a = searchSortKey("凡人修仙传第2部")
-    const b = searchSortKey("凡人修仙传第10部")
-    // key 是归一化字符串，numeric 序是 Collator 的职责，不能对 key 用 `<`
-    expect(
-      new Intl.Collator("zh", { numeric: true }).compare(a, b)
-    ).toBeLessThan(0)
-  })
+  test(
+    "正文数字保留（第2部 < 第10部，Collator numeric 序）",
+    () => {
+      const a = searchSortKey("凡人修仙传第2部")
+      const b = searchSortKey("凡人修仙传第10部")
+      // key 是归一化字符串，numeric 序是 Collator 的职责，
+      // 不能对 key 用 `<`
+      expect(
+        new Intl.Collator("zh", { numeric: true }).compare(a, b)
+      ).toBeLessThan(0)
+    }
+  )
 })
 
 describe("mergeSearchPages", () => {
@@ -42,15 +50,24 @@ describe("mergeSearchPages", () => {
       page("1", [["【乙】", "1"]], 2),
       page("2", [["甲", "a"], ["乙", "b"]], 2),
     ])
-    // link.title 保持上游原始标题（设计：展示/排序前才 parse）；排序键使「【乙】」「乙」同键平局
-    expect(r.items.map((i) => i.link.title)).toEqual(["甲", "【乙】", "乙"])
-    expect(r.items[1]!.site).toBe("1") // 同排序键稳定序：site1 先于 site2
+    // link.title 保持上游原始标题（设计：展示/排序前才
+    // parse）；排序键使「【乙】」「乙」同键平局
+    expect(r.items.map((i) => i.link.title)).toEqual([
+      "甲",
+      "【乙】",
+      "乙",
+    ])
+    // 同排序键稳定序：site1 先于 site2
+    expect(r.items[1]!.site).toBe("1")
     expect(r.items[2]!.site).toBe("2")
     expect(r.nextPage).toBe(2)
   })
 
   test("nextPage 取 OR：一站耗尽另一站还有 → 仍前进", () => {
-    const r = mergeSearchPages([page("1", [["A", "1"]], null), page("2", [["B", "2"]], 2)])
+    const r = mergeSearchPages([
+      page("1", [["A", "1"]], null),
+      page("2", [["B", "2"]], 2),
+    ])
     expect(r.nextPage).toBe(2)
   })
 
