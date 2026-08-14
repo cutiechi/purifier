@@ -95,9 +95,15 @@ Purifier 是 Cool18 净化阅读器（Bun workspace monorepo：`apps/api` + `app
 - **6-1 返回兜底**：`SiteHeader` showBack 改为**仅实测过的 `window.history.state?.idx === 0`**（React Router v7 history 等价字段）时 `navigate(routes.home)`，否则 `navigate(-1)`。**不用 `history.length`**（Chrome 新标签下不可靠，review 中-8）。ReadPage/BookPage 共用。验证：新标签直达 `/read/:tid` 回首页；从首页点进阅读返回仍回首页。
 - **6-2 论坛章节底栏——数据源重定义（review 高-1）**：
   - **事实**：`content.links` 是「扩展链接」= 正文 pre **外**的其它帖链接，按 tid 数值排序，**当前帖 tid 不在其中**；`index` 是排序下标非章节号。原「`findIndex` 定位当前 tid」方案在多数帖子 `pos === -1`，底栏几乎永不出现，且 tid 数值序不是阅读顺序——**方案废弃**。
-  - **新数据源**：正文 pre **内**的「上一章/下一章」站内链接。清洗后 HTML（`extractPreHtml`）保留 `/read/:tid` 站内链接，`ReadPage` 用 `DOMParser` 解析 `content`，提取 `a[href*='/read/']` 且文本匹配 `上一章|上一回|下一章|下一回|上章|下章|目录|返回目录` 的链接：匹配「上」侧 → 上一章、匹配「下」侧 → 下一章。匹配模式实现时以真实连载帖样本校准（写进验证项）。
+  - **新数据源（双来源，均按标题模式匹配，不当作序列；review 二轮）**：仓库规范用例是 **pre 外** 的 `<a>下一章</a>` 进 `content.links`（`extractor.test.ts:8-24` 断言 `links === [{ title: "下一章", tid: "999" }]`），pre **内**同类链接才进 `content`（内链保留为 `/read/:tid`）。只扫 `content` 会漏主路径，两个来源都用：
+    - 来源 A（pre 内）：`DOMParser` 解析清洗后 `content`，取 `a[href*='/read/']` 且文本匹配标题模式的链接。
+    - 来源 B（pre 外）：`content.links` 中 `title` 匹配同一模式的条目。
+    - 标题模式（**不含目录**）：`上一章|上一回|上章`（「上」侧）与 `下一章|下一回|下章`（「下」侧）。`目录|返回目录` 不放进正则、不做第三颗按钮——目录导航由 `RelatedLinks` 列表承担。
+    - 取「上」/「下」各一条：多候选时按来源优先级 [content, links] 取第一条。
+    - **仍不用 tid 排序当阅读顺序**（links 是 tid 序，语义无效）。
   - **显示条件**：仅当解析出上一章或下一章链接时显示底栏；单帖/无章节链接帖不显示。
-  - **布局**：半透明固定底栏，**右端避让 `ItemActions` FAB**（`fixed right-4 z-50`，右端留空或短条），`z-index` 低于 FAB；safe-area 沿用 `item-actions.tsx:125` 的 inline `calc(env(safe-area-inset-bottom, 0px) + …)` 写法，**不发明 `pb-safe` 工具类**（review 中-7）；`article`/`main` 加与底栏等高的 padding-bottom 防遮挡正文与进度条；验证进度条仍可见。
+  - **布局**：半透明固定底栏，**右端避让 `ItemActions` FAB**（`fixed right-4 z-50`，右端留空或短条），`z-index` 低于 FAB；safe-area 沿用 `item-actions.tsx:125` 的 inline `calc(env(safe-area-inset-bottom, 0px) + …)` 写法，**不发明 `pb-safe` 工具类**（review 中-7）；`article`/`main` 加与底栏等高的 padding-bottom 防遮挡正文。
+  - **进度条显式避让（review 二轮）**：`ReadingProgress` 的细条（`fixed inset-x-0 bottom-0 z-30 h-0.5`）与百分比（`fixed right-2 z-30`）都是 fixed（`reading-progress.tsx:4-17`），正文 padding 抬不动。底栏出现时，给 `ReadingProgress` 增加抬升（如 `bottomOffset` prop 或 CSS 变量）：细条与百分比 `bottom` 改为 `calc(底栏高度 + env(safe-area-inset-bottom, 0px))`（底栏高度用统一常量/CSS 变量，实现时定）。验证项：有底栏时进度条在底栏**上方**仍可见。
   - 书库 `BookPage` 内联 prev/next 不动。
   - 底栏与 `ReadingSelectionToolbar`（文字选择工具栏）触发时共存策略实现时验证（选择工具栏出现时不遮挡、可关闭）。
 
@@ -121,16 +127,19 @@ Purifier 是 Cool18 净化阅读器（Bun workspace monorepo：`apps/api` + `app
 | 3 | 页面栏宽 `PageWidth`(xwide=5xl) 独立档 + 热力图滚动/点击 | `reading-settings.tsx`、`page-shell.tsx`、`site-header.tsx`、`Stats/Jobs/Archive` 页、`stats-heatmap.tsx` | 低 | 2-3h |
 | 4 | 题材胶囊进副标题 + 副标题 line-clamp-1；相似搜索保持现状 | `components/list-post-card.tsx`、`components/post-card.tsx` | 低 | 30min |
 | 5 | Pager `onPage` + 5 处接线 + Archive 越界回退 | `components/pager.tsx`、`me-list-page.tsx`、`pages/{Archive,Bookmarks,Group,Jobs}Page.tsx` | 中（越界） | 2h |
-| 6 | 论坛章节底栏（content 内章链为数据源）+ 返回兜底 | `pages/ReadPage.tsx`、`article-view.tsx`、`site-header.tsx` | 中（数据源启发式/浮层冲突） | 半天 |
+| 6 | 论坛章节底栏（content+links 双来源章链）+ 返回兜底 | `pages/ReadPage.tsx`、`article-view.tsx`、`site-header.tsx`、`reading-progress.tsx` | 中（数据源启发式/浮层与进度条避让） | 半天 |
 | A11y | skip-to-main + confirm-dialog Tab trap/焦点归还 | `site-header.tsx`、`page-shell.tsx`、`confirm-dialog.tsx` | 低 | 1h |
 | 可选 | 底部 Tab bar（1b）、Tab 视觉合并（2b） | `routes.ts`、`site-header.tsx`、新组件 | 高 | 1-2 天 |
 
 ## 验证方式
 
-- 导航：浏览器实测 **768px 与 820px 两档**（`md` 断点）无换行/溢出；溢出则 `md:hidden` 用户名或退出改图标（review 低-2）。768 下为 logo + 8 nav + 搜索图标 + 主题 + 汉堡（`md:hidden` 后）。
+- 导航：浏览器实测拆两档（review 二轮低）：
+  - **`<768`**：logo + 搜索图标 + 用户名（sm:inline）+ 退出 + 主题 + 汉堡（横排 nav 隐藏）。
+  - **`≥768`（md 起）**：logo + 8 nav + 用户名 + 退出 + 主题（汉堡与搜索图标 `md:hidden` 消失）；820px 复查无换行/溢出。
+  - 溢出对策：`md:hidden` 用户名或退出改图标（review 低-2）。
 - 宽度/热力图：三页 `xwide` 生效；热力图触摸点击固定详情、键盘步进可用、默认滚到最近一周。
 - 分页：跳页输入 clamp 与回退；Archive 越界回退到末页；Browse/Search 不显示跳页输入。
-- 章节底栏（review 高-1 验证项）：打开多章连载帖确认底栏出现且上一章/下一章 tid 正确；单帖/无章节链接帖不显示；正文不被底栏遮挡、进度条仍可见、FAB 不被遮挡。
+- 章节底栏（review 高-1 + 二轮验证项）：打开多章连载帖（含 **pre 外「下一章」主路径**，对应 `extractor.test.ts:8-24` 夹具结构）确认底栏出现且上一章/下一章 tid 正确；单帖/无章节链接帖不显示；正文不被底栏遮挡、**进度条在底栏上方仍可见**、FAB 不被遮挡。
 - 返回兜底：新标签直达 `/read/:tid` 回首页；从首页点进阅读返回回首页（review 中-8）。
 - 回归：`bun run typecheck` + `bun run build` + **`bun run test`**（改 extractor 语义或 pager 行为时，`packages/core` 与前端单测都要跑，review 补充 5）。
 
