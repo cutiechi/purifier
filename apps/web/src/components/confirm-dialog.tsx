@@ -46,6 +46,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [opts, setOpts] = useState<ConfirmOptions | null>(null)
   const resolveRef = useRef<((v: boolean) => void) | null>(null)
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
   const descId = useId()
 
@@ -54,6 +56,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       // 若上一次未决：先 false 关闭，避免 Promise 悬挂
       resolveRef.current?.(false)
       resolveRef.current = resolve
+      prevFocusRef.current =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
       setOpts(next)
     })
   }, [])
@@ -62,6 +68,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     const r = resolveRef.current
     resolveRef.current = null
     setOpts(null)
+    const prev = prevFocusRef.current
+    if (prev && document.contains(prev)) prev.focus()
     r?.(value)
   }, [])
 
@@ -108,10 +116,31 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             onClick={() => finish(false)}
           />
           <div
+            ref={dialogRef}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby={titleId}
             aria-describedby={opts.description ? descId : undefined}
+            onKeyDown={(e) => {
+              if (e.key !== "Tab") return
+              const el = dialogRef.current
+              if (!el) return
+              const focusables = Array.from(
+                el.querySelectorAll<HTMLElement>(
+                  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+                )
+              )
+              if (focusables.length === 0) return
+              const first = focusables[0]!
+              const last = focusables[focusables.length - 1]!
+              if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault()
+                last.focus()
+              } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault()
+                first.focus()
+              }
+            }}
             className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl"
           >
             <h2

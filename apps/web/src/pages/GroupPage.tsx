@@ -520,6 +520,7 @@ export default function GroupPage() {
             total={total}
             onPrev={() => update({ page: Math.max(1, page - 1) })}
             onNext={() => update({ page: page + 1 })}
+            onPage={(n) => update({ page: n })}
             disabled={loading}
           />
         )}

@@ -63,7 +63,9 @@ export function PostCard({
           {title}
         </span>
         {subtitle != null && subtitle !== "" && (
-          <span className="text-xs text-muted-foreground">{subtitle}</span>
+          <span className="line-clamp-1 text-xs text-muted-foreground">
+            {subtitle}
+          </span>
         )}
       </div>
       {trailing ?? (

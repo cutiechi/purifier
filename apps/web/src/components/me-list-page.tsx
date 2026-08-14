@@ -245,6 +245,7 @@ export function MeListPage({
           totalPages={calcTotalPages(total, ME_PAGE_SIZE)}
           onPrev={() => update({ page: page - 1 })}
           onNext={() => nextPage !== undefined && update({ page: nextPage })}
+          onPage={(n) => update({ page: n })}
           disabled={loading}
         />
       </AsyncBody>

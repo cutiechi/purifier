@@ -92,7 +92,7 @@ export default function StatsPage() {
   const maxHour = data ? Math.max(1, ...data.timeOfDay) : 1
 
   return (
-    <PageShell>
+    <PageShell maxWidth="xwide">
       <PageHeader title="统计" description="阅读时长 · 连读 · 时段" />
       <div
         className="mb-4 flex w-fit items-center gap-1 rounded-full border border-border bg-card p-1"

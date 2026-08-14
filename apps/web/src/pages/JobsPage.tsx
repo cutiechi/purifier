@@ -317,7 +317,7 @@ export default function JobsPage() {
   // 任务页按站可用：论坛 archive_posts、书库 archive_books
 
   return (
-    <PageShell>
+    <PageShell maxWidth="xwide">
       <PageHeader
         title="任务"
         description={isBooks ? "同步书库目录与备份" : "同步目录、自动分组与备份"}
@@ -541,6 +541,7 @@ export default function JobsPage() {
             onNext={() =>
               nextPage !== undefined && update({ page: nextPage })
             }
+            onPage={(n) => update({ page: n })}
             disabled={loading}
           />
         )}
