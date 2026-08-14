@@ -102,13 +102,13 @@ export function groupBooks<T>(
  * 再按原始数组顺序 walk 去重发射，保持原序 interleave。
  * 组内按 id 数字升序。
  */
-export function groupMeListItems(
-  items: MeListItem[]
-): GroupedItem<MeListItem>[] {
-  const eligible = (it: MeListItem) => it.kind === "post" && it.site === "1"
+export function groupMeListItems<
+  T extends Pick<MeListItem, "kind" | "site" | "id" | "title">,
+>(items: T[]): GroupedItem<T>[] {
+  const eligible = (it: T) => it.kind === "post" && it.site === "1"
 
   // 第一遍：对 eligible 项建全局桶
-  const buckets = new Map<string, MeListItem[]>()
+  const buckets = new Map<string, T[]>()
   const displayTitle = new Map<string, string>()
   for (const it of items) {
     if (!eligible(it)) continue
@@ -127,7 +127,7 @@ export function groupMeListItems(
 
   // 第二遍：原序 walk 去重发射
   const emitted = new Set<string>()
-  const result: GroupedItem<MeListItem>[] = []
+  const result: GroupedItem<T>[] = []
   for (const it of items) {
     if (!eligible(it)) {
       result.push({ type: "single", item: it })
