@@ -101,6 +101,7 @@ export function ArticleView({
   actions,
   footer,
   progress,
+  progressBottomOffset,
   characters,
   highlightEnabled,
   onCharacterClick,
@@ -113,6 +114,7 @@ export function ArticleView({
   actions?: ReactNode
   footer?: ReactNode
   progress?: number
+  progressBottomOffset?: number
   characters?: { name: string; hue: number }[]
   highlightEnabled?: boolean
   onCharacterClick?: (name: string, rect: DOMRect) => void
@@ -140,7 +142,12 @@ export function ArticleView({
 
       {footer}
 
-      {progress !== undefined && <ReadingProgress progress={progress} />}
+      {progress !== undefined && (
+        <ReadingProgress
+          progress={progress}
+          bottomOffset={progressBottomOffset}
+        />
+      )}
     </article>
   )
 }

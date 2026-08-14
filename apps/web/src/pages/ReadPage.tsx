@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import {
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArticleView, RelatedLinks } from "@/components/article-view"
 import { BookmarkList } from "@/components/bookmark-list"
+import { ChapterNavBar } from "@/components/chapter-nav-bar"
 import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
@@ -23,6 +20,10 @@ import { useSite } from "@/hooks/use-site"
 import { type PostMetaFields } from "@/components/post-meta"
 import { ReplyList, type ReplyNode } from "@/components/reply-list"
 import { scrollToProgress, scrollToQuote } from "@/lib/bookmark-locate"
+import {
+  extractBodyChapterLinks,
+  extractChapterNeighbors,
+} from "@/lib/chapter-nav"
 import { api, readPath } from "@/lib/routes"
 
 interface ContentData {
@@ -213,8 +214,7 @@ export default function ReadPage() {
         locatedRef.current = locateKey
         setStaleId(undefined) // 换 bm 新决策：清掉上一条 stale 标记（列表增删重跑 effect 不清）
         const root = document.querySelector(".reading-body")
-        const hit =
-          root instanceof Element && scrollToQuote(root, target.quote)
+        const hit = root instanceof Element && scrollToQuote(root, target.quote)
         if (!hit) {
           scrollToProgress(target.scrollProgress)
           setStaleId(target.id)
@@ -226,105 +226,125 @@ export default function ReadPage() {
     return () => cancelAnimationFrame(raf2)
   }, [locateKey, loadedTid, tid, bookmarksReady, target])
 
+  const neighbors = useMemo(() => {
+    if (!content) return { prev: undefined, next: undefined }
+    return extractChapterNeighbors(
+      content.links ?? [],
+      extractBodyChapterLinks(content.content)
+    )
+  }, [content])
+
+  const showChapterNav = Boolean(neighbors.prev || neighbors.next)
+
   return (
     <PageShell showBack maxWidth={settings.maxWidth}>
-      <AsyncBody
-        loading={loading}
-        error={error}
-        empty={!content}
-        onRetry={fetchContent}
-        emptyText="内容不存在"
+      <div
+        className={
+          showChapterNav
+            ? "pb-[calc(3rem+env(safe-area-inset-bottom,0px))]"
+            : undefined
+        }
       >
-        {content && (
-          <>
-            {refreshNotice && (
-              <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
-                {refreshNotice}
-              </div>
-            )}
-            <ArticleView
-              title={content.title}
-              meta={content.meta ?? {}}
-              contentHtml={content.content}
-              sourceUrl={content.url}
-              currentTid={tid}
-              progress={progress}
-              characters={marks}
-              highlightEnabled={enabled}
-              onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
-              actions={
-                <ItemActions
-                  kind="post"
-                  id={tid}
-                  state={state}
-                  reload={reload}
-                  onRefresh={() => void fetchContent({ refresh: true })}
-                  refreshing={refreshing}
-                  characterSlot={
-                    <CharacterPanel
-                      clusters={clusters}
-                      enabled={enabled}
-                      setEnabled={setEnabled}
-                      onRemove={(n) => void handleRemove(n)}
-                      onSplit={(clusterId, n) => {
-                        void split(clusterId, n)
-                          .then(() => setMutationError(""))
-                          .catch((e) =>
-                            setMutationError(
-                              e instanceof Error ? e.message : "拆分失败"
+        <AsyncBody
+          loading={loading}
+          error={error}
+          empty={!content}
+          onRetry={fetchContent}
+          emptyText="内容不存在"
+        >
+          {content && (
+            <>
+              {refreshNotice && (
+                <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
+                  {refreshNotice}
+                </div>
+              )}
+              <ArticleView
+                title={content.title}
+                meta={content.meta ?? {}}
+                contentHtml={content.content}
+                sourceUrl={content.url}
+                currentTid={tid}
+                progress={progress}
+                progressBottomOffset={showChapterNav ? 48 : 0}
+                characters={marks}
+                highlightEnabled={enabled}
+                onCharacterClick={(name, rect) => setMarkPopup({ name, rect })}
+                actions={
+                  <ItemActions
+                    kind="post"
+                    id={tid}
+                    state={state}
+                    reload={reload}
+                    onRefresh={() => void fetchContent({ refresh: true })}
+                    refreshing={refreshing}
+                    characterSlot={
+                      <CharacterPanel
+                        clusters={clusters}
+                        enabled={enabled}
+                        setEnabled={setEnabled}
+                        onRemove={(n) => void handleRemove(n)}
+                        onSplit={(clusterId, n) => {
+                          void split(clusterId, n)
+                            .then(() => setMutationError(""))
+                            .catch((e) =>
+                              setMutationError(
+                                e instanceof Error ? e.message : "拆分失败"
+                              )
                             )
-                          )
-                      }}
-                      onMerge={(clusterIds, hue) => {
-                        void merge(clusterIds, hue)
-                          .then(() => setMutationError(""))
-                          .catch((e) =>
-                            setMutationError(
-                              e instanceof Error ? e.message : "合并失败"
+                        }}
+                        onMerge={(clusterIds, hue) => {
+                          void merge(clusterIds, hue)
+                            .then(() => setMutationError(""))
+                            .catch((e) =>
+                              setMutationError(
+                                e instanceof Error ? e.message : "合并失败"
+                              )
                             )
-                          )
-                      }}
-                      onRecolor={(clusterId, hue) => {
-                        void recolor(clusterId, hue)
-                          .then(() => setMutationError(""))
-                          .catch((e) =>
-                            setMutationError(
-                              e instanceof Error ? e.message : "改色失败"
+                        }}
+                        onRecolor={(clusterId, hue) => {
+                          void recolor(clusterId, hue)
+                            .then(() => setMutationError(""))
+                            .catch((e) =>
+                              setMutationError(
+                                e instanceof Error ? e.message : "改色失败"
+                              )
                             )
-                          )
-                      }}
-                      error={charactersError}
-                      mutationError={mutationError}
-                      onRetry={() => {
-                        setMutationError("")
-                        void reloadCharacters()
-                      }}
-                    />
-                  }
-                />
-              }
-              footer={
-                <>
-                  <RelatedLinks links={content.links ?? []} />
-                  <ReplyList replies={content.replies ?? []} />
-                </>
-              }
-            />
-            {bookmarksError && (
-              <p className="mt-3 text-xs text-destructive">
-                {bookmarksError}
-              </p>
-            )}
-            <BookmarkList
-              items={bookmarks}
-              staleId={staleId}
-              onJump={handleJumpBookmark}
-              onUpdateNote={updateBookmarkNote}
-              onRemove={removeBookmark}
-            />
-          </>
-        )}
-      </AsyncBody>
+                        }}
+                        error={charactersError}
+                        mutationError={mutationError}
+                        onRetry={() => {
+                          setMutationError("")
+                          void reloadCharacters()
+                        }}
+                      />
+                    }
+                  />
+                }
+                footer={
+                  <>
+                    <RelatedLinks links={content.links ?? []} />
+                    <ReplyList replies={content.replies ?? []} />
+                  </>
+                }
+              />
+              {bookmarksError && (
+                <p className="mt-3 text-xs text-destructive">
+                  {bookmarksError}
+                </p>
+              )}
+              <BookmarkList
+                items={bookmarks}
+                staleId={staleId}
+                onJump={handleJumpBookmark}
+                onUpdateNote={updateBookmarkNote}
+                onRemove={removeBookmark}
+              />
+            </>
+          )}
+        </AsyncBody>
+      </div>
+      <ChapterNavBar prev={neighbors.prev} next={neighbors.next} site={site} />
       <ReadingSelectionToolbar
         clusters={clusters}
         onAdd={(n, cid) => void handleAdd(n, cid)}
