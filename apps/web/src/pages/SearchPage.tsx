@@ -18,8 +18,8 @@ import { SimilarPostCard } from "@/components/similar-post-card"
 import { groupMeListItems } from "@/lib/book-groups"
 import { mergeItemKey, toMeListItems } from "@/lib/merge-search"
 import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
+import { SourceBadge } from "@/components/source-badge"
 import { formatListPagination } from "@/lib/list-meta"
-import { cn } from "@workspace/ui/lib/utils"
 import { useSite } from "@/hooks/use-site"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import type { MergedSearchItem } from "@workspace/core"
@@ -31,29 +31,12 @@ import {
   readPath,
   searchPath,
   SITES,
-  type SiteId,
 } from "@/lib/routes"
 
 interface SearchResponse {
   items: MergedSearchItem[]
   nextPage: number | null
   errors?: Record<string, string>
-}
-
-/** 来源标签：论坛 = 中性，书库 = 强调 */
-function SourceBadge({ site }: { site: SiteId }) {
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        site === "2"
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-border bg-muted text-muted-foreground"
-      )}
-    >
-      {SITES[site]?.label ?? site}
-    </span>
-  )
 }
 
 function SearchContent() {

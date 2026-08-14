@@ -431,7 +431,7 @@ export default function GroupPage() {
           </Link>
         }
       />
-      <PageSiteTabs sites={["1"]} />
+      <PageSiteTabs sites={["1"]} hideWhenSingle />
       <SectionTabs items={sectionTabs} />
 
       <SearchForm
