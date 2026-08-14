@@ -34,7 +34,7 @@
 
 ### JobContext（`packages/core/src/jobs/handler.ts`）
 
-新增 `checkpoint(): Promise<void>`：未暂停立即返回；已暂停则挂起，直到 resume 或 abort（abort 时抛出与现有 signal 一致的中断，走 `aborted` 收尾）。
+新增 `checkpoint(): Promise<void>`：未暂停立即返回；已暂停则挂起，直到 resume 或 abort。**abort 时与 `sleep` 一致：resolve、不抛**（现有协作取消模型是「唤醒 + handler 看到 `signal.aborted` 自行退出」，`runJob` 在正常返回后才标 `aborted`，catch 一律 `failed`——若 checkpoint 抛错，pause → stop 会误标 failed）。checkpoint resolve 后 handler 循环检查 `ctx.signal.aborted` 决定退出，与现有让出点的 abort 检查同一模式。
 
 checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的「一页」：
 
