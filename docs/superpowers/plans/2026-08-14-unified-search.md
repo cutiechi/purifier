@@ -42,7 +42,7 @@
 cp apps/web/src/lib/title-parse.ts packages/core/src/title-parse.ts
 ```
 
-运行：`diff <(sed -n '1,192p' apps/web/src/lib/title-parse.ts) packages/core/src/title-parse.ts`
+运行：`diff apps/web/src/lib/title-parse.ts packages/core/src/title-parse.ts`
 期望：无输出（文件完全一致；core 旧简版被整体丢弃，两者导出名相同：`ParsedTitle` / `parseListTitle` / `parseFeaturedTitle` / `formatTitleMeta`）。
 
 - [ ] **Step 2: 向 core title-parse.ts 追加 normalize 函数（从 web book-groups.ts:15-40 原样移入，含 docstring）**
@@ -127,6 +127,8 @@ cd packages/core && bun run typecheck
 
 - [ ] **Step 8: Commit**
 
+若 Step 7 因 fixture 变化更新过 `packages/core/src/jobs/handlers/archive_auto_group.test.ts`，把它一并加入 commit：
+
 ```bash
 git add packages/core/src/title-parse.ts packages/core/package.json apps/web/src/lib/title-parse.ts apps/web/src/lib/book-groups.ts packages/core/src/jobs/handlers/archive_auto_group.ts
 git commit -m "refactor: unify title parsing pipeline in @workspace/core/title-parse"
@@ -184,10 +186,13 @@ describe("searchSortKey", () => {
     expect(searchSortKey("马屌少年（完）作者：小明")).toBe("马屌少年")
   })
 
-  test("正文数字保留（第2部 < 第10部）", () => {
+  test("正文数字保留（第2部 < 第10部，Collator numeric 序）", () => {
     const a = searchSortKey("凡人修仙传第2部")
     const b = searchSortKey("凡人修仙传第10部")
-    expect(a < b).toBe(true)
+    // key 是归一化字符串，numeric 序是 Collator 的职责，不能对 key 用 `<`
+    expect(
+      new Intl.Collator("zh", { numeric: true }).compare(a, b)
+    ).toBeLessThan(0)
   })
 })
 
@@ -365,46 +370,51 @@ async function handleSearch(url: URL): Promise<Response> {
     parseInt(url.searchParams.get("page") || "1", 10) || 1
   )
 
-  const settled: Array<{
-    site: string
-    page: CategoryPage | null
-    error?: string
-  }> = []
-  const errors: unknown[] = []
-  let allTimeout = true
-
-  // 键与 handleBrowse 同一模板（type 段为空）：同词浏览/搜索共享按站缓存
-  await Promise.all(
+  // map 返回值 → Promise.all 保序（与 Object.keys(SITES) 同序）；
+  // 不要对共享数组 push，完成顺序是竞态，会破坏平局 site1 在前与首错误序
+  const results = await Promise.all(
     Object.keys(SITES).map(async (site) => {
       try {
         const cacheKey = `browse:${site}::${q}:${page}`
         const hit = getListMemCache<CategoryPage>(cacheKey)
-        if (hit) {
-          settled.push({ site, page: hit })
-          return
-        }
+        if (hit) return { site, page: hit }
         const extractor = resolveSite(site)
         const result = await extractor.fetchCategoryPage(
           { keywords: q },
           page
         )
         setListMemCache(cacheKey, result)
-        settled.push({ site, page: result })
+        return { site, page: result }
       } catch (err) {
-        settled.push({
+        return {
           site,
           page: null,
           error: err instanceof Error ? err.message : String(err),
-        })
-        errors.push(err)
-        if (!(err instanceof UpstreamTimeoutError)) allTimeout = false
+          err,
+        }
       }
     })
   )
 
-  if (errors.length === Object.keys(SITES).length) {
-    const first = errors[0]
-    const status = allTimeout
+  const settled = results.map(({ site, page, error }) => ({
+    site,
+    page,
+    error,
+  }))
+  const failures = results.filter(
+    (r): r is {
+      site: string
+      page: null
+      error: string
+      err: unknown
+    } => !r.page
+  )
+
+  if (failures.length === Object.keys(SITES).length) {
+    const first = failures[0]!.err
+    const status = failures.every(
+      (f) => f.err instanceof UpstreamTimeoutError
+    )
       ? 504
       : first instanceof ExtractorError
         ? first.statusCode
@@ -636,7 +646,7 @@ import {
   useState,
 } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AsyncBody } from "@/components/ui-state"
+import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
@@ -650,6 +660,7 @@ import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
 import { formatListPagination } from "@/lib/list-meta"
 import { cn } from "@workspace/ui/lib/utils"
 import { useSite } from "@/hooks/use-site"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import type { MergedSearchItem } from "@workspace/core"
 import {
   api,
@@ -887,7 +898,7 @@ export default function SearchPage() {
     <Suspense
       fallback={
         <PageShell>
-          <AsyncBody loading />
+          <Spinner />
         </PageShell>
       }
     >
