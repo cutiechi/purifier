@@ -93,7 +93,13 @@ export interface GroupListResult {
 }
 
 export type JobStatus =
-  "pending" | "running" | "succeeded" | "failed" | "interrupted" | "aborted"
+  | "pending"
+  | "running"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "interrupted"
+  | "aborted"
 
 export interface Job {
   id: number

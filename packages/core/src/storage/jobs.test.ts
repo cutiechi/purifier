@@ -157,4 +157,39 @@ describe("jobs store", () => {
     expect(warns.map((l) => l.message)).toEqual(["second"])
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test("markPaused/markResumed 往返，不改 started_at", () => {
+    const { store, dir } = makeStore()
+    const job = store.createJob("archive_posts", null)
+    store.markRunning(job.id)
+    const startedAt = store.getJob(job.id)!.started_at
+    expect(store.markPaused(job.id)).toBe(true)
+    expect(store.getJob(job.id)!.status).toBe("paused")
+    expect(store.getJob(job.id)!.started_at).toBe(startedAt)
+    expect(store.markPaused(job.id)).toBe(false) // 已 paused
+    expect(store.markResumed(job.id)).toBe(true)
+    expect(store.getJob(job.id)!.status).toBe("running")
+    expect(store.getJob(job.id)!.started_at).toBe(startedAt)
+    expect(store.markResumed(job.id)).toBe(false) // 已 running
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("hasRunningOfType 把 paused 算占用", () => {
+    const { store, dir } = makeStore()
+    const job = store.createJob("archive_posts", null)
+    store.markRunning(job.id)
+    store.markPaused(job.id)
+    expect(store.hasRunningOfType("archive_posts")).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("markStaleJobsInterrupted 覆盖 paused", () => {
+    const { store, dir } = makeStore()
+    const job = store.createJob("archive_posts", null)
+    store.markRunning(job.id)
+    store.markPaused(job.id)
+    expect(store.markStaleJobsInterrupted()).toBe(1)
+    expect(store.getJob(job.id)!.status).toBe("interrupted")
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

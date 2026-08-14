@@ -1449,6 +1449,22 @@ export class Store {
     return Number(res.changes ?? 0) > 0
   }
 
+  /** running → paused（暂停；不动 started_at，暂停时长计入总耗时） */
+  markPaused(id: number): boolean {
+    const res = this.db
+      .query("UPDATE jobs SET status='paused' WHERE id=?1 AND status='running'")
+      .run(id)
+    return Number(res.changes ?? 0) > 0
+  }
+
+  /** paused → running（恢复；不改 started_at。不能复用 markRunning：那是 pending→running 且重写 started_at） */
+  markResumed(id: number): boolean {
+    const res = this.db
+      .query("UPDATE jobs SET status='running' WHERE id=?1 AND status='paused'")
+      .run(id)
+    return Number(res.changes ?? 0) > 0
+  }
+
   markFinished(
     id: number,
     status: "succeeded" | "failed" | "interrupted" | "aborted",
@@ -1477,7 +1493,7 @@ export class Store {
 
   hasRunningOfType(type: string): boolean {
     const row = this.db
-      .query("SELECT 1 FROM jobs WHERE type=?1 AND status='running' LIMIT 1")
+      .query("SELECT 1 FROM jobs WHERE type=?1 AND status IN ('running','paused') LIMIT 1")
       .get(type)
     return !!row
   }
@@ -1510,7 +1526,7 @@ export class Store {
       const res = this.db
         .query(
           `UPDATE jobs SET status='interrupted', finished_at=?1
-           WHERE status IN ('running','pending')`
+           WHERE status IN ('running','pending','paused')`
         )
         .run(now)
       // 崩溃后归档游标可能残留 running，一并标 interrupted（续跑仍靠 next_mtid）
