@@ -107,8 +107,8 @@ Purifier 是 Cool18 净化阅读器（Bun workspace monorepo：`apps/api` + `app
   - 书库 `BookPage` 内联 prev/next 不动。
   - 底栏与 `ReadingSelectionToolbar`（文字选择工具栏）触发时共存策略实现时验证（选择工具栏出现时不遮挡、可关闭）。
 
-涉及文件：`apps/web/src/pages/ReadPage.tsx`、`apps/web/src/components/article-view.tsx`（或新小组件）、`apps/web/src/components/site-header.tsx`
-风险：中。数据源为标题模式启发式（以真实页面校准）；若样本显示 pre 内无「上一章/下一章」链接，降级为不做论坛底栏并在实施计划中标注（备选：extractor 后端扩展，超出本轮范围，列「明确不做」）。
+涉及文件：`apps/web/src/pages/ReadPage.tsx`、`apps/web/src/components/article-view.tsx`（或新小组件）、`apps/web/src/components/site-header.tsx`、`apps/web/src/components/reading-progress.tsx`（进度条抬升）
+风险：中。数据源为标题模式启发式（以真实页面校准）；**降级条件 = 来源 A、B 都匹配不到上/下链接**（不是「pre 内没有」——规范用例就是 pre 外「下一章」进 `content.links`，见 `extractor.test.ts:8-24`；pre 内没有但 links 有，必须出底栏）；降级时在实施计划中标注（备选：extractor 后端扩展，超出本轮范围，列「明确不做」）。
 
 ### 收尾：可达性（1h，低风险）
 
@@ -151,4 +151,4 @@ Purifier 是 Cool18 净化阅读器（Bun workspace monorepo：`apps/api` + `app
 - 「我的」页站点 Tab（无此问题）
 - 书库章节导航改造（已有内联 prev/next）
 - 热力图只画有数据的月份（丢时间轴完整性）
-- extractor 后端扩展「章节序列」字段（若 §6-2 样本验证失败，底栏整体降级为不做，而非扩后端）
+- extractor 后端扩展「章节序列」字段（来源 A、B 均无上/下链接且样本确认后，底栏整体降级为不做，而非扩后端）
