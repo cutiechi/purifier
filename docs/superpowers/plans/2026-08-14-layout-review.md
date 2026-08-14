@@ -43,32 +43,41 @@
 
 同块内每个菜单 `<Link>` 的 className 去掉 `shrink-0`（原 `"inline-flex h-11 shrink-0 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors"` → 去掉 `shrink-0`）。
 
-- [ ] **Step 2: 菜单外点击关闭**
+- [ ] **Step 2: 菜单外点击关闭（pointerdown 方案）**
 
-`<nav className={cn("mx-auto border-t ... lg:hidden", widthClass)}>` 之前（仍在 `<header>` 内）插入：
+**不用 fixed 遮罩**：`<header>` 带 `backdrop-blur-xl`，`backdrop-filter` 会成为 `position: fixed` 子孙的 containing block，`fixed inset-0` 遮罩只盖顶栏、盖不住正文。改用 `document` 级 `pointerdown`（与 `character-mark-popover.tsx` 同模式）。
 
-```tsx
-{open && (
-  <div
-    aria-hidden
-    className="fixed inset-0 z-40"
-    onClick={() => setOpen(false)}
-  />
-)}
-```
-
-同时把该菜单 `<nav>` 的 className 加 `relative z-50`（遮罩 `z-40` 在 header 的 stacking context 内会盖住普通流菜单，菜单必须提层）。最终：
+react import 补 `useRef`（现为 `useEffect, useState`）：
 
 ```tsx
-{open && (
-  <>
-    <div aria-hidden className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-    <nav className={cn("relative z-50 mx-auto border-t border-border/60 px-3 py-3 lg:hidden", widthClass)}>
-      ...
-    </nav>
-  </>
-)}
+import { useEffect, useRef, useState } from "react"
 ```
+
+组件内（`const [open, setOpen] = useState(false)` 附近）加 ref 与监听 effect：
+
+```tsx
+const menuRef = useRef<HTMLElement | null>(null)
+const toggleRef = useRef<HTMLButtonElement | null>(null)
+
+// 点菜单/汉堡外关闭（不用遮罩：header backdrop-blur 会截断 fixed 定位）
+useEffect(() => {
+  if (!open) return
+  const onPointerDown = (e: PointerEvent) => {
+    const t = e.target
+    if (
+      t instanceof Node &&
+      (menuRef.current?.contains(t) || toggleRef.current?.contains(t))
+    ) {
+      return
+    }
+    setOpen(false)
+  }
+  document.addEventListener("pointerdown", onPointerDown)
+  return () => document.removeEventListener("pointerdown", onPointerDown)
+}, [open])
+```
+
+汉堡按钮加 `ref={toggleRef}`；移动菜单 `<nav>` 加 `ref={menuRef}`。原「遮罩 fixed 层 + nav 提 z」方案**废弃**，`{open && (<nav ...>)}` 结构保持原样。
 
 - [ ] **Step 3: 断点提前 md（4 处）**
 
@@ -84,7 +93,7 @@
 Run: `bun run --filter=web typecheck` → PASS。
 浏览器实测（`bun run dev:web`）：
 - `<768`（如 390px）：汉堡网格 2 列；点菜单外区域关闭。
-- `≥768`（如 768px 与 820px）：横排 8 项导航出现、汉堡与搜索图标消失，无换行/溢出。溢出则把用户名 `sm:inline` 改 `md:hidden` 或「退出」改图标（仅溢出时）。
+- `≥768`（如 768px 与 820px）：横排 8 项导航出现、汉堡与搜索图标消失，无换行/溢出。溢出对策（按序尝试）：收紧导航项 `px-2.5 → px-2`（spec §1c）→ 用户名 `sm:inline` 改 `md:hidden` → 「退出」改图标。
 - 手机导航链路 `?site=` 参数保留（点击菜单项跳转后 `pathname` 变化自动关闭）。
 
 - [ ] **Step 5: Commit**
@@ -249,7 +258,11 @@ import { useEffect, useRef, useState } from "react"
 const [hover, setHover] = useState<Day | null>(null)
 const [selected, setSelected] = useState<Day | null>(null)
 const scrollRef = useRef<HTMLDivElement>(null)
+```
 
+**滚动 effect 必须放在 `weeks` 计算完之后、`return` 之前**（现文件 `weeks` 在 `all`/`pad` 之后才算出，约 L45-46；放前面会引用未定义变量）：
+
+```tsx
 // 挂载/周数变化时滚到最近一周（365 天从最旧画起，最新在右端）
 useEffect(() => {
   const el = scrollRef.current
@@ -475,7 +488,7 @@ export function Pager({
 - [ ] **Step 3: 验证**
 
 Run: `bun run --filter=web typecheck` → PASS。
-浏览器：在 `/archive`（有 totalPages）中间区出现跳页输入；输入越界值（如 9999）提交后落在末页且 URL `page` 被 clamp；输入非数字无反应；`/search`（无 totalPages）不显示输入。
+此时 `onPage` 尚未接线（Task 7），跳页输入**不出现**——本任务只验：`/search`（无 `totalPages`）不显示输入。跳页输入出现、越界 clamp、URL 修改的完整验证在 Task 7 Step 2。
 
 - [ ] **Step 4: Commit**
 
@@ -511,7 +524,7 @@ onPage={(n) => update({ page: n })}
 - [ ] **Step 2: 验证**
 
 Run: `bun run --filter=web typecheck` → PASS。
-浏览器：`/history`、`/bookmarks`、`/groups`、`/jobs`、`/archive` 跳页输入均出现且跳转正确；`/search`、`/browse` 无跳页输入。
+浏览器（跳页完整验证在此）：`/history`、`/bookmarks`、`/groups`、`/jobs`、`/archive` 跳页输入均出现；输入越界值（如 9999）提交后落在末页且 URL `page` 被 clamp；输入非数字无反应；`/search`、`/browse` 无跳页输入。
 
 - [ ] **Step 3: Commit**
 
@@ -718,7 +731,10 @@ export function extractChapterNeighbors(
   return { prev, next }
 }
 
-/** 解析清洗后正文 HTML 的站内 /read/:tid 链接（DOMPurify 仅留 href 属性，顺序可控） */
+/** 解析清洗后正文 HTML 的站内 /read/:tid 链接。
+ * 后端 extractPreHtml（cheerio sanitizeContentHtml）输出规范为 <a href="/read/:tid">文本</a>，
+ * 属性仅 href、顺序可控；article-view 渲染时的 DOMPurify 只是兜底、不改变结构。
+ * 用正则以支持 bun test（bun 环境无 DOMParser），替代 spec 中的 DOMParser 表述。 */
 export function extractBodyChapterLinks(
   html: string
 ): ChapterLinkLike[] {
@@ -737,7 +753,7 @@ export function extractBodyChapterLinks(
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `bun test apps/web/src/lib/chapter-nav.test.ts`
-Expected: PASS（8 用例）。
+Expected: PASS（7 用例：extractChapterNeighbors 5 + extractBodyChapterLinks 2）。
 
 - [ ] **Step 5: Commit**
 
@@ -901,14 +917,20 @@ const showChapterNav = Boolean(neighbors.prev || neighbors.next)
 
 ```tsx
 <PageShell showBack maxWidth={settings.maxWidth}>
-  <div className={showChapterNav ? "pb-14" : undefined}>
+  <div
+    className={
+      showChapterNav
+        ? "pb-[calc(3rem+env(safe-area-inset-bottom,0px))]"
+        : undefined
+    }
+  >
     <AsyncBody ...>...</AsyncBody>
   </div>
   <ChapterNavBar prev={neighbors.prev} next={neighbors.next} site={site} />
   <ReadingSelectionToolbar ... />
 ```
 
-`ArticleView` 传 `progressBottomOffset={showChapterNav ? 48 : 0}`（48 = 底栏 `h-12`，`pb-14` 与 safe-area 实测微调）。
+正文垫高 = 底栏总高（`h-12` 的 3rem + safe-area），与底栏一致；`ArticleView` 传 `progressBottomOffset={showChapterNav ? 48 : 0}`（48 = 底栏内容高，`ReadingProgress` 自己加 safe-area）。
 
 - [ ] **Step 5: 验证**
 
