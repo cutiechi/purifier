@@ -7,3 +7,4 @@ export {
   isValidSite,
   type SiteId,
 } from "./sites"
+export * from "./merge-search"
