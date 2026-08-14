@@ -110,22 +110,6 @@ describe("jobs store", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("clearFinishedJobs 只删终态、CASCADE 清日志、保留 running/pending", () => {
-    const { store, dir } = makeStore()
-    const a = store.createJob("archive_posts", null) // pending
-    const b = store.createJob("archive_posts", null)
-    store.markRunning(b.id)
-    store.markFinished(b.id, "succeeded", null, null)
-    store.appendJobLog(b.id, "info", "done")
-    const removed = store.clearFinishedJobs()
-    expect(removed).toBe(1)
-    expect(store.getJob(a.id)?.status).toBe("pending") // 保留
-    expect(store.getJob(b.id)).toBeNull() // 终态已删
-    const logs = store.listJobLogs(b.id, { limit: 100, offset: 0 })
-    expect(logs).toHaveLength(0) // CASCADE 清掉
-    rmSync(dir, { recursive: true, force: true })
-  })
-
   test("markStaleJobsInterrupted 同时清 running 与 pending", () => {
     const { store, dir } = makeStore()
     const a = store.createJob("archive_posts", null) // pending

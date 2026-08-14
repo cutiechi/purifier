@@ -1538,22 +1538,6 @@ export class Store {
     return !!row
   }
 
-  clearFinishedJobs(): number {
-    // 注意：bun:sqlite 的 changes() 会计入 FK CASCADE 删掉的 job_logs 行，
-    // 直接返回 changes 会多算；先数终态 job 行数再删，返回删除的 job 数。
-    const row = this.db
-      .query(
-        "SELECT COUNT(*) AS n FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')"
-      )
-      .get() as { n: number }
-    this.db
-      .query(
-        `DELETE FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')`
-      )
-      .run()
-    return Number(row.n ?? 0)
-  }
-
   /** 批量删除（只删终态；活动行由 API 层先检查 409；返回删除的 job 数，不计 CASCADE 日志） */
   deleteJobsMany(ids: number[]): number {
     if (ids.length === 0) return 0

@@ -58,6 +58,7 @@ import {
   type ReplyNode,
   type Job,
   type JobLog,
+  type JobSortKey,
   type JobStatus,
 } from "@workspace/core"
 import {
@@ -1254,11 +1255,35 @@ function jobsListQuery(url: URL) {
     0,
     parseInt(url.searchParams.get("offset") || "0", 10) || 0
   )
+  const sortRaw = url.searchParams.get("sort") ?? "created_at"
+  const orderRaw = url.searchParams.get("order") ?? "desc"
+  const SORT_KEYS = new Set(["created_at", "type", "status", "duration"])
+  if (!SORT_KEYS.has(sortRaw)) throw new ExtractorError("invalid sort", 400)
+  if (orderRaw !== "asc" && orderRaw !== "desc") {
+    throw new ExtractorError("invalid order", 400)
+  }
+  const statusRaw = url.searchParams.get("status")
+  const STATUS_VALUES = new Set([
+    "pending",
+    "running",
+    "paused",
+    "succeeded",
+    "failed",
+    "interrupted",
+    "aborted",
+    "active",
+    "finished",
+  ])
+  if (statusRaw && !STATUS_VALUES.has(statusRaw)) {
+    throw new ExtractorError("invalid status", 400)
+  }
   return {
     type: url.searchParams.get("type") ?? undefined,
-    status: url.searchParams.get("status") ?? undefined,
+    status: statusRaw ?? undefined,
     limit,
     offset,
+    sort: sortRaw as JobSortKey,
+    order: orderRaw as "asc" | "desc",
   }
 }
 
@@ -1322,15 +1347,51 @@ function handleJobGet(id: number): Response {
 function handleJobDelete(id: number): Response {
   const job = store.getJob(id)
   if (!job) return jsonError("job not found", 404)
-  if (job.status === "running") {
-    return jsonError("cannot delete running job; stop it first", 409)
+  if (
+    job.status !== "succeeded" &&
+    job.status !== "failed" &&
+    job.status !== "interrupted" &&
+    job.status !== "aborted"
+  ) {
+    return jsonError(
+      `cannot delete job in status: ${job.status}; stop it first`,
+      409
+    )
   }
   store.deleteJob(id)
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
 }
 
-function handleJobsClear(): Response {
-  const removed = store.clearFinishedJobs()
+async function handleJobsBatchDelete(req: Request): Promise<Response> {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    throw new ExtractorError("invalid json body", 400)
+  }
+  const ids =
+    body && typeof body === "object" && "ids" in body ? body.ids : null
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    !ids.every((v) => typeof v === "number" && Number.isInteger(v) && v > 0)
+  ) {
+    throw new ExtractorError("ids must be a non-empty number[]", 400)
+  }
+  const active = ids
+    .map((id) => store.getJob(id))
+    .filter((j): j is Job => j !== null)
+    .find(
+      (j) =>
+        j.status === "running" || j.status === "paused" || j.status === "pending"
+    )
+  if (active) {
+    return jsonError(
+      `cannot delete job ${active.id} in status: ${active.status}; stop it first`,
+      409
+    )
+  }
+  const removed = store.deleteJobsMany(ids)
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
 }
 
@@ -1354,10 +1415,40 @@ function handleJobLogs(url: URL, id: number): Response {
 function handleJobStop(id: number): Response {
   const job = store.getJob(id)
   if (!job) return jsonError("job not found", 404)
-  if (job.status !== "running") {
+  if (job.status !== "running" && job.status !== "paused") {
     return jsonError(`cannot stop job in status: ${job.status}`, 409)
   }
   runner.stop(id)
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+function handleJobPause(id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  if (job.status !== "running") {
+    return jsonError(`cannot pause job in status: ${job.status}`, 409)
+  }
+  if (!runner.pause(id)) {
+    return jsonError(
+      `cannot pause job in status: ${store.getJob(id)?.status ?? "unknown"}`,
+      409
+    )
+  }
+  return jsonOk({ ok: true }, NO_STORE_HEADERS)
+}
+
+function handleJobResume(id: number): Response {
+  const job = store.getJob(id)
+  if (!job) return jsonError("job not found", 404)
+  if (job.status !== "paused") {
+    return jsonError(`cannot resume job in status: ${job.status}`, 409)
+  }
+  if (!runner.resume(id)) {
+    return jsonError(
+      `cannot resume job in status: ${store.getJob(id)?.status ?? "unknown"}`,
+      409
+    )
+  }
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
 }
 
@@ -1551,7 +1642,9 @@ async function routeInner(req: Request): Promise<Response> {
       }
     }
     // /api/me/jobs 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
-    const jobsSub = pathname.match(/^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop))?$/)
+    const jobsSub = pathname.match(
+      /^\/api\/me\/jobs\/(\d+)(?:\/(logs|stop|pause|resume))?$/
+    )
     if (jobsSub) {
       const id = Number(jobsSub[1])
       const sub = jobsSub[2]
@@ -1572,11 +1665,23 @@ async function routeInner(req: Request): Promise<Response> {
         }
         return handleJobStop(id)
       }
+      if (sub === "pause") {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return handleJobPause(id)
+      }
+      if (sub === "resume") {
+        if (req.method !== "POST") {
+          throw new ExtractorError("method not allowed", 405)
+        }
+        return handleJobResume(id)
+      }
     }
     if (pathname === "/api/me/jobs") {
       if (req.method === "GET") return handleJobsList(url)
       if (req.method === "POST") return await handleJobStart(req)
-      if (req.method === "DELETE") return handleJobsClear()
+      if (req.method === "DELETE") return await handleJobsBatchDelete(req)
       throw new ExtractorError("method not allowed", 405)
     }
     // /api/me/groups 子资源（id 数字；放在 switch 前独立前缀分支，不干扰 SPA fallback）
