@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom"
 import { useLocation, useNavigate } from "react-router-dom"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   IconChevronLeft,
   IconClose,
@@ -35,6 +35,8 @@ export function SiteHeader({
   const site = useSite()
   const { enabled, user, logout } = useAuth()
   const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLElement | null>(null)
+  const toggleRef = useRef<HTMLButtonElement | null>(null)
   // 一级导航固定，不再按站过滤整项
   const items = NAV_ITEMS
 
@@ -42,6 +44,23 @@ export function SiteHeader({
   useEffect(() => {
     setOpen(false)
   }, [menuKey])
+
+  // 点菜单/汉堡外关闭（不用遮罩：header backdrop-blur 会截断 fixed 定位）
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target
+      if (
+        t instanceof Node &&
+        (menuRef.current?.contains(t) || toggleRef.current?.contains(t))
+      ) {
+        return
+      }
+      setOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => document.removeEventListener("pointerdown", onPointerDown)
+  }, [open])
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
@@ -76,7 +95,7 @@ export function SiteHeader({
           />
         </Link>
 
-        <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto lg:flex">
+        <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:flex">
           {items.map((item) => {
             const active = item.match(pathname)
             return (
@@ -99,7 +118,7 @@ export function SiteHeader({
         <div className="ml-auto flex items-center gap-0.5">
           <Link
             to={navHref(routes.search, site)}
-            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
+            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
             aria-label="搜索"
           >
             <IconSearch size={18} />
@@ -121,7 +140,8 @@ export function SiteHeader({
           <ModeToggle />
           <button
             type="button"
-            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
+            ref={toggleRef}
+            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
             aria-label={open ? "关闭菜单" : "打开菜单"}
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
@@ -133,12 +153,13 @@ export function SiteHeader({
 
       {open && (
         <nav
+          ref={menuRef}
           className={cn(
-            "mx-auto border-t border-border/60 px-3 py-3 lg:hidden",
+            "mx-auto border-t border-border/60 px-3 py-3 md:hidden",
             widthClass
           )}
         >
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <div className="grid grid-cols-2 gap-1.5 pb-1 sm:grid-cols-4">
             {items.map((item) => {
               const active = item.match(pathname)
               return (
@@ -146,7 +167,7 @@ export function SiteHeader({
                   key={item.href}
                   to={navHref(item.href, site)}
                   className={cn(
-                    "inline-flex h-11 shrink-0 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",
+                    "inline-flex h-11 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",
                     active
                       ? "bg-accent text-foreground"
                       : "bg-muted/50 text-muted-foreground hover:bg-accent hover:text-foreground"
