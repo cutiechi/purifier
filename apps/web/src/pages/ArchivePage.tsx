@@ -130,6 +130,15 @@ export default function ArchivePage() {
 
   useScrollTop([page, sort, q])
 
+  // 页码越界 → 回退到最后一页（其余列表页已有同样逻辑）
+  useEffect(() => {
+    if (loading || error) return
+    if (total <= 0) return
+    const maxPage = calcTotalPages(total, ARCHIVE_PAGE_SIZE)
+    if (page > maxPage) update({ page: maxPage })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on total/page
+  }, [loading, error, total, page])
+
   function update(next: { q?: string; sort?: SortKey; page?: number }) {
     const params = new URLSearchParams(searchParams)
     if (next.q !== undefined) {
