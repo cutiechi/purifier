@@ -6,7 +6,6 @@ import { StatsHeatmap } from "@/components/stats-heatmap"
 import { AsyncBody } from "@/components/ui-state"
 import { api, bookPath, readPath, type SiteId } from "@/lib/routes"
 import { formatDateTime, formatDuration } from "@/lib/format"
-import { cn } from "@workspace/ui/lib/utils"
 
 type StatsResult = {
   summary: {
@@ -47,13 +46,6 @@ type StatsResult = {
   }
 }
 
-type Scope = "all" | SiteId
-const SCOPE_TABS: { key: Scope; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "1", label: "论坛" },
-  { key: "2", label: "书库" },
-]
-
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
     <div className="rounded-2xl border border-border/80 bg-card/80 px-4 py-3.5">
@@ -64,7 +56,6 @@ function StatCard({ value, label }: { value: string; label: string }) {
 }
 
 export default function StatsPage() {
-  const [scope, setScope] = useState<Scope>("all")
   const [data, setData] = useState<StatsResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -74,8 +65,8 @@ export default function StatsPage() {
     let cancelled = false
     setLoading(true)
     setError("")
-    const url = scope === "all" ? api.meStats : `${api.meStats}?site=${scope}`
-    fetch(url)
+    // 固定跨站统计（全部）：站点拆分由列表项 site 字段承担
+    fetch(api.meStats)
       .then(async (r) => {
         if (!r.ok) throw new Error("请求失败")
         const json = (await r.json()) as StatsResult
@@ -86,37 +77,14 @@ export default function StatsPage() {
     return () => {
       cancelled = true
     }
-  }, [scope, reloadKey])
+  }, [reloadKey])
 
   const hasSessions = !!data && (data.summary.trackedSince !== null)
   const maxHour = data ? Math.max(1, ...data.timeOfDay) : 1
 
   return (
     <PageShell maxWidth="xwide">
-      <PageHeader title="统计" description="阅读时长 · 连读 · 时段" />
-      <div
-        className="mb-4 flex w-fit items-center gap-1 rounded-full border border-border bg-card p-1"
-        role="tablist"
-        aria-label="站点"
-      >
-        {SCOPE_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={scope === t.key}
-            onClick={() => setScope(t.key)}
-            className={cn(
-              "min-h-9 rounded-full px-3.5 text-[13px] font-medium transition-colors",
-              scope === t.key
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <PageHeader title="统计" description="阅读时长 · 连读 · 时段（论坛与书库）" />
 
       <AsyncBody
         loading={loading}
