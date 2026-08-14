@@ -57,6 +57,7 @@ export function mergeSearchPages(
 
 - 排序：`new Intl.Collator("zh", { numeric: true })` 按 `searchSortKey(link.title)` 升序。
 - 排序键规范化理由：`link.title` 是上游原文，直接排会让「【X】」类标题（U+3010）乱序，且与前端 `parseListTitle` 显示的主标题不一致。
+- `searchSortKey` 与前端分组键 `normalizeTitleKey` 的剥离规则必须一致（都剥首尾括号装饰与尾随章节标记），保证同键条目在排序后尽可能相邻，折叠组显示连续。
 - 平局：稳定排序，输入顺序 site1 先于 site2 → 同标题论坛在前。
 - 跨站同名不同 id：都保留，不合并去重（内容不同）。
 
