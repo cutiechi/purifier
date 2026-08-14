@@ -3,10 +3,22 @@ import { api } from "@/lib/routes"
 export type JobStatus =
   | "pending"
   | "running"
+  | "paused"
   | "succeeded"
   | "failed"
   | "interrupted"
   | "aborted"
+
+export const TERMINAL_JOB_STATUSES: JobStatus[] = [
+  "succeeded",
+  "failed",
+  "interrupted",
+  "aborted",
+]
+
+export function isTerminalJob(j: Job): boolean {
+  return TERMINAL_JOB_STATUSES.includes(j.status)
+}
 
 export interface Job {
   id: number
@@ -31,9 +43,9 @@ export interface JobLog {
 export type ArchiveMode = "full" | "resume" | "incremental"
 
 export const JOB_TYPE_LABEL: Record<string, string> = {
-  archive_posts: "全站主帖归档",
+  archive_posts: "论坛归档",
   archive_books: "书库归档",
-  archive_auto_group: "归档自动分组",
+  archive_auto_group: "自动分组",
 }
 
 export const ARCHIVE_MODE_LABEL: Record<ArchiveMode, string> = {
@@ -49,6 +61,7 @@ export function jobTypeLabel(type: string): string {
 export const STATUS_LABEL: Record<JobStatus, string> = {
   pending: "等待",
   running: "运行中",
+  paused: "已暂停",
   succeeded: "成功",
   failed: "失败",
   interrupted: "中断",
@@ -89,9 +102,6 @@ export function formatJobProgress(
   }
   if (typeof result.scanned === "number" && result.groupsUpserted != null) {
     parts.push(`扫 ${result.scanned}`)
-  }
-  if (typeof result.nextMtid === "string" && result.nextMtid) {
-    parts.push(`游标 ${result.nextMtid}`)
   }
   return parts.join(" · ")
 }
@@ -156,11 +166,15 @@ export async function startJob(
   return json.job
 }
 
+export type JobSortKey = "created_at" | "type" | "status" | "duration"
+
 export async function listJobs(opts?: {
   type?: string
   status?: string
   page?: number
   limit?: number
+  sort?: JobSortKey
+  order?: "asc" | "desc"
 }): Promise<{ items: Job[]; nextPage?: number; total: number }> {
   const params = new URLSearchParams()
   const page = Math.max(1, opts?.page ?? 1)
@@ -169,6 +183,8 @@ export async function listJobs(opts?: {
   params.set("offset", String((page - 1) * limit))
   if (opts?.type) params.set("type", opts.type)
   if (opts?.status) params.set("status", opts.status)
+  if (opts?.sort) params.set("sort", opts.sort)
+  if (opts?.order) params.set("order", opts.order)
   const res = await fetch(`${api.meJobs}?${params.toString()}`)
   await throwIfNotOk(res)
   const json = (await res.json()) as {
@@ -213,6 +229,27 @@ export async function stopJob(id: number): Promise<void> {
 export async function deleteJob(id: number): Promise<void> {
   const res = await fetch(`${api.meJobs}/${id}`, { method: "DELETE" })
   await throwIfNotOk(res)
+}
+
+export async function pauseJob(id: number): Promise<void> {
+  const res = await fetch(`${api.meJobs}/${id}/pause`, { method: "POST" })
+  await throwIfNotOk(res)
+}
+
+export async function resumeJob(id: number): Promise<void> {
+  const res = await fetch(`${api.meJobs}/${id}/resume`, { method: "POST" })
+  await throwIfNotOk(res)
+}
+
+export async function deleteJobsMany(ids: number[]): Promise<number> {
+  const res = await fetch(api.meJobs, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids }),
+  })
+  await throwIfNotOk(res)
+  const json = (await res.json()) as { removed: number }
+  return json.removed
 }
 
 export async function clearFinishedJobs(): Promise<number> {
