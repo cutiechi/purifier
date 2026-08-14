@@ -23,7 +23,7 @@ export function PageShell({
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,oklch(0.7_0.08_260_/0.12),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,oklch(0.45_0.08_280_/0.18),transparent_70%)]"
       />
-      <SiteHeader showBack={showBack} maxWidth={maxWidth} />
+      <SiteHeader showBack={showBack} />
       <main
         id="main"
         tabIndex={-1}

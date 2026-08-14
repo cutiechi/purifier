@@ -8,7 +8,6 @@ import {
   IconSearch,
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
-import { pageWidthClass, type PageWidth } from "@/components/reading-settings"
 import { useSite } from "@/hooks/use-site"
 import { useAuth } from "@/lib/auth"
 import { DEFAULT_SITE, NAV_ITEMS, routes, type SiteId } from "@/lib/routes"
@@ -22,14 +21,7 @@ function navHref(href: string, site: SiteId): string {
   return `${href}?${params.toString()}`
 }
 
-export function SiteHeader({
-  showBack,
-  maxWidth,
-}: {
-  showBack?: boolean
-  maxWidth?: PageWidth
-}) {
-  const widthClass = pageWidthClass(maxWidth ?? "normal")
+export function SiteHeader({ showBack }: { showBack?: boolean }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const site = useSite()
@@ -70,12 +62,7 @@ export function SiteHeader({
       >
         跳到正文
       </a>
-      <div
-        className={cn(
-          "mx-auto flex h-14 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5",
-          widthClass
-        )}
-      >
+      <div className="flex h-14 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5">
         {showBack ? (
           <button
             type="button"
@@ -164,10 +151,7 @@ export function SiteHeader({
       {open && (
         <nav
           ref={menuRef}
-          className={cn(
-            "mx-auto border-t border-border/60 px-3 py-3 md:hidden",
-            widthClass
-          )}
+          className="relative z-50 border-t border-border/60 px-3 py-3 md:hidden"
         >
           <div className="grid grid-cols-2 gap-1.5 pb-1 sm:grid-cols-4">
             {items.map((item) => {
