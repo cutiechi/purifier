@@ -73,7 +73,11 @@ checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的�
 
 - `sort`：`created_at`（默认）| `type` | `status` | `duration`；不在白名单 400。
 - `order`：`asc` | `desc`（默认 `desc`）。
-- `status` 新增聚合值 `active` = `running | paused | pending`（供前端「进行中」条一次拉取；其余单值语义不变）。
+- `status` 新增聚合值：
+  - `active` = `running | paused | pending`（供前端「进行中」条一次拉取）。
+  - `finished` = `succeeded | failed | interrupted | aborted`（供统计卡取「最近一次结果」，见下）。
+  - 其余单值语义不变。
+- **`listJobs` 与 `countJobs` 必须共用同一套 status 条件**（聚合值展开为 `IN (…)`，单值仍等值）；现状两处独立写 `status = ?2`，只改 list 不改 count 会让 `active`/`finished` 的计数恒 0。
 - `duration` 为计算列：`COALESCE(finished_at, now_ms) - started_at`（进行中按当前时间），`started_at` 为 NULL 排最后。注明：进行中任务的 duration 随时间变化，排序位置不稳定，可接受。
 - `status` 排序按固定状态序（running > paused > pending > interrupted > failed > aborted > succeeded）。
 
@@ -107,13 +111,18 @@ checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的�
 
 - 库内条数：`GET /api/me/archive/status?site=1|2` 的 `total`（该接口无 lastJob，不指望它）。
 - 组数：`GET /api/me/groups?limit=1` 的 `total`。成员总数不做（现有接口无此数据，辅文里的成员数来自上次任务 result）。
-- 上次结果：每类型独立 `GET /api/me/jobs?type=<type>&status=succeeded&limit=1`，与表格筛选/分页无关。
+- 上次结果：每类型独立 `GET /api/me/jobs?type=<type>&status=finished&sort=created_at&order=desc&limit=1`（**sort/order 写死**，禁止复用表格 URL 上的排序参数，否则会拿到「最短的一次」而非最近一次）。只查 succeeded 会把「刚失败过」显示成「还没跑过」，故取最近一条终态任务：
+  - succeeded → 「上次：新增 x · 更新 y」（自动分组：「上次：G 组 · M 成员」）。
+  - failed / interrupted / aborted → 「上次未完成」。
+  - 无任何终态 → 「还没跑过」。
 - 「可从中断处接着扫」内部判定：`cursor.next_mtid` 存在且 `cursor.status !== 'done'`（**统一用这一条**，删掉现有 `canResume` / `resumeEnabled` 两套逻辑）；且该类型当前无 running/paused。UI 不展示游标数值。
 
 ### 「进行中」条（表格上方，固定，不受 type/status/page 筛选影响）
 
 - 数据：`GET /api/me/jobs?status=active&limit=10`。
 - 每条显示：类型、进度摘要、暂停/继续/停止快捷按钮、展开日志。操作都在条内完成，不依赖表格当前筛选状态；创建 modal 的「占用提示」也指回此条（高亮对应任务）而非表格行。
+- **active 任务的操作只归本条**：默认「全部」视图下 active 任务会同时出现在本条和表格里，表格对 active 行只做展示（状态徽章 + 进度），行内不重复渲染暂停/继续/停止，避免两套操作入口。
+- 创建成功：关闭 modal、刷新「进行中」条与统计卡；表格不强制跳回第 1 页。
 - 轮询条件：**实例内存在 active 任务**（即本条非空），与当前页表格内容无关——否则筛掉 running 或翻到后页时轮询停转、暂停入口消失、结束 toast 失效。
 - 结束 toast 判定比较 **active 集合**（running|paused|pending）：`running → paused` 不算结束、不通知；active 集合清空才算结束（修正现有 `prevRunningRef` 只看 running 的语义）。
 
@@ -121,7 +130,7 @@ checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的�
 
 - 第一步：选类型，三张小卡 `grid-cols-1 sm:grid-cols-3`，选中描边（论坛归档 / 书库归档 / 自动分组，文案与 `JOB_TYPE_LABEL`、表格、筛选项统一改齐，不保留「全站主帖归档」旧词）。
 - 第二步（站点已由类型隐含，v1 自动分组仅论坛）：
-  - 归档类：模式用 `SegmentedControl`——增量（默认）/ 全量 / 续跑。「续跑」仅当该站游标可续时可选并显示续跑位置；全量出耗时警示文案。
+  - 归档类：模式用 `SegmentedControl`——增量（默认）/ 全量 / 续跑。「续跑」仅当该站游标可续时可选，提示用人话「从中断处接着扫（已记 N 页）」（只用 `cursor.pages`，**不展示 `next_mtid`**——论坛是 tid、书库是页码，都是实现细节）；全量出耗时警示文案。
   - 自动分组：最少章节数数字输入，范围 2–50（与 handler clamp 一致），超界前端拦截。
 - **占用处理**：v1 保持**全局一把锁**——实例内任一 running/paused 任务存在时，第二步不给「启动」，显示「已有任务进行中 / 已暂停」+ 按钮定位到该任务（后端 type 级互斥仅防双开同类）。
 - 文案区分两种「继续」：表格行「继续」= 恢复暂停的同一条任务；modal「续跑」= 从目录游标接着扫（新任务）。
@@ -155,6 +164,7 @@ checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的�
 ### 移除项（汇总）
 
 - 「返回目录」链接、「最近一次归档成功」横幅、运行中横幅（职责并入「进行中」条与统计卡）、cursorHint 裸文本、「清空已结束」按钮、「刷新间隔」下拉、任务行 `#id`。
+- `formatJobProgress` 的「游标 nextMtid」段（`jobs.ts` 中 `nextMtid` 三行）：游标值是给排查用的实现细节，进度列、进行中条、结束 toast 一律不出；页数、新增、更新、组/成员保留。
 
 ### 保留项
 
@@ -173,8 +183,8 @@ checkpoint 插入位置**跟随各 handler 现有让出点**，不是统一的�
 
 - runner：pause → resume → 正常完成；pause → stop → aborted；paused + `abortAll` → aborted 且 `waitForIdle` 不超时；暂停中同类型 start 409；checkpoint 未暂停时直通。
 - storage：`markResumed` 仅 `paused → running` 且不改 `started_at`；`hasRunningOfType` 含 paused；`markStaleJobsInterrupted` 覆盖 paused；`setJobResult` 在 paused 下不写、resume 后可写。
-- jobs 查询：sort/order 白名单与 400；duration 计算与 NULL 末位；`status=active` 聚合；批量删除与运行中整批 409。
-- API 层：pause/resume/stop/单删的状态矩阵（running/paused/终态 × 各操作），含路由正则匹配 pause/resume。
+- jobs 查询：sort/order 白名单与 400；duration 计算与 NULL 末位；`active`/`finished` 聚合的 list 与 **count 一致**；批量删除与运行中整批 409。
+- 状态矩阵（core 层 runner + store，不新起 `apps/api` 测试脚手架——仓库约定测试只在 `packages/core`）：running/paused/终态 × pause/resume/stop/单删；路由正则扩展靠 typecheck 与手工验收覆盖。
 - 日志：level 精确匹配维持现状的用例。
 
 全仓：`bun run test` + `bun run typecheck` + `bun run build`。
