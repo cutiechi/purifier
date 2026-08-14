@@ -33,7 +33,11 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const byDate = new Map(days.map((d) => [d.date, d]))
   const today = new Date()
-  const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const todayMid = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  )
   const all: Day[] = []
   for (let i = 364; i >= 0; i--) {
     const d = new Date(todayMid)
@@ -67,6 +71,10 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
           const base = shown?.date ?? keyOf(todayMid)
           const d = new Date(base + "T00:00:00")
           d.setDate(d.getDate() + (e.key === "ArrowRight" ? 1 : -1))
+          if (d.getTime() > todayMid.getTime()) return
+          const todayMin = new Date(todayMid)
+          todayMin.setDate(todayMin.getDate() - 364)
+          if (d.getTime() < todayMin.getTime()) return
           const nextKey = keyOf(d)
           setSelected(
             byDate.get(nextKey) ?? { date: nextKey, durationS: 0, estimated: 0 }
@@ -88,7 +96,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
                   className={cn(
                     "h-2.5 w-2.5 rounded-[2px]",
                     LEVEL_BG[level(c.durationS)],
-                    c.estimated === 1 && "ring-1 ring-inset ring-amber-400/70"
+                    c.estimated === 1 && "ring-1 ring-amber-400/70 ring-inset"
                   )}
                 />
               )

@@ -8,7 +8,10 @@ import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
-import { useReadingSettings } from "@/components/reading-settings"
+import {
+  pageWidthClass,
+  useReadingSettings,
+} from "@/components/reading-settings"
 import {
   useCharacters,
   useCharacterHighlightEnabled,
@@ -344,7 +347,12 @@ export default function ReadPage() {
           )}
         </AsyncBody>
       </div>
-      <ChapterNavBar prev={neighbors.prev} next={neighbors.next} site={site} />
+      <ChapterNavBar
+        prev={neighbors.prev}
+        next={neighbors.next}
+        site={site}
+        widthClass={pageWidthClass(settings.maxWidth)}
+      />
       <ReadingSelectionToolbar
         clusters={clusters}
         onAdd={(n, cid) => void handleAdd(n, cid)}

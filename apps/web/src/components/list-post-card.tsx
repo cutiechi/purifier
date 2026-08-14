@@ -61,7 +61,7 @@ export function ListPostCard({
   /** 兼容保留：题材统一并入副标题行，不再渲染右侧胶囊 */
   showGenre?: boolean
   className?: string
-  /** 右侧附加插槽（如搜索相似触发器），与统计/题材胶囊并存 */
+  /** 右侧附加插槽（如搜索相似触发器），与统计插槽并存 */
   trailing?: ReactNode
 }) {
   const parsed = parseListTitle(rawTitle)

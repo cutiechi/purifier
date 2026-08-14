@@ -21,8 +21,11 @@ export function ReadingProgress({
         />
       </div>
       <span
-        className="pointer-events-none fixed right-2 z-30 text-[10px] leading-none text-muted-foreground/80 tabular-nums"
-        style={{ bottom: pctBottom }}
+        className="pointer-events-none fixed z-30 text-[10px] leading-none text-muted-foreground/80 tabular-nums"
+        style={{
+          right: bottomOffset > 0 ? "4.5rem" : "0.5rem",
+          bottom: pctBottom,
+        }}
         aria-hidden
       >
         {Math.round(clamped * 100)}%

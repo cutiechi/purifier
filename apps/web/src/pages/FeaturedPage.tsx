@@ -15,7 +15,7 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, readPath, routes } from "@/lib/routes"
+import { api, readPath, routes, DISCOVER_TABS } from "@/lib/routes"
 
 interface ChapterLink {
   index: number
@@ -62,7 +62,10 @@ export default function FeaturedPage() {
             : "在线榜单与栏目"
         }
       />
-      <PageSiteTabs sites={["1"]} hideWhenSingle />
+      <PageSiteTabs
+        sites={DISCOVER_TABS.find((t) => t.href === routes.featured)!.sites}
+        hideWhenSingle
+      />
       <SectionTabs items={sectionTabs} />
 
       <AsyncBody

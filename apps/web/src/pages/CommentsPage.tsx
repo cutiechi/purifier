@@ -16,7 +16,7 @@ import { useSite } from "@/hooks/use-site"
 import { formatCount } from "@/lib/format"
 import { groupBooks } from "@/lib/book-groups"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, readPath, routes } from "@/lib/routes"
+import { api, readPath, routes, DISCOVER_TABS } from "@/lib/routes"
 
 interface CommentRankPost {
   rank: number
@@ -59,7 +59,10 @@ export default function CommentsPage() {
             : "在线榜单与栏目"
         }
       />
-      <PageSiteTabs sites={["1"]} hideWhenSingle />
+      <PageSiteTabs
+        sites={DISCOVER_TABS.find((t) => t.href === routes.comments)!.sites}
+        hideWhenSingle
+      />
       <SectionTabs items={sectionTabs} />
 
       <AsyncBody

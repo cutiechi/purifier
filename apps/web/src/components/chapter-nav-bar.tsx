@@ -11,10 +11,12 @@ export function ChapterNavBar({
   prev,
   next,
   site,
+  widthClass = "max-w-3xl",
 }: {
   prev?: ChapterLinkLike
   next?: ChapterLinkLike
   site: SiteId
+  widthClass?: string
 }) {
   if (!prev && !next) return null
   return (
@@ -23,7 +25,9 @@ export function ChapterNavBar({
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
-      <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-2 pr-12 pl-3 sm:pr-14 sm:pl-5">
+      <div
+        className={`mx-auto flex h-12 ${widthClass} items-center justify-between gap-2 pr-12 pl-3 sm:pr-14 sm:pl-5`}
+      >
         {prev ? (
           <Link
             to={readPath(prev.tid, site)}

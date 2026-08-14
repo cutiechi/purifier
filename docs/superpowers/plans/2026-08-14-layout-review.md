@@ -920,7 +920,7 @@ const showChapterNav = Boolean(neighbors.prev || neighbors.next)
   <div
     className={
       showChapterNav
-        ? "pb-[calc(3rem+env(safe-area-inset-bottom,0px))]"
+        ? "pb-[calc(3rem_+_env(safe-area-inset-bottom,0px))]"
         : undefined
     }
   >
