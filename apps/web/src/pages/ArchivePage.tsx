@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactNode } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
@@ -11,9 +12,9 @@ import {
 import { GenrePill, ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { PostList } from "@/components/post-card"
+import { SourceBadge } from "@/components/source-badge"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
-import { useSite } from "@/hooks/use-site"
-import { groupBooks } from "@/lib/book-groups"
+import { groupBooks, type GroupedItem } from "@/lib/book-groups"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
@@ -27,7 +28,6 @@ import {
   parseQuery,
   readPath,
   routes,
-  siteUrl,
   type SiteId,
 } from "@/lib/routes"
 
@@ -37,6 +37,12 @@ interface ArchivePost {
   title: string
   first_seen_at: number
   archived_at: number
+}
+
+interface ArchivePageData {
+  items: ArchivePost[]
+  nextPage?: number
+  total: number
 }
 
 type SortKey = "title" | "tid" | "archived_at"
@@ -53,26 +59,35 @@ function parseSort(raw: string | null, site: SiteId): SortKey {
   return site === "2" ? "archived_at" : "tid"
 }
 
+function buildParams(
+  sort: SortKey,
+  site: SiteId,
+  page: number,
+  q: string
+): string {
+  const params = new URLSearchParams()
+  params.set("sort", sort)
+  params.set("page", String(page))
+  params.set("site", site)
+  if (q) params.set("q", q)
+  // 书库 archived_at 默认 desc（最旧在前），要最新收录在前必须显式 asc
+  if (site === "2" && sort === "archived_at") params.set("order", "asc")
+  return params.toString()
+}
+
+const EMPTY: ArchivePageData = { items: [], total: 0 }
+
+/** 目录：论坛 + 书库归档同页合并（带来源徽标），不再用站点 Tab 切换 */
 export default function ArchivePage() {
-  const site = useSite()
   const [searchParams, setSearchParams] = useSearchParams()
-  const isBooks = site === "2"
-  const defaultSort: SortKey = isBooks ? "archived_at" : "tid"
-  const sort = parseSort(searchParams.get("sort"), site)
-  const sortOptions = useMemo(() => {
-    if (!isBooks) return SORT_OPTIONS
-    return SORT_OPTIONS.filter((o) => o.value !== "tid").map((o) =>
-      o.value === "archived_at"
-        ? { ...o, title: "最新收录在前（第 1 页先入库）" }
-        : o
-    )
-  }, [isBooks])
+  const rawSort = searchParams.get("sort")
+  // UI 高亮用论坛侧排序键（书库侧 tid 自动回落 archived_at）
+  const sort = parseSort(rawSort, "1")
   const q = parseQuery(searchParams)
   const page = parsePage(searchParams)
 
-  const [items, setItems] = useState<ArchivePost[]>([])
-  const [nextPage, setNextPage] = useState<number | undefined>(undefined)
-  const [total, setTotal] = useState(0)
+  const [forum, setForum] = useState<ArchivePageData>(EMPTY)
+  const [library, setLibrary] = useState<ArchivePageData>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [draftQ, setDraftQ] = useState(q)
@@ -88,29 +103,34 @@ export default function ArchivePage() {
     setLoading(true)
     setError("")
     try {
-      const params = new URLSearchParams()
-      params.set("sort", sort)
-      params.set("page", String(page))
-      // 评审问题 2：不带 site 会拉到默认站（1）的数据
-      params.set("site", site)
-      if (q) params.set("q", q)
-      // 评审问题 4：书库 archived_at 默认 desc（最旧在前），要最新收录在前必须显式 asc
-      if (isBooks && sort === "archived_at") params.set("order", "asc")
-      const res = await fetch(`${api.meArchive}?${params.toString()}`)
-      const json = (await res.json()) as {
-        items: ArchivePost[]
-        nextPage?: number
-        total?: number
-        error?: string
+      const [forumRes, libraryRes] = await Promise.all([
+        fetch(`${api.meArchive}?${buildParams(parseSort(rawSort, "1"), "1", page, q)}`),
+        fetch(`${api.meArchive}?${buildParams(parseSort(rawSort, "2"), "2", page, q)}`),
+      ])
+      const parse = async (
+        res: Response,
+        fallback: ArchivePageData
+      ): Promise<ArchivePageData> => {
+        const json = (await res.json()) as {
+          items?: ArchivePost[]
+          nextPage?: number
+          total?: number
+          error?: string
+        }
+        if (!res.ok) throw new Error(json.error || "请求失败")
+        return {
+          items: json.items ?? [],
+          nextPage: json.nextPage,
+          total: typeof json.total === "number" ? json.total : 0,
+        }
       }
+      const [f, l] = await Promise.all([
+        parse(forumRes, EMPTY),
+        parse(libraryRes, EMPTY),
+      ])
       if (seq !== seqRef.current) return
-      if (!res.ok) {
-        setError(json.error || "请求失败")
-        return
-      }
-      setItems(json.items ?? [])
-      setNextPage(json.nextPage)
-      setTotal(typeof json.total === "number" ? json.total : 0)
+      setForum(f)
+      setLibrary(l)
     } catch (e) {
       if (seq === seqRef.current) {
         setError(e instanceof Error ? e.message : "未知错误")
@@ -118,7 +138,7 @@ export default function ArchivePage() {
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [sort, page, q, site, isBooks])
+  }, [rawSort, page, q])
 
   useEffect(() => {
     void reload()
@@ -126,14 +146,24 @@ export default function ArchivePage() {
 
   useScrollTop([page, sort, q])
 
-  // 页码越界 → 回退到最后一页（其余列表页已有同样逻辑）
+  const total = forum.total + library.total
+  const items = useMemo(
+    () => [...forum.items, ...library.items],
+    [forum.items, library.items]
+  )
+  const hasNext = forum.nextPage !== undefined || library.nextPage !== undefined
+  const maxPages = Math.max(
+    calcTotalPages(forum.total, ARCHIVE_PAGE_SIZE),
+    calcTotalPages(library.total, ARCHIVE_PAGE_SIZE)
+  )
+
+  // 页码越界 → 回退到最后一页（两站页数取大者）
   useEffect(() => {
     if (loading || error) return
-    if (total <= 0) return
-    const maxPage = calcTotalPages(total, ARCHIVE_PAGE_SIZE)
-    if (page > maxPage) update({ page: maxPage })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on total/page
-  }, [loading, error, total, page])
+    if (maxPages <= 0) return
+    if (page > maxPages) update({ page: maxPages })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on totals/page
+  }, [loading, error, page, maxPages])
 
   function update(next: { q?: string; sort?: SortKey; page?: number }) {
     const params = new URLSearchParams(searchParams)
@@ -142,7 +172,7 @@ export default function ArchivePage() {
       else params.delete("q")
     }
     if (next.sort !== undefined) {
-      if (next.sort === defaultSort) params.delete("sort")
+      if (next.sort === "tid") params.delete("sort")
       else params.set("sort", next.sort)
     }
     const pageChanged = next.page !== undefined
@@ -165,14 +195,24 @@ export default function ArchivePage() {
   }, [draftQ])
 
   const { isExpanded, toggle } = useExpandedBooks("archive")
-  const grouped = useMemo(() => {
-    if (isBooks) return null
-    return groupBooks(
-      items,
-      (it) => it.title,
-      (it) => it.tid
-    )
-  }, [items, isBooks])
+  const forumGrouped = useMemo(
+    () =>
+      groupBooks(
+        forum.items,
+        (it) => it.title,
+        (it) => it.tid
+      ),
+    [forum.items]
+  )
+  const libraryGrouped = useMemo(
+    () =>
+      groupBooks(
+        library.items,
+        (it) => it.title,
+        (it) => it.tid
+      ),
+    [library.items]
+  )
 
   function itemHref(it: ArchivePost): string {
     return it.site === "2"
@@ -180,16 +220,78 @@ export default function ArchivePage() {
       : readPath(it.tid, it.site)
   }
 
+  function renderGrouped(g: GroupedItem<ArchivePost>, badge: ReactNode) {
+    if (g.type === "single") {
+      const item = g.item
+      return (
+        <ListPostCard
+          key={`${item.site}:${item.tid}`}
+          href={itemHref(item)}
+          rawTitle={item.title}
+          trailing={
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-muted-foreground/70 tabular-nums">
+                #{item.tid}
+              </span>
+              {badge}
+            </span>
+          }
+        />
+      )
+    }
+    return (
+      <CollapsibleBookGroup
+        key={`group:${g.key}`}
+        title={g.title}
+        summary={[g.author, g.genre].filter(Boolean).join(" · ") || undefined}
+        count={g.items.length}
+        bookKey={g.key}
+        isExpanded={isExpanded(g.key)}
+        onToggle={() => toggle(g.key)}
+        trailing={
+          <span className="flex shrink-0 items-center gap-2">
+            {g.genre ? <GenrePill genre={g.genre} /> : null}
+            {badge}
+          </span>
+        }
+      >
+        {g.items.map((it) => {
+          const parsed = parseListTitle(it.title)
+          const sub = formatTitleMeta(
+            parsed.chapters ? { ...parsed, chapters: null } : parsed
+          )
+          return (
+            <Link
+              key={`${it.site}:${it.tid}`}
+              to={itemHref(it)}
+              className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
+            >
+              <span className="min-w-0 flex-1 line-clamp-2 font-medium text-foreground">
+                {parsed.chapters || parsed.title}
+              </span>
+              {sub && (
+                <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                  {sub}
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                #{it.tid}
+              </span>
+            </Link>
+          )
+        })}
+      </CollapsibleBookGroup>
+    )
+  }
+
   return (
     <PageShell maxWidth="xwide">
       <PageHeader
         title="目录"
-        description={
-          isBooks ? "本地全站书库目录（由任务同步）" : "本地全站主帖目录（由任务同步）"
-        }
+        description="本地全站归档 · 论坛与书库（由任务同步）"
         action={
           <Link
-            to={siteUrl(routes.jobs, site)}
+            to={routes.jobs}
             className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             更新目录
@@ -204,7 +306,7 @@ export default function ArchivePage() {
       />
 
       <FilterTabs
-        options={sortOptions}
+        options={SORT_OPTIONS}
         value={sort}
         onChange={(v) => update({ sort: v, page: 1 })}
         variant="primary"
@@ -217,7 +319,7 @@ export default function ArchivePage() {
             pageCount: items.length,
             pageSize: ARCHIVE_PAGE_SIZE,
             total,
-            hasNext: nextPage !== undefined,
+            hasNext,
           })}
         </ListMeta>
       )}
@@ -228,94 +330,37 @@ export default function ArchivePage() {
         empty={items.length === 0}
         onRetry={() => void reload()}
         emptyText={
-          <>
-            {q ? (
-              "没有匹配的归档"
-            ) : (
-              <>
-                还没有归档，去
-                <Link
-                  to={siteUrl(routes.jobs, site)}
-                  className="text-foreground underline underline-offset-2"
-                >
-                  任务
-                </Link>
-                {isBooks ? "开始一次全站书库归档" : "开始一次全站主帖归档"}
-              </>
-            )}
-          </>
+          q ? (
+            "没有匹配的归档"
+          ) : (
+            <>
+              还没有归档，去
+              <Link
+                to={routes.jobs}
+                className="text-foreground underline underline-offset-2"
+              >
+                任务
+              </Link>
+              开始一次全站归档
+            </>
+          )
         }
       >
         <PostList>
-          {grouped
-            ? grouped.map((g) =>
-                g.type === "single" ? (
-                  <ListPostCard
-                    key={`${g.item.site}:${g.item.tid}`}
-                    href={itemHref(g.item)}
-                    rawTitle={g.item.title}
-                    trailing={
-                      <span className="text-xs text-muted-foreground/70 tabular-nums">
-                        #{g.item.tid}
-                      </span>
-                    }
-                  />
-                ) : (
-                  <CollapsibleBookGroup
-                    key={`group:${g.key}`}
-                    title={g.title}
-                    summary={
-                      [g.author, g.genre].filter(Boolean).join(" · ") || undefined
-                    }
-                    count={g.items.length}
-                    bookKey={g.key}
-                    isExpanded={isExpanded(g.key)}
-                    onToggle={() => toggle(g.key)}
-                    trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
-                  >
-                    {g.items.map((it) => {
-                      const parsed = parseListTitle(it.title)
-                      const sub = formatTitleMeta(
-                        parsed.chapters ? { ...parsed, chapters: null } : parsed
-                      )
-                      return (
-                        <Link
-                          key={`${it.site}:${it.tid}`}
-                          to={itemHref(it)}
-                          className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
-                        >
-                          <span className="min-w-0 flex-1 line-clamp-2 font-medium text-foreground">
-                            {parsed.chapters || parsed.title}
-                          </span>
-                          {sub && (
-                            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                              {sub}
-                            </span>
-                          )}
-                          <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                            #{it.tid}
-                          </span>
-                        </Link>
-                      )
-                    })}
-                  </CollapsibleBookGroup>
-                )
-              )
-            : items.map((it) => (
-                <ListPostCard
-                  key={`${it.site}:${it.tid}`}
-                  href={itemHref(it)}
-                  rawTitle={it.title}
-                />
-              ))}
+          {forumGrouped.map((g) =>
+            renderGrouped(g, <SourceBadge site="1" />)
+          )}
+          {libraryGrouped.map((g) =>
+            renderGrouped(g, <SourceBadge site="2" />)
+          )}
         </PostList>
         <Pager
           page={page}
-          hasNext={nextPage !== undefined}
+          hasNext={hasNext}
           total={total}
-          totalPages={calcTotalPages(total, ARCHIVE_PAGE_SIZE)}
+          totalPages={maxPages}
           onPrev={() => update({ page: page - 1 })}
-          onNext={() => nextPage !== undefined && update({ page: nextPage })}
+          onNext={() => hasNext && update({ page: page + 1 })}
           onPage={(n) => update({ page: n })}
           disabled={loading}
         />
