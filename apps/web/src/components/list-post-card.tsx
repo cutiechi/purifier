@@ -39,7 +39,7 @@ export function StatTrailing({
 }
 
 /**
- * 统一列表帖：解析标题 + 可选排名/序号/统计/题材胶囊
+ * 统一列表帖：解析标题 + 可选排名/序号/统计（题材并入副标题）
  */
 export function ListPostCard({
   href,
@@ -58,17 +58,14 @@ export function ListPostCard({
   index?: number
   statValue?: number | string
   statUnit?: string
-  /** 是否把题材放到右侧胶囊（默认 true，有统计时题材进副标题） */
+  /** 兼容保留：题材统一并入副标题行，不再渲染右侧胶囊 */
   showGenre?: boolean
   className?: string
   /** 右侧附加插槽（如搜索相似触发器），与统计/题材胶囊并存 */
   trailing?: ReactNode
 }) {
   const parsed = parseListTitle(rawTitle)
-  const genreAsPill = showGenre && !!parsed.genre && statValue == null
-  const subtitle = formatTitleMeta(
-    genreAsPill ? { ...parsed, genre: null } : parsed
-  )
+  const subtitle = formatTitleMeta(parsed)
 
   let leading: ReactNode
   if (rank != null) leading = <RankBadge rank={rank} />
@@ -77,8 +74,6 @@ export function ListPostCard({
   let defaultTrailing: ReactNode
   if (statValue != null && statUnit) {
     defaultTrailing = <StatTrailing value={statValue} unit={statUnit} />
-  } else if (genreAsPill && parsed.genre) {
-    defaultTrailing = <GenrePill genre={parsed.genre} />
   }
 
   const combined = trailing ? (
