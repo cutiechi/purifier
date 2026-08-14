@@ -45,9 +45,12 @@ import {
   readContentCache,
   readRepliesCache,
   resolveSite,
+  SITES,
+  mergeSearchPages,
   writeContentCache,
   writeRepliesCache,
   type CacheEntry,
+  type CategoryPage,
   type Extractor,
   type ItemKind,
   type ItemState,
@@ -542,6 +545,74 @@ async function handleBrowse(url: URL): Promise<Response> {
   const result = await extractor.fetchCategoryPage(query, page)
   setListMemCache(cacheKey, result)
   return jsonOk(result, LIST_CACHE_HEADERS)
+}
+
+async function handleSearch(url: URL): Promise<Response> {
+  const q = url.searchParams.get("q")?.trim() ?? ""
+  if (!q) return jsonError("missing q parameter", 400)
+  if (q.length > 200) return jsonError("q too long", 400)
+  const page = Math.max(
+    1,
+    parseInt(url.searchParams.get("page") || "1", 10) || 1
+  )
+
+  // map 返回值 → Promise.all 保序（与 Object.keys(SITES) 同序）；
+  // 不要对共享数组 push，完成顺序是竞态，会破坏平局 site1 在前与首错误序
+  const results = await Promise.all(
+    Object.keys(SITES).map(async (site) => {
+      try {
+        const cacheKey = `browse:${site}::${q}:${page}`
+        const hit = getListMemCache<CategoryPage>(cacheKey)
+        if (hit) return { site, page: hit }
+        const extractor = resolveSite(site)
+        const result = await extractor.fetchCategoryPage(
+          { keywords: q },
+          page
+        )
+        setListMemCache(cacheKey, result)
+        return { site, page: result }
+      } catch (err) {
+        return {
+          site,
+          page: null,
+          error: err instanceof Error ? err.message : String(err),
+          err,
+        }
+      }
+    })
+  )
+
+  const settled = results.map(({ site, page, error }) => ({
+    site,
+    page,
+    error,
+  }))
+  const failures = results.filter(
+    (r): r is {
+      site: string
+      page: null
+      error: string
+      err: unknown
+    } => !r.page
+  )
+
+  if (failures.length === Object.keys(SITES).length) {
+    const first = failures[0]!.err
+    const status = failures.every(
+      (f) => f.err instanceof UpstreamTimeoutError
+    )
+      ? 504
+      : first instanceof ExtractorError
+        ? first.statusCode
+        : 502
+    return jsonError(
+      first instanceof Error ? first.message : "search failed",
+      status
+    )
+  }
+
+  // 合并页不进任何共享缓存：半残页（errors）不被 CDN/浏览器钉住
+  return jsonOk(mergeSearchPages(settled), NO_STORE_HEADERS)
 }
 
 async function handleHomeExtract(
@@ -1666,6 +1737,9 @@ async function routeInner(req: Request): Promise<Response> {
       case "/api/browse":
         requireGet(req)
         return await handleBrowse(url)
+      case "/api/search":
+        requireGet(req)
+        return await handleSearch(url)
       case "/api/categories":
         requireGet(req)
         return await handleHomeExtract(
