@@ -127,7 +127,7 @@ export function JobRow({
               {job.error}
             </p>
           )}
-          <JobLogPanel jobId={job.id} running={running} pollMs={pollMs} />
+          <JobLogPanel jobId={job.id} active={running} pollMs={pollMs} />
         </div>
       )}
     </li>

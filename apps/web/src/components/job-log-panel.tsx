@@ -2,18 +2,19 @@ import { useEffect, useRef, useState } from "react"
 import { getJobLogs, type JobLog } from "@/lib/jobs"
 import { formatDateTime } from "@/lib/format"
 
-/** 日志面板：running 时按 pollMs 轮询 desc 拉尾，UI 反转为 ASC 显示 */
+/** 日志面板：active(running|paused) 时按 pollMs 轮询 desc 拉尾，UI 反转为 ASC 显示 */
 export function JobLogPanel({
   jobId,
-  running,
+  active,
   pollMs,
 }: {
   jobId: number
-  running: boolean
+  active: boolean
   pollMs: number
 }) {
   const [logs, setLogs] = useState<JobLog[]>([])
   const [truncated, setTruncated] = useState(false)
+  const [level, setLevel] = useState<"" | "warn" | "error">("")
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const preRef = useRef<HTMLPreElement | null>(null)
   const stickBottomRef = useRef(true)
@@ -23,7 +24,11 @@ export function JobLogPanel({
     let cancelled = false
     const poll = async () => {
       try {
-        const fresh = await getJobLogs(jobId, { order: "desc", limit })
+        const fresh = await getJobLogs(jobId, {
+          order: "desc",
+          limit,
+          level: level || undefined,
+        })
         if (!cancelled) {
           // desc 拉回 → 反转成 ASC 显示
           setLogs(fresh.slice().reverse())
@@ -32,7 +37,7 @@ export function JobLogPanel({
       } catch {
         // 静默
       }
-      if (!cancelled && running) {
+      if (!cancelled && active) {
         timerRef.current = setTimeout(poll, pollMs)
       }
     }
@@ -41,7 +46,7 @@ export function JobLogPanel({
       cancelled = true
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [jobId, running, pollMs])
+  }, [jobId, active, pollMs, level])
 
   // 贴底：用户未上滚时，日志更新后滚到底
   useEffect(() => {
@@ -56,6 +61,29 @@ export function JobLogPanel({
 
   return (
     <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        {(
+          [
+            { v: "", label: "全部" },
+            { v: "warn", label: "warn" },
+            { v: "error", label: "error" },
+          ] as const
+        ).map((o) => (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => setLevel(o.v)}
+            className={
+              "rounded px-1.5 py-0.5 text-[11px] " +
+              (level === o.v
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/60")
+            }
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
       {truncated && (
         <p className="text-[11px] text-muted-foreground">
           仅显示最近 {limit} 条
