@@ -187,22 +187,25 @@ test("status 聚合 active/finished：list 与 count 一致", () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test("sort=duration：进行中按 now 计，NULL started_at 排最后", () => {
+test("sort=duration：进行中按 now 计，同耗时 tie-break created_at desc，NULL 排最后", () => {
   const { store, dir } = makeStore()
-  const { a, c } = seedThree(store)
+  const { a, b, c } = seedThree(store)
   const d = store.createJob("archive_posts", null) // pending：started_at NULL
   const rows = store.listJobs({ limit: 10, offset: 0, sort: "duration" })
-  // c 进行中（now - started_at 最大）> a（终态 1ms）> d（NULL 末尾）
-  expect(rows[0]!.id).toBe(c.id)
-  expect(rows[1]!.id).toBe(a.id)
-  expect(rows[rows.length - 1]!.id).toBe(d.id)
+  // c 进行中（now - started_at 最大）；a/b 终态同为 1ms → created_at desc（b 后建）在前；d NULL 末尾
+  expect(rows.map((j) => j.id)).toEqual([c.id, b.id, a.id, d.id])
   rmSync(dir, { recursive: true, force: true })
 })
 
-test("sort=type / sort=status 生效", () => {
+test("sort=type（asc）与 sort=status 生效", () => {
   const { store, dir } = makeStore()
   const { a, b, c } = seedThree(store)
-  const byType = store.listJobs({ limit: 10, offset: 0, sort: "type" })
+  const byType = store.listJobs({
+    limit: 10,
+    offset: 0,
+    sort: "type",
+    order: "asc",
+  })
   expect(byType.map((j) => j.type)).toEqual([
     "archive_books",
     "archive_posts",
@@ -210,29 +213,28 @@ test("sort=type / sort=status 生效", () => {
   ])
   // status 序：running(0) > paused(1) > pending(2) > interrupted(3) > failed(4) > aborted(5) > succeeded(6)
   const byStatus = store.listJobs({ limit: 10, offset: 0, sort: "status" })
+  expect(byStatus.map((j) => j.id)).toEqual([c.id, b.id, a.id])
   expect(byStatus.map((j) => j.status)).toEqual([
     "paused",
-    "pending",
     "failed",
     "succeeded",
   ])
-  expect(byStatus.map((j) => j.id)).toEqual([c.id, a.id, b.id, a.id].slice(0, 3))
   rmSync(dir, { recursive: true, force: true })
 })
 
-test("deleteJobsMany 只删终态", () => {
+test("deleteJobsMany 只删终态，removed 不计 CASCADE 日志", () => {
   const { store, dir } = makeStore()
   const { a, b, c } = seedThree(store)
+  store.appendJobLog(a.id, "info", "log line") // FK CASCADE 行不计入 removed
   expect(store.deleteJobsMany([])).toBe(0)
   expect(store.deleteJobsMany([a.id, b.id])).toBe(2)
   expect(store.getJob(a.id)).toBeNull()
+  expect(store.listJobLogs(a.id, { limit: 10, offset: 0 })).toEqual([])
   expect(store.deleteJobsMany([c.id])).toBe(0) // paused 不删
   expect(store.getJob(c.id)!.status).toBe("paused")
   rmSync(dir, { recursive: true, force: true })
 })
 ```
-
-注意 `sort=status` 那条：seed 顺序里没有 pending/interrupted/aborted，实际断言前先跑一遍看真实输出再固定（写测试时以运行结果为准修正 `toEqual`）。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -251,20 +253,37 @@ export type JobSortKey = "created_at" | "type" | "status" | "duration"
 `packages/core/src/storage/store.ts` — jobs 区顶部加模块级常量与 helper（放 class 外）：
 
 ```ts
-/** status 聚合值 → 展开集合；单值仍等值匹配。listJobs/countJobs 共用 */
+/** status 聚合值 → 展开集合；单值仍占位符绑定（不拼值进 SQL） */
 const JOB_STATUS_AGGREGATES: Record<string, string[]> = {
   active: ["running", "paused", "pending"],
   finished: ["succeeded", "failed", "interrupted", "aborted"],
 }
 
-/** 终态白名单（单删/批量删除/「最近一次结果」共用） */
-const JOB_TERMINAL_STATUSES = "succeeded','failed','interrupted','aborted"
+/** 终态白名单（批量删除；固定字面量，安全拼接） */
+const JOB_TERMINAL_SQL = "('succeeded','failed','interrupted','aborted')"
 
-function jobStatusClause(status?: string): string {
-  const agg = status ? JOB_STATUS_AGGREGATES[status] : undefined
-  if (agg) return `AND status IN ('${agg.join("','")}')`
-  if (status) return `AND status = '${status.replace(/'/g, "''")}'`
-  return ""
+/** type/status → WHERE 片段与绑定参数（listJobs/countJobs 共用） */
+function jobFilterSql(opts: { type?: string; status?: string }): {
+  where: string
+  binds: string[]
+} {
+  const conds: string[] = []
+  const binds: string[] = []
+  if (opts.type) {
+    conds.push("type = ?")
+    binds.push(opts.type)
+  }
+  if (opts.status) {
+    const agg = JOB_STATUS_AGGREGATES[opts.status]
+    if (agg) {
+      conds.push(`status IN (${agg.map(() => "?").join(",")})`)
+      binds.push(...agg)
+    } else {
+      conds.push("status = ?")
+      binds.push(opts.status)
+    }
+  }
+  return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", binds }
 }
 ```
 
@@ -292,48 +311,46 @@ listJobs(opts: {
         : opts.sort === "duration"
           ? `ORDER BY CASE WHEN started_at IS NULL THEN 1 ELSE 0 END ASC, (COALESCE(finished_at, ${nowMs}) - started_at) ${dir}, created_at DESC, id DESC`
           : `ORDER BY created_at ${dir}, id ${dir}`
-  return this.db
-    .query(
-      `SELECT * FROM jobs
-       WHERE (?1 IS NULL OR type = ?1) ${jobStatusClause(opts.status)}
-       ${orderSql}
-       LIMIT ?2 OFFSET ?3`
-    )
-    .all(opts.type ?? null, opts.limit, opts.offset) as (Omit<Job, "status"> & {
+  const { where, binds } = jobFilterSql(opts)
+  const rows = this.db
+    .query(`SELECT * FROM jobs ${where} ${orderSql} LIMIT ? OFFSET ?`)
+    .all(...binds, opts.limit, opts.offset) as (Omit<Job, "status"> & {
     status: string
-  })[]).map((r) => ({ ...r, status: r.status as JobStatus }))
+  })[]
+  return rows.map((r) => ({ ...r, status: r.status as JobStatus }))
 }
 ```
 
-（注意 `.all(...)` 的括号配平：`this.db.query(...).all(...) as ...` 再 `.map`，写成两步更清晰也可。）
-
-`countJobs` 替换 WHERE 部分，保持与 list 一致：
+`countJobs` 替换（与 list 同一过滤构造）：
 
 ```ts
 countJobs(opts: { type?: string; status?: string }): number {
+  const { where, binds } = jobFilterSql(opts)
   const row = this.db
-    .query(
-      `SELECT COUNT(*) AS n FROM jobs
-       WHERE (?1 IS NULL OR type = ?1) ${jobStatusClause(opts.status)}`
-    )
-    .get(opts.type ?? null) as { n: number }
+    .query(`SELECT COUNT(*) AS n FROM jobs ${where}`)
+    .get(...binds) as { n: number }
   return Number(row.n ?? 0)
 }
 ```
 
-`clearFinishedJobs` 整个删除，原位置换成：
+`clearFinishedJobs` 整个删除，原位置换成（`changes()` 会把 FK CASCADE 的 `job_logs` 计入——沿用 clearFinishedJobs 的「先 COUNT 再删」）：
 
 ```ts
 /** 批量删除（只删终态；活动行由 API 层先检查 409） */
 deleteJobsMany(ids: number[]): number {
   if (ids.length === 0) return 0
   const ph = ids.map(() => "?").join(",")
-  const res = this.db
+  const row = this.db
     .query(
-      `DELETE FROM jobs WHERE id IN (${ph}) AND status IN ('${JOB_TERMINAL_STATUSES}')`
+      `SELECT COUNT(*) AS n FROM jobs WHERE id IN (${ph}) AND status IN ${JOB_TERMINAL_SQL}`
+    )
+    .get(...ids) as { n: number }
+  this.db
+    .query(
+      `DELETE FROM jobs WHERE id IN (${ph}) AND status IN ${JOB_TERMINAL_SQL}`
     )
     .run(...ids)
-  return Number(res.changes ?? 0)
+  return Number(row.n ?? 0)
 }
 ```
 
@@ -415,6 +432,22 @@ test("pause → stop → aborted（checkpoint 被 abort 唤醒且不抛）", asy
   await sleep(50)
   const done = store.getJob(job.id)!
   expect(done.status).toBe("aborted")
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("pause → resume → 再 pause → stop → aborted（二次挂起仍可被唤醒）", async () => {
+  const { runner, store, dir } = makeRunner()
+  runner.register(new PausableHandler())
+  const job = await runner.start("pausable")
+  await sleep(12)
+  expect(runner.pause(job.id)).toBe(true)
+  expect(runner.resume(job.id)).toBe(true)
+  await sleep(10)
+  expect(runner.pause(job.id)).toBe(true)
+  await sleep(20) // 已挂起在第二个 checkpoint
+  expect(runner.stop(job.id)).toBe(true)
+  await sleep(50)
+  expect(store.getJob(job.id)!.status).toBe("aborted")
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -514,7 +547,7 @@ resume(jobId: number): boolean {
 }
 ```
 
-4. `runJob` 的 ctx 构造加 `checkpoint`：
+4. `runJob` 的 ctx 构造加 `checkpoint`。**不在 checkpoint 里注册 abort listener**——每次挂起注册的 listener 闭包持有各自的 resolve，二次暂停后旧 listener 会把新 `h.wake` 置空、调用已 resolve 过的旧 resolve，新挂起永远无人唤醒（handler 卡死、`waitForIdle` 超时）。改为：唤醒只来自 `resume()` / `stop()` / `abortAll()` 显式调用当前 `h.wake`：
 
 ```ts
 const ctx: JobContext = {
@@ -526,23 +559,33 @@ const ctx: JobContext = {
   checkpoint: () =>
     new Promise<void>((resolve) => {
       const h = this.running.get(jobId)
-      if (!h || !h.paused) return resolve()
+      // 未暂停直通；signal 已 aborted（stop 落在挂起之前，如 handler 还在当前页里）也直通，
+      // 循环随后的 signal.aborted 检查会退出
+      if (!h || !h.paused || signal.aborted) return resolve()
       h.wake = () => {
         h.wake = null
         resolve()
       }
-      // abort 也唤醒（resolve 不抛）；listener once 且随 signal 生命周期释放
-      signal.addEventListener(
-        "abort",
-        () => {
-          if (h.wake) {
-            h.wake = null
-            resolve()
-          }
-        },
-        { once: true }
-      )
     }),
+}
+```
+
+5. `stop` / `abortAll` 在 abort 之后显式唤醒挂起的 checkpoint：
+
+```ts
+stop(jobId: number): boolean {
+  const h = this.running.get(jobId)
+  if (!h) return false
+  h.controller.abort()
+  h.wake?.() // 唤醒可能挂起的 checkpoint（resolve 不抛）
+  return true
+}
+
+abortAll(): void {
+  for (const h of this.running.values()) {
+    h.controller.abort()
+    h.wake?.()
+  }
 }
 ```
 
@@ -780,7 +823,7 @@ async function handleJobsBatchDelete(req: Request): Promise<Response> {
 
 `/api/me/jobs` 分发行 `if (req.method === "DELETE") return handleJobsClear()` 改为 `return await handleJobsBatchDelete(req)`。
 
-`jobsListQuery` 加排序解析（放 limit/offset 之后）：
+`jobsListQuery` 加排序与 status 白名单解析（放 limit/offset 之后；status 走白名单，store 侧单值保持占位符绑定，不拼值进 SQL）：
 
 ```ts
 const sortRaw = url.searchParams.get("sort") ?? "created_at"
@@ -790,9 +833,24 @@ if (!SORT_KEYS.has(sortRaw)) throw new ExtractorError("invalid sort", 400)
 if (orderRaw !== "asc" && orderRaw !== "desc") {
   throw new ExtractorError("invalid order", 400)
 }
+const statusRaw = url.searchParams.get("status")
+const STATUS_VALUES = new Set([
+  "pending",
+  "running",
+  "paused",
+  "succeeded",
+  "failed",
+  "interrupted",
+  "aborted",
+  "active",
+  "finished",
+])
+if (statusRaw && !STATUS_VALUES.has(statusRaw)) {
+  throw new ExtractorError("invalid status", 400)
+}
 ```
 
-返回对象补 `sort: sortRaw as JobSortKey, order: orderRaw`（顶部从 `@workspace/core` 导入 `JobSortKey`，若 core 未导出则在 core `index.ts` 补导出）。`handleJobsList` 的 `store.listJobs(q)` 已带新参数，无需改。
+返回对象改为 `{ type, status: statusRaw ?? undefined, limit, offset, sort: sortRaw as JobSortKey, order: orderRaw }`（顶部从 `@workspace/core` 导入 `JobSortKey`，若 core 未导出则在 core `index.ts` 补导出）。`handleJobsList` 的 `store.listJobs(q)` 已带新参数，无需改。
 
 - [ ] **Step 3: 类型检查 + 全量测试**
 
@@ -806,7 +864,9 @@ TMPDATA=$(mktemp -d)
 DATA_DIR="$TMPDATA" PORT=3101 bun run dev:api &
 sleep 2
 curl -s "http://127.0.0.1:3101/api/me/jobs?sort=bogus"        # 期望 {"error":"invalid sort"}
+curl -s "http://127.0.0.1:3101/api/me/jobs?status=bogus"      # 期望 {"error":"invalid status"}
 curl -s "http://127.0.0.1:3101/api/me/jobs?sort=duration&order=asc" # 期望 {"items":[],"total":0,...}
+curl -s "http://127.0.0.1:3101/api/me/jobs?status=active"     # 期望 {"items":[],"total":0,...}
 curl -s -X POST "http://127.0.0.1:3101/api/me/jobs/1/pause"   # 期望 404 job not found
 curl -s -X POST "http://127.0.0.1:3101/api/me/jobs/1/resume"  # 期望 404
 curl -s -X DELETE -H 'content-type: application/json' -d '{"ids":[]}' "http://127.0.0.1:3101/api/me/jobs" # 期望 400
@@ -898,7 +958,7 @@ export async function listJobs(opts?: {
 }
 ```
 
-文件末尾轮询持久化块（`POLL_MS_KEY` 起到 `export { POLL_OPTIONS }`）整体删除，新增：
+新增（旧导出 `clearFinishedJobs`、`POLL_MS_KEY`/`POLL_OPTIONS`/`getPollMs`/`setPollMs` **本任务先保留**，`JobsPage`/`job-row` 还在引用；Task 10 页面重写后统一删除）：
 
 ```ts
 export async function pauseJob(id: number): Promise<void> {
@@ -923,12 +983,10 @@ export async function deleteJobsMany(ids: number[]): Promise<number> {
 }
 ```
 
-- [ ] **Step 3: 类型检查（此时 JobsPage 仍引用旧导出，会红——本任务只改 lib，页面在 Task 9 重写）**
-
-临时处理：本任务结束时 `bun run typecheck` 预期报 `JobsPage`/`job-row` 的旧引用错误。为保持每任务可交付，Task 6 与 Task 9 合并验证不现实——因此本任务允许 typecheck 报**仅位于** `apps/web/src/pages/JobsPage.tsx`、`apps/web/src/components/job-row.tsx` 的错误（`clearFinishedJobs`/`POLL_OPTIONS`/`getPollMs` 等），其余文件必须干净。运行确认报错范围后提交。
+- [ ] **Step 3: 类型检查（必须全绿——旧导出保留，页面未动）**
 
 Run: `bun run typecheck`
-Expected: 错误仅限上述两个文件。
+Expected: 全绿。
 
 - [ ] **Step 4: 提交**
 
@@ -993,7 +1051,8 @@ const [level, setLevel] = useState<"" | "warn" | "error">("")
 
 - [ ] **Step 3: 验证 + 提交**
 
-Run: `bun run typecheck`（仍允许 JobsPage/job-row 的 Task 6 遗留错误）
+Run: `bun run typecheck`
+Expected: 全绿
 
 ```bash
 git add apps/web/src/components/job-log-panel.tsx apps/web/src/components/job-row.tsx
@@ -1092,17 +1151,17 @@ export function CreateJobModal({
 
   if (!open) return null
 
-  const archiveKind = kind === "archive_books" ? "archive_books" : "archive_posts"
+  const isAutoGroup = kind === "archive_auto_group"
   const site: SiteId = kind === "archive_books" ? "2" : "1"
   const resumable = cursorResumable(statuses[site])
 
   const submit = async () => {
     if (hasActive) return
-    if (archiveKind !== "archive_auto_group" && mode === "full") {
+    if (!isAutoGroup && mode === "full") {
       const ok = await confirm({
         title: "全量归档？",
         description:
-          "会从头扫全站目录，上次全量耗时 78 分钟；日常同步用「增量」即可。",
+          "会从头扫全站目录，耗时可能很长；日常同步用「增量」即可。",
         confirmLabel: "开始全量",
         destructive: true,
       })
@@ -1111,13 +1170,13 @@ export function CreateJobModal({
     setBusy(true)
     setError("")
     try {
-      if (kind === "archive_auto_group") {
+      if (isAutoGroup) {
         await startJob("archive_auto_group", {
           site: "1",
           minMembers: Math.min(50, Math.max(2, Math.floor(minMembers) || 2)),
         })
       } else {
-        await startJob(archiveKind, { site, mode })
+        await startJob(kind, { site, mode })
       }
       onStarted()
       onClose()
@@ -1182,42 +1241,52 @@ export function CreateJobModal({
               />
             </label>
           ) : (
-            <div className="mt-4 space-y-2">
-              {MODES.map((m) => {
-                const disabled = m.value === "resume" && !resumable
-                return (
-                  <button
-                    key={m.value}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => setMode(m.value)}
-                    className={cn(
-                      "flex w-full items-start gap-2 rounded-xl border p-3 text-left transition-colors disabled:opacity-40",
-                      mode === m.value && m.value !== "resume"
-                        ? "border-primary bg-accent"
-                        : "border-border hover:bg-accent/50"
-                    )}
-                  >
-                    <span className="text-sm font-medium text-foreground">
+            <div className="mt-4">
+              {/* 模式：单行 segmented control（规格要求），选中态对所有模式生效（含续跑） */}
+              <div className="flex gap-1.5">
+                {MODES.map((m) => {
+                  const disabled = m.value === "resume" && !resumable
+                  return (
+                    <button
+                      key={m.value}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setMode(m.value)}
+                      className={cn(
+                        "min-h-10 flex-1 rounded-xl border px-3 text-sm font-medium transition-colors disabled:opacity-40",
+                        mode === m.value
+                          ? "border-primary bg-accent text-foreground"
+                          : "border-border text-muted-foreground hover:bg-accent/50"
+                      )}
+                    >
                       {m.label}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {m.value === "resume" && !resumable
-                        ? "没有可续跑的进度"
-                        : m.value === "resume"
-                          ? `从中断处接着扫（已记 ${statuses[site]?.cursor?.pages ?? 0} 页）`
-                          : m.desc}
-                    </span>
-                  </button>
-                )
-              })}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {mode === "resume" && !resumable
+                  ? "没有可续跑的进度"
+                  : mode === "resume"
+                    ? `从中断处接着扫（已记 ${statuses[site]?.cursor?.pages ?? 0} 页）`
+                    : MODES.find((m) => m.value === mode)!.desc}
+              </p>
             </div>
           ))}
 
         {hasActive && step === 2 && (
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-            <AlertTriangle size={13} /> 已有任务进行中或已暂停，先等它结束或到「进行中」条操作
-          </p>
+          <div className="mt-3 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+            <span className="flex items-center gap-1.5">
+              <AlertTriangle size={13} /> 已有任务进行中或已暂停
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-2 py-1 underline underline-offset-2"
+            >
+              查看进行中任务
+            </button>
+          </div>
         )}
         {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
 
@@ -1256,7 +1325,8 @@ export function CreateJobModal({
 
 - [ ] **Step 2: 类型检查 + 提交**
 
-Run: `bun run typecheck`（允许 JobsPage/job-row 遗留错误）
+Run: `bun run typecheck`
+Expected: 全绿
 
 ```bash
 git add apps/web/src/components/create-job-modal.tsx
@@ -1274,13 +1344,13 @@ git commit -m "feat(web): two-step create job modal"
 **Interfaces:**
 - Consumes: `Job`、`ArchiveStatus`、`formatJobProgress`、`pauseJob/resumeJob/stopJob`、`JobLogPanel`、`SITES`、`routes`。
 - Produces:
-  - `JobStatsCards({ statuses, groupTotal, lastByType, activeTypes }: { statuses: Record<SiteId, ArchiveStatus | null>; groupTotal: number | null; lastByType: Record<string, Job | undefined>; activeTypes: Set<string> })`
+  - `JobStatsCards({ statuses, groupTotal, lastByType, activeStates }: { statuses: Record<SiteId, ArchiveStatus | null>; groupTotal: number | null; lastByType: Record<string, Job | undefined>; activeStates: Map<string, string> })`——`activeStates` 是 `type → job status`（来自 active 列表），卡片据此区分「进行中 / 已暂停」
   - `JobsActiveStrip({ jobs, onChanged }: { jobs: Job[]; onChanged: () => void })`（onChanged = 操作后让页面 silent 刷新）
 
 - [ ] **Step 1: JobStatsCards**
 
 ```tsx
-import { Link } from "react-router"
+import { Link } from "react-router-dom"
 import { formatJobProgress, type ArchiveStatus, type Job } from "@/lib/jobs"
 import { routes, SITES, type SiteId } from "@/lib/routes"
 
@@ -1322,22 +1392,24 @@ export function JobStatsCards({
   statuses,
   groupTotal,
   lastByType,
-  activeTypes,
+  activeStates,
 }: {
   statuses: Record<SiteId, ArchiveStatus | null>
   groupTotal: number | null
   lastByType: Record<string, Job | undefined>
-  activeTypes: Set<string>
+  activeStates: Map<string, string>
 }) {
-  const siteState = (type: string, sid: SiteId, s: ArchiveStatus | null) => {
-    if (activeTypes.has(type)) {
-      return type === "archive_auto_group" || "进行中"
+  const siteState = (type: string, s: ArchiveStatus | null) => {
+    // 活动态优先：区分「进行中 / 已暂停」（与验收清单、进行中条一致）
+    const active = activeStates.get(type)
+    if (active === "running" || active === "pending") return "进行中"
+    if (active === "paused") return "已暂停"
+    // 可续判定统一为一条：next_mtid 存在且 status !== done（UI 不展示游标值）
+    if (s?.cursor?.next_mtid && s.cursor.status !== "done") {
+      return "可从中断处接着扫"
     }
-    if (s?.cursor) {
-      if (s.cursor.next_mtid) return "可从中断处接着扫"
-      if (s.cursor.status === "done") return "已扫完"
-    }
-    return ""
+    if (s?.cursor?.status === "done") return "已扫完"
+    return "—"
   }
   return (
     <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1346,30 +1418,26 @@ export function JobStatsCards({
         title={SITES["1"].label}
         value={statuses["1"] ? `库内 ${statuses["1"].total} 条` : "—"}
         sub={lastSummary(lastByType["archive_posts"])}
-        state={siteState("archive_posts", "1", statuses["1"]) || "—"}
+        state={siteState("archive_posts", statuses["1"])}
       />
       <Card
         to={`${routes.archive}?site=2`}
         title={SITES["2"].label}
         value={statuses["2"] ? `库内 ${statuses["2"].total} 条` : "—"}
         sub={lastSummary(lastByType["archive_books"])}
-        state={siteState("archive_books", "2", statuses["2"]) || "—"}
+        state={siteState("archive_books", statuses["2"])}
       />
       <Card
         to={routes.groups}
         title="自动分组"
         value={groupTotal != null ? `${groupTotal} 组` : "—"}
         sub={lastSummary(lastByType["archive_auto_group"])}
-        state={
-          activeTypes.has("archive_auto_group") ? "进行中" : "—"
-        }
+        state={siteState("archive_auto_group", null)}
       />
     </div>
   )
 }
 ```
-
-注意 `siteState` 里第一支写成：`return activeTypes.has(type) ? "进行中" : ""`（去掉上面示意里的笔误三元）；论坛/书库若该类型 active 显示「进行中」，自动分组卡独立写。实现时以「进行中 / 已暂停 不区分——activeTypes 来自 active 列表，统一文案『进行中』，行内暂停态在表格/进行中条呈现」为准。
 
 - [ ] **Step 2: JobsActiveStrip**
 
@@ -1476,7 +1544,8 @@ export function JobsActiveStrip({
 
 - [ ] **Step 3: 类型检查 + 提交**
 
-Run: `bun run typecheck`（允许 JobsPage/job-row 遗留错误）
+Run: `bun run typecheck`
+Expected: 全绿
 
 ```bash
 git add apps/web/src/components/job-stats-cards.tsx apps/web/src/components/jobs-active-strip.tsx
@@ -1501,7 +1570,7 @@ git commit -m "feat(web): jobs stats cards and active strip components"
 
 ```tsx
 import { useState } from "react"
-import { Link } from "react-router"
+import { Link } from "react-router-dom"
 import { ChevronDown, ChevronUp, ExternalLink, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobLogPanel } from "@/components/job-log-panel"
@@ -1716,6 +1785,8 @@ export function JobsTable({
         })}
       </ul>
 
+      {/* 手机行操作 ≤3 个平铺；若将来超过 3 个，收进「…」菜单（规格 #16） */}
+
       {/* 桌面：sm+ 表格 */}
       <table className="hidden w-full border-collapse sm:table">
         <thead>
@@ -1823,7 +1894,7 @@ export function JobsTable({
 
 ```tsx
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router"
+import { useSearchParams } from "react-router-dom"
 import { Download, Plus, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell, Pager } from "@/components/page-shell"
@@ -2066,7 +2137,7 @@ export default function JobsPage() {
         statuses={statuses}
         groupTotal={groupTotal}
         lastByType={lastByType}
-        activeTypes={new Set(active.map((j) => j.type))}
+        activeStates={new Map(active.map((j) => [j.type, j.status] as const))}
       />
       <JobsActiveStrip jobs={active} onChanged={() => { void loadSide(); void loadTable(true) }} />
 
@@ -2143,11 +2214,18 @@ export default function JobsPage() {
 
 实现时以编译器为准修正小问题（如 `SITES` 若未用到则去掉 import；`parsePage` 签名核对 `lib/routes.ts`）。
 
-- [ ] **Step 3: 删除 job-row.tsx 并确认无引用**
+- [ ] **Step 3: 删除 job-row.tsx 与 lib/jobs.ts 遗留导出，确认无引用**
 
 ```bash
 rm apps/web/src/components/job-row.tsx
 grep -rn "job-row\|JobRow" apps/web/src   # 期望无输出
+```
+
+同时删除 Task 6 暂留的 `apps/web/src/lib/jobs.ts` 旧导出：`clearFinishedJobs`、`POLL_MS_KEY`、`POLL_OPTIONS`、`getPollMs`、`setPollMs`（页面已不再引用）：
+
+```bash
+grep -rn "clearFinishedJobs\|POLL_OPTIONS\|getPollMs\|setPollMs" apps/web/src   # 期望无输出
+bun run typecheck   # 全绿
 ```
 
 - [ ] **Step 4: 更新 AGENTS.md API 表**
@@ -2192,6 +2270,6 @@ git commit -m "feat(web): jobs page redesign - stats cards, active strip, create
 
 ## Self-Review 结果
 
-- 规格覆盖：暂停/继续（T1–T5）、排序/批量删除（T2/T5）、统计卡数据源（T9）、进行中条与轮询/toast（T9/T10）、创建 modal（T8）、表格响应式与批量（T10）、日志级别筛选（T7）、移除项（T6/T10）、AGENTS.md（T10）、重启边界（既有行为，T10 验收 6）——均有对应任务。
-- 类型一致性：`JobSortKey`/`markPaused`/`markResumed`/`deleteJobsMany`/`checkpoint`/`pauseJob`/`resumeJob`/组件 props 各任务间签名一致；`JobLogPanel` prop 统一为 `active`。
-- 占位符：Task 9 `siteState` 有一处示意笔误已内联注明修正方式；Task 10 Step 2 注明以编译器为准修正 import 细节——均为明确的修正指令，非待定项。
+- 规格覆盖：暂停/继续（T1–T5）、排序/批量删除（T2/T5）、统计卡数据源（T9）、进行中条与轮询/toast（T9/T10）、创建 modal（T8）、表格响应式与批量（T10）、日志级别筛选（T7）、移除项（T6 暂留 + T10 Step 3 统一删）、AGENTS.md（T10）、重启边界（既有行为，T10 验收 6）——均有对应任务。
+- 类型一致性：`JobSortKey`/`markPaused`/`markResumed`/`deleteJobsMany`/`checkpoint`/`pauseJob`/`resumeJob`/组件 props 各任务间签名一致；`JobLogPanel` prop 统一为 `active`；统计卡统一为 `activeStates: Map<string, string>`（区分进行中/已暂停）。
+- Plan-review 修订（第二轮）：checkpoint 唤醒改为 resume/stop/abortAll 显式调 `h.wake`（无 abort listener 闭包，二次挂起可唤醒，含回归测试）；`deleteJobsMany` 先 COUNT 再删（`changes()` 计入 CASCADE 日志）；Task 2 排序断言与 SQL 一致（type 用 asc、duration tie-break、status 三态）；store 过滤全部占位符绑定 + API status 白名单；Task 6–9 每任务 typecheck 全绿（旧导出暂留至 T10 删）；modal 续跑选中态、去掉编造的 78 分钟、segmented 单行 + 「查看进行中任务」按钮；前端 import 统一 `react-router-dom`。
