@@ -20,6 +20,7 @@ export function SimilarPostCard({
   statUnit,
   showGenre,
   className,
+  badge,
 }: {
   href: string
   rawTitle: string
@@ -31,6 +32,7 @@ export function SimilarPostCard({
   statUnit?: string
   showGenre?: boolean
   className?: string
+  badge?: ReactNode
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const groupKey = groupKeyFromTitle(rawTitle)
@@ -45,6 +47,7 @@ export function SimilarPostCard({
         statUnit={statUnit}
         showGenre={showGenre}
         className={className}
+        trailing={badge}
       />
     )
   }
@@ -61,7 +64,14 @@ export function SimilarPostCard({
         showGenre={showGenre}
         className={className}
         trailing={
-          <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+          badge ? (
+            <span className="flex shrink-0 items-center gap-2">
+              {badge}
+              <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+            </span>
+          ) : (
+            <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+          )
         }
       />
       {open && (

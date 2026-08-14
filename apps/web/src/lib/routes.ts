@@ -96,6 +96,7 @@ export const api = {
   comments: "/api/comments",
   categories: "/api/categories",
   browse: "/api/browse",
+  search: "/api/search",
   meHistory: "/api/me/history",
   meFavorites: "/api/me/favorites",
   meTags: "/api/me/tags",
