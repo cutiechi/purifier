@@ -73,7 +73,11 @@ export function SiteHeader({
         {showBack ? (
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              // 新标签直达（history idx=0）时无前向页可退，回首页
+              if (window.history.state?.idx === 0) navigate(routes.home)
+              else navigate(-1)
+            }}
             className="flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label="返回"
           >
