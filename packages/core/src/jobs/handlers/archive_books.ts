@@ -96,6 +96,8 @@ export class ArchiveBooksJob implements JobHandler {
     let stopReason = "completed"
 
     while (!ctx.signal.aborted) {
+      await ctx.checkpoint()
+      if (ctx.signal.aborted) break
       let page: HomePage
       try {
         // 网络抖动重试（指数退避 + jitter），避免单次失败就整轮作废

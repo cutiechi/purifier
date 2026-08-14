@@ -49,11 +49,12 @@ export class ArchiveAutoGroupJob implements JobHandler {
       scanned++
       // 每 100 条让出事件循环，避免同步扫库卡住整站 HTTP
       if (scanned % 100 === 0) {
-        await sleep(0, ctx.signal)
+        await ctx.checkpoint()
         if (ctx.signal.aborted) {
           ctx.log("warn", "aborted during bucket scan")
           break
         }
+        await sleep(0, ctx.signal)
       }
       const parsed = parseListTitle(p.title)
       const key = normalizeTitleKey(parsed.title)
@@ -127,6 +128,8 @@ export class ArchiveAutoGroupJob implements JobHandler {
       }
       // 每组 upsert 后让出，SQLite 写密集时仍可响应其它 API
       if (i % 3 === 0) {
+        await ctx.checkpoint()
+        if (ctx.signal.aborted) break
         await sleep(0, ctx.signal)
       }
       if (i % 25 === 0 || i === eligible.length) {
