@@ -9,6 +9,7 @@
     "./bookmarks": "./src/bookmarks.ts",
     "./character-highlight": "./src/character-highlight.ts",
     "./extractor": "./src/extractor/index.ts",
+    "./title-parse": "./src/title-parse.ts",
     "./upstream": "./src/upstream.ts"
   },
   "scripts": {

@@ -1,21 +1,12 @@
 import type { Store } from "../../storage/store"
 import { ExtractorError } from "../../extractor/types"
-import { parseListTitle } from "../../title-parse"
+import {
+  normalizeTitleKey,
+  parseListTitle,
+  stripTrailingChapterMarker,
+} from "../../title-parse"
 import type { JobContext, JobHandler, JobResult } from "../handler"
 import { sleep } from "../sleep"
-
-/** 与 web book-groups 同源：剥尾随章节标记后再做 key */
-function stripTrailingChapterMarker(title: string): string {
-  return title.replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
-}
-
-function normalizeTitleKey(title: string): string {
-  return stripTrailingChapterMarker(
-    title.replace(/^[《【［[]+|[》】］\]]+$/g, "")
-  )
-    .trim()
-    .toLowerCase()
-}
 
 /**
  * 从归档目录按书名自动 upsert 分组（≥ minMembers 章才建组）。

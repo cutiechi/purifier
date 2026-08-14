@@ -1,4 +1,8 @@
-import { parseListTitle } from "@/lib/title-parse"
+import {
+  normalizeTitleKey,
+  parseListTitle,
+  stripTrailingChapterMarker,
+} from "@workspace/core/title-parse"
 import type { MeListItem } from "@/components/me-item-card"
 
 export type GroupedItem<T> =
@@ -11,26 +15,6 @@ export type GroupedItem<T> =
       author: string | null
       genre: string | null
     }
-
-/**
- * 剥掉尾随的（…）章节/卷标记（与 title-parse 识别范围一致，≤24 字）。
- * parseListTitle 在「作者跟在章节号后」或单字书名（<2 字）时会把尾随的
- * 章节号留在 title 里（如「马屌少年（2）作者：小明」→「马屌少年（2）」、
- * 「马屌少年（完）作者：小明」→「马屌少年（完）」）。解析出的 title 里
- * 尾随（…）按构造都是章节/卷标记（作者已被拆出），这里一并剥掉：
- * key 侧保证同名不同章落入同一桶，组头侧保证显示干净书名。
- */
-export function stripTrailingChapterMarker(title: string): string {
-  return title.replace(/(?:[（(][^）)]{1,24}[）)]\s*)+$/, "")
-}
-
-export function normalizeTitleKey(title: string): string {
-  return stripTrailingChapterMarker(
-    title.replace(/^[「《【〖［[]+|[」》】〗］\]]+$/g, "")
-  )
-    .trim()
-    .toLowerCase()
-}
 
 /** 从一组项里取首个非空 author / genre（用于组头展示） */
 export function pickHeaderMeta<T>(
@@ -174,3 +158,5 @@ export function groupMeListItems(
   }
   return result
 }
+
+export { normalizeTitleKey, stripTrailingChapterMarker }
