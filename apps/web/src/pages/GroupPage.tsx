@@ -414,7 +414,7 @@ export default function GroupPage() {
   const pages = calcTotalPages(total, ME_PAGE_SIZE)
 
   return (
-    <PageShell>
+    <PageShell maxWidth="xwide">
       <PageHeader
         title="分组"
         description={
