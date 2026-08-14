@@ -202,14 +202,19 @@ describe("mergeSearchPages", () => {
       page("1", [["【乙】", "1"]], 2),
       page("2", [["甲", "a"], ["乙", "b"]], 2),
     ])
-    expect(r.items.map((i) => i.link.title)).toEqual(["甲", "乙", "乙"])
+    // link.title 是上游原始标题（【乙】保留原文）；排序键归一化后「【乙】」与「乙」同键平局，
+    // 稳定排序 site1 在前 → 原始标题数组为 ["甲", "【乙】", "乙"]
+    expect(r.items.map((i) => i.link.title)).toEqual(["甲", "【乙】", "乙"])
     expect(r.items[1]!.site).toBe("1") // 同标题稳定序：site1 先于 site2
     expect(r.items[2]!.site).toBe("2")
     expect(r.nextPage).toBe(2)
   })
 
   test("nextPage 取 OR：一站耗尽另一站还有 → 仍前进", () => {
-    const r = mergeSearchPages([page("1", [["A", "1"]], null), page("2", [["B", "2"]], 2)])
+    const r = mergeSearchPages([
+      page("1", [["A", "1"]], null),
+      page("2", [["B", "2"]], 2),
+    ])
     expect(r.nextPage).toBe(2)
   })
 
@@ -334,7 +339,7 @@ export * from "./merge-search"
 cd packages/core && bun test src/extractor/merge-search.test.ts
 ```
 
-期望：PASS（6 个 test 全绿）。
+期望：PASS（9 个 test 全绿：searchSortKey 3 + mergeSearchPages 5 + SITE_KIND 1）。
 
 - [ ] **Step 6: Commit**
 
