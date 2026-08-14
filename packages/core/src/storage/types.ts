@@ -101,6 +101,9 @@ export type JobStatus =
   | "interrupted"
   | "aborted"
 
+/** jobs 列表排序键（API 层白名单校验，store 对未知值回退 created_at） */
+export type JobSortKey = "created_at" | "type" | "status" | "duration"
+
 export interface Job {
   id: number
   type: string

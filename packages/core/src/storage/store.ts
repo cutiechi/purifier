@@ -22,6 +22,7 @@ import {
   Job,
   JobLog,
   JobLogLevel,
+  JobSortKey,
   JobStatus,
   ListItem,
   ListQuery,
@@ -131,6 +132,39 @@ export function computeStreaks(
     cur = dayBefore(cur)
   }
   return { currentStreak: current, longestStreak: longest }
+}
+
+/** status 聚合值 → 展开集合；单值仍占位符绑定（不拼值进 SQL） */
+const JOB_STATUS_AGGREGATES: Record<string, string[]> = {
+  active: ["running", "paused", "pending"],
+  finished: ["succeeded", "failed", "interrupted", "aborted"],
+}
+
+/** 终态白名单（批量删除；固定字面量，安全拼接） */
+const JOB_TERMINAL_SQL = "('succeeded','failed','interrupted','aborted')"
+
+/** type/status → WHERE 片段与绑定参数（listJobs/countJobs 共用） */
+function jobFilterSql(opts: { type?: string; status?: string }): {
+  where: string
+  binds: string[]
+} {
+  const conds: string[] = []
+  const binds: string[] = []
+  if (opts.type) {
+    conds.push("type = ?")
+    binds.push(opts.type)
+  }
+  if (opts.status) {
+    const agg = JOB_STATUS_AGGREGATES[opts.status]
+    if (agg) {
+      conds.push(`status IN (${agg.map(() => "?").join(",")})`)
+      binds.push(...agg)
+    } else {
+      conds.push("status = ?")
+      binds.push(opts.status)
+    }
+  }
+  return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", binds }
 }
 
 export class Store {
@@ -1411,32 +1445,38 @@ export class Store {
     status?: string
     limit: number
     offset: number
+    sort?: JobSortKey
+    order?: "asc" | "desc"
   }): Job[] {
+    const dir = opts.order === "asc" ? "ASC" : "DESC"
+    const nowMs = this.now()
+    // status 排序键：固定状态序 running 最前（键值最大，默认 desc 即固定序）
+    const statusRank =
+      "CASE status WHEN 'running' THEN 6 WHEN 'paused' THEN 5 WHEN 'pending' THEN 4 WHEN 'interrupted' THEN 3 WHEN 'failed' THEN 2 WHEN 'aborted' THEN 1 ELSE 0 END"
+    // duration：进行中按当前时间计；started_at 为 NULL 排最后（两段排序）
+    const orderSql =
+      opts.sort === "type"
+        ? `ORDER BY type ${dir}, created_at DESC, id DESC`
+        : opts.sort === "status"
+          ? `ORDER BY ${statusRank} ${dir}, created_at DESC, id DESC`
+          : opts.sort === "duration"
+            ? `ORDER BY CASE WHEN started_at IS NULL THEN 1 ELSE 0 END ASC, (COALESCE(finished_at, ${nowMs}) - started_at) ${dir}, created_at DESC, id DESC`
+            : `ORDER BY created_at ${dir}, id ${dir}`
+    const { where, binds } = jobFilterSql(opts)
     const rows = this.db
-      .query(
-        `SELECT * FROM jobs
-         WHERE (?1 IS NULL OR type = ?1)
-           AND (?2 IS NULL OR status = ?2)
-         ORDER BY created_at DESC, id DESC
-         LIMIT ?3 OFFSET ?4`
-      )
-      .all(
-        opts.type ?? null,
-        opts.status ?? null,
-        opts.limit,
-        opts.offset
-      ) as (Omit<Job, "status"> & { status: string })[]
+      .query(`SELECT * FROM jobs ${where} ${orderSql} LIMIT ? OFFSET ?`)
+      .all(...binds, opts.limit, opts.offset) as (Omit<Job, "status"> & {
+      status: string
+    })[]
     return rows.map((r) => ({ ...r, status: r.status as JobStatus }))
   }
 
   /** jobs 总数（与 listJobs 同样的 type/status 过滤） */
   countJobs(opts: { type?: string; status?: string }): number {
+    const { where, binds } = jobFilterSql(opts)
     const row = this.db
-      .query(
-        `SELECT COUNT(*) AS n FROM jobs
-         WHERE (?1 IS NULL OR type = ?1) AND (?2 IS NULL OR status = ?2)`
-      )
-      .get(opts.type ?? null, opts.status ?? null) as { n: number }
+      .query(`SELECT COUNT(*) AS n FROM jobs ${where}`)
+      .get(...binds) as { n: number }
     return Number(row.n ?? 0)
   }
 
@@ -1511,6 +1551,23 @@ export class Store {
         `DELETE FROM jobs WHERE status IN ('succeeded','failed','interrupted','aborted')`
       )
       .run()
+    return Number(row.n ?? 0)
+  }
+
+  /** 批量删除（只删终态；活动行由 API 层先检查 409；返回删除的 job 数，不计 CASCADE 日志） */
+  deleteJobsMany(ids: number[]): number {
+    if (ids.length === 0) return 0
+    const ph = ids.map(() => "?").join(",")
+    const row = this.db
+      .query(
+        `SELECT COUNT(*) AS n FROM jobs WHERE id IN (${ph}) AND status IN ${JOB_TERMINAL_SQL}`
+      )
+      .get(...ids) as { n: number }
+    this.db
+      .query(
+        `DELETE FROM jobs WHERE id IN (${ph}) AND status IN ${JOB_TERMINAL_SQL}`
+      )
+      .run(...ids)
     return Number(row.n ?? 0)
   }
 

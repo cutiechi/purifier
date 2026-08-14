@@ -13,6 +13,20 @@ function makeStore() {
   return { store, db, dir }
 }
 
+/** 造三个任务：a 论坛成功、b 书库失败、c 论坛暂停中（makeStore 的 now 每次 +1） */
+function seedThree(store: Store) {
+  const a = store.createJob("archive_posts", null)
+  store.markRunning(a.id)
+  store.markFinished(a.id, "succeeded", { pages: 1 }, null)
+  const b = store.createJob("archive_books", null)
+  store.markRunning(b.id)
+  store.markFinished(b.id, "failed", null, "boom")
+  const c = store.createJob("archive_posts", null)
+  store.markRunning(c.id)
+  store.markPaused(c.id)
+  return { a, b, c }
+}
+
 describe("jobs store", () => {
   test("createJob + getJob 往返；payload JSON 序列化", () => {
     const { store, dir } = makeStore()
@@ -190,6 +204,83 @@ describe("jobs store", () => {
     store.markPaused(job.id)
     expect(store.markStaleJobsInterrupted()).toBe(1)
     expect(store.getJob(job.id)!.status).toBe("interrupted")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("listJobs 默认 created_at desc；order=asc 反转", () => {
+    const { store, dir } = makeStore()
+    const { a, b, c } = seedThree(store)
+    const desc = store.listJobs({ limit: 10, offset: 0 })
+    expect(desc.map((j) => j.id)).toEqual([c.id, b.id, a.id])
+    const asc = store.listJobs({ limit: 10, offset: 0, order: "asc" })
+    expect(asc.map((j) => j.id)).toEqual([a.id, b.id, c.id])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("status 聚合 active/finished：list 与 count 一致", () => {
+    const { store, dir } = makeStore()
+    const { a, b, c } = seedThree(store)
+    const active = store.listJobs({ status: "active", limit: 10, offset: 0 })
+    expect(active.map((j) => j.id)).toEqual([c.id])
+    expect(store.countJobs({ status: "active" })).toBe(1)
+    const finished = store.listJobs({
+      status: "finished",
+      limit: 10,
+      offset: 0,
+    })
+    expect(finished.map((j) => j.id)).toEqual([b.id, a.id])
+    expect(store.countJobs({ status: "finished" })).toBe(2)
+    expect(
+      store.countJobs({ type: "archive_posts", status: "finished" })
+    ).toBe(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("sort=duration：进行中按 now 计，同耗时 tie-break created_at desc，NULL 排最后", () => {
+    const { store, dir } = makeStore()
+    const { a, b, c } = seedThree(store)
+    const d = store.createJob("archive_posts", null) // pending：started_at NULL
+    const rows = store.listJobs({ limit: 10, offset: 0, sort: "duration" })
+    // c 进行中（now - started_at 最大）；a/b 终态同为 1ms → created_at desc（b 后建）在前；d NULL 末尾
+    expect(rows.map((j) => j.id)).toEqual([c.id, b.id, a.id, d.id])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("sort=type（asc）与 sort=status 生效", () => {
+    const { store, dir } = makeStore()
+    const { a, b, c } = seedThree(store)
+    const byType = store.listJobs({
+      limit: 10,
+      offset: 0,
+      sort: "type",
+      order: "asc",
+    })
+    expect(byType.map((j) => j.type)).toEqual([
+      "archive_books",
+      "archive_posts",
+      "archive_posts",
+    ])
+    // status 序：running(0) > paused(1) > pending(2) > interrupted(3) > failed(4) > aborted(5) > succeeded(6)
+    const byStatus = store.listJobs({ limit: 10, offset: 0, sort: "status" })
+    expect(byStatus.map((j) => j.id)).toEqual([c.id, b.id, a.id])
+    expect(byStatus.map((j) => j.status)).toEqual([
+      "paused",
+      "failed",
+      "succeeded",
+    ])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("deleteJobsMany 只删终态，removed 不计 CASCADE 日志", () => {
+    const { store, dir } = makeStore()
+    const { a, b, c } = seedThree(store)
+    store.appendJobLog(a.id, "info", "log line") // FK CASCADE 行不计入 removed
+    expect(store.deleteJobsMany([])).toBe(0)
+    expect(store.deleteJobsMany([a.id, b.id])).toBe(2)
+    expect(store.getJob(a.id)).toBeNull()
+    expect(store.listJobLogs(a.id, { limit: 10, offset: 0 })).toEqual([])
+    expect(store.deleteJobsMany([c.id])).toBe(0) // paused 不删
+    expect(store.getJob(c.id)!.status).toBe("paused")
     rmSync(dir, { recursive: true, force: true })
   })
 })
