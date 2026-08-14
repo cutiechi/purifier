@@ -13,9 +13,7 @@ import { PageShell, Pager } from "@/components/page-shell"
 import { useScrollTop } from "@/components/form-controls"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { JobRow } from "@/components/job-row"
-import { useSite } from "@/hooks/use-site"
 import {
   ME_PAGE_SIZE,
   totalPages as calcTotalPages,
@@ -36,20 +34,20 @@ import {
   type ArchiveStatus,
   type Job,
 } from "@/lib/jobs"
-import { api, parsePage, routes, siteUrl } from "@/lib/routes"
+import { api, parsePage, routes, SITES, type SiteId } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
 
 export default function JobsPage() {
-  const site = useSite()
   const confirm = useConfirm()
-  const isBooks = site === "2"
-  const archiveJobType = isBooks ? "archive_books" : "archive_posts"
   const [searchParams, setSearchParams] = useSearchParams()
   const page = parsePage(searchParams)
   const [jobs, setJobs] = useState<Job[]>([])
   const [nextPage, setNextPage] = useState<number | undefined>(undefined)
   const [total, setTotal] = useState(0)
-  const [status, setStatus] = useState<ArchiveStatus | null>(null)
+  const [status, setStatus] = useState<Record<SiteId, ArchiveStatus | null>>({
+    "1": null,
+    "2": null,
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -76,14 +74,17 @@ export default function JobsPage() {
       if (!opts?.silent) setLoading(true)
       setError("")
       try {
-        const [data, st] = await Promise.all([
+        const [data, statuses] = await Promise.all([
           listJobs({ page }),
-          getArchiveStatus(site),
+          Promise.all([
+            getArchiveStatus("1"),
+            getArchiveStatus("2"),
+          ]),
         ])
         setJobs(data.items)
         setNextPage(data.nextPage)
         setTotal(data.total)
-        if (st) setStatus(st)
+        setStatus({ "1": statuses[0], "2": statuses[1] })
         // 返回「本次结果是否还有 running」，供轮询决定是否继续
         return data.items.some((j) => j.status === "running")
       } catch (e) {
@@ -93,7 +94,7 @@ export default function JobsPage() {
         if (!opts?.silent) setLoading(false)
       }
     },
-    [site, page]
+    [page]
   )
 
   useEffect(() => {
@@ -183,12 +184,15 @@ export default function JobsPage() {
     }
   }
 
-  const onStart = async (mode: ArchiveMode) => {
+  const onStart = async (siteId: SiteId, mode: ArchiveMode) => {
     setBusy(true)
     setError("")
     try {
       requestNotify()
-      await startJob(archiveJobType, { site, mode })
+      await startJob(
+        siteId === "2" ? "archive_books" : "archive_posts",
+        { site: siteId, mode }
+      )
       if (page !== 1) update({ page: 1 })
       else await reload({ silent: true })
     } catch (e) {
@@ -203,7 +207,7 @@ export default function JobsPage() {
     setError("")
     try {
       requestNotify()
-      await startJob("archive_auto_group", { site, minMembers: 2 })
+      await startJob("archive_auto_group", { site: "1", minMembers: 2 })
       if (page !== 1) update({ page: 1 })
       else await reload({ silent: true })
     } catch (e) {
@@ -281,38 +285,44 @@ export default function JobsPage() {
   const hasRunning = !!runningJob
   const lastSuccess = jobs.find((j) => j.status === "succeeded")
   const startDisabled = busy || hasRunning
-  const canResume =
-    !!status?.cursor?.next_mtid &&
-    (status.cursor.status === "interrupted" ||
-      status.cursor.status === "running")
+  const canResume = (sid: SiteId) => {
+    const c = status[sid]?.cursor
+    return (
+      !!c?.next_mtid &&
+      (c.status === "interrupted" || c.status === "running")
+    )
+  }
   // running cursor during another machine? local only — allow resume when interrupted/done-with-cursor
-  const resumeEnabled =
+  const resumeEnabled = (sid: SiteId) =>
     !startDisabled &&
-    !!status?.cursor?.next_mtid &&
-    status.cursor.status !== "done"
+    !!status[sid]?.cursor?.next_mtid &&
+    status[sid]?.cursor?.status !== "done"
   const startHint = hasRunning
     ? "已有任务在运行"
     : busy
       ? "启动中…"
       : undefined
 
-  const cursorHint = status
-    ? [
-        `库内 ${status.total} 条`,
-        status.maxTid && !isBooks ? `最新 tid ${status.maxTid}` : null,
-        status.cursor
-          ? `游标 ${status.cursor.status}${
-              status.cursor.next_mtid
-                ? ` @ ${status.cursor.next_mtid}`
-                : status.cursor.status === "done"
+  const cursorHint = (["1", "2"] as SiteId[])
+    .map((sid) => {
+      const s = status[sid]
+      if (!s) return null
+      const parts = [
+        `${SITES[sid].label} · 库内 ${s.total} 条`,
+        sid === "1" && s.maxTid ? `最新 tid ${s.maxTid}` : null,
+        s.cursor
+          ? `游标 ${s.cursor.status}${
+              s.cursor.next_mtid
+                ? ` @ ${s.cursor.next_mtid}`
+                : s.cursor.status === "done"
                   ? "（已完成）"
                   : ""
-            } · 已记 ${status.cursor.pages} 页`
+            } · 已记 ${s.cursor.pages} 页`
           : "尚无续跑游标",
       ]
-        .filter(Boolean)
-        .join(" · ")
-    : null
+      return parts.filter(Boolean).join(" · ")
+    })
+    .filter((h): h is string => h !== null)
 
   // 任务页按站可用：论坛 archive_posts、书库 archive_books
 
@@ -320,7 +330,7 @@ export default function JobsPage() {
     <PageShell maxWidth="xwide">
       <PageHeader
         title="任务"
-        description={isBooks ? "同步书库目录与备份" : "同步目录、自动分组与备份"}
+        description="同步目录（论坛与书库）、自动分组与备份"
         action={
           <div className="flex flex-wrap gap-2">
             <button
@@ -338,7 +348,7 @@ export default function JobsPage() {
               <Trash2 size={14} /> 清空缓存
             </button>
             <Link
-              to={siteUrl(routes.archive, site)}
+              to={routes.archive}
               className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               返回目录
@@ -346,7 +356,6 @@ export default function JobsPage() {
           </div>
         }
       />
-      <PageSiteTabs sites={["1", "2"]} />
 
       {toast && (
         <div
@@ -374,7 +383,7 @@ export default function JobsPage() {
               to={
                 runningJob.type === "archive_auto_group"
                   ? routes.groups
-                  : siteUrl(routes.archive, site)
+                  : routes.archive
               }
               className="underline underline-offset-2"
             >
@@ -393,7 +402,7 @@ export default function JobsPage() {
             {formatJobProgress(lastSuccess.result)}
             {" · "}
             <Link
-              to={siteUrl(routes.archive, site)}
+              to={routes.archive}
               className="underline underline-offset-2"
             >
               查看归档
@@ -402,58 +411,81 @@ export default function JobsPage() {
         </div>
       )}
 
-      {cursorHint && (
-        <p className="mb-3 text-xs text-muted-foreground tabular-nums">
-          {cursorHint}
-        </p>
+      {cursorHint.length > 0 && (
+        <div className="mb-3 text-xs text-muted-foreground tabular-nums">
+          {cursorHint.map((h) => (
+            <p key={h}>{h}</p>
+          ))}
+        </div>
       )}
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {(["1", "2"] as SiteId[]).map((sid) => {
+            const isBook = sid === "2"
+            const st = status[sid]
+            return (
+              <div
+                key={sid}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {SITES[sid].label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void onStart(sid, "full")}
+                  disabled={startDisabled}
+                  title={
+                    startHint ??
+                    (isBook
+                      ? "从第 1 页（最新收录）往后扫"
+                      : "从最新帖往回全量扫描")
+                  }
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <Play size={14} /> 全量归档
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onStart(sid, "resume")}
+                  disabled={!resumeEnabled(sid)}
+                  title={
+                    resumeEnabled(sid)
+                      ? isBook
+                        ? `从第 ${st?.cursor?.next_mtid} 页继续`
+                        : `从游标 ${st?.cursor?.next_mtid} 继续`
+                      : "没有可续跑的游标（先跑全量或中断后再试）"
+                  }
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <SkipForward size={14} /> 继续归档
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onStart(sid, "incremental")}
+                  disabled={startDisabled}
+                  title={
+                    isBook
+                      ? "只补比库内更新收录的书"
+                      : "只扫比库内最新 tid 还新的帖子"
+                  }
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <RefreshCw size={14} /> 增量更新
+                </button>
+              </div>
+            )
+          })}
           <button
             type="button"
-            onClick={() => void onStart("full")}
+            onClick={() => void onAutoGroup()}
             disabled={startDisabled}
-            title={startHint ?? (isBooks ? "从第 1 页（最新收录）往后扫" : "从最新帖往回全量扫描")}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Play size={14} /> 全量归档
-          </button>
-          <button
-            type="button"
-            onClick={() => void onStart("resume")}
-            disabled={!resumeEnabled}
-            title={
-              resumeEnabled
-                ? isBooks
-                  ? `从第 ${status?.cursor?.next_mtid} 页继续`
-                  : `从游标 ${status?.cursor?.next_mtid} 继续`
-                : "没有可续跑的游标（先跑全量或中断后再试）"
-            }
+            title="按书名把归档里多章帖子自动写入分组（≥2 章）"
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
           >
-            <SkipForward size={14} /> 继续归档
+            <FolderTree size={14} /> 归档自动分组
           </button>
-          <button
-            type="button"
-            onClick={() => void onStart("incremental")}
-            disabled={startDisabled}
-            title={isBooks ? "只补比库内更新收录的书" : "只扫比库内最新 tid 还新的帖子"}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-          >
-            <RefreshCw size={14} /> 增量更新
-          </button>
-          {!isBooks && (
-            <button
-              type="button"
-              onClick={() => void onAutoGroup()}
-              disabled={startDisabled}
-              title="按书名把归档里多章帖子自动写入分组（≥2 章）"
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-            >
-              <FolderTree size={14} /> 归档自动分组
-            </button>
-          )}
           <button
             type="button"
             onClick={onClear}
@@ -483,9 +515,9 @@ export default function JobsPage() {
       {startHint && hasRunning && (
         <p className="mb-4 text-xs text-muted-foreground">{startHint}</p>
       )}
-      {canResume && !hasRunning && (
+      {(["1", "2"] as SiteId[]).some(canResume) && !hasRunning && (
         <p className="mb-4 text-xs text-muted-foreground">
-          检测到未完成游标，可点「继续归档」从中断处接着扫，无需从头开始。
+          检测到未完成游标，可点对应站的「继续归档」从中断处接着扫，无需从头开始。
         </p>
       )}
 
@@ -495,29 +527,17 @@ export default function JobsPage() {
         empty={jobs.length === 0}
         onRetry={() => void reload()}
         emptyText={
-          isBooks ? (
-            <>
-              暂无任务。可用「全量归档」从第 1 页（最新收录）往后扫，「增量更新」只补新书；中断后用「继续归档」。完成后可在
-              <Link
-                to={siteUrl(routes.archive, site)}
-                className="text-foreground underline underline-offset-2"
-              >
-                归档
-              </Link>
-              浏览，或点「导出备份」下载本地数据。
-            </>
-          ) : (
-            <>
-              暂无任务。可用「全量归档」扫全站，「增量更新」只补新帖；中断后用「继续归档」。完成后可在
-              <Link
-                to={siteUrl(routes.archive, site)}
-                className="text-foreground underline underline-offset-2"
-              >
-                归档
-              </Link>
-              浏览，或点「导出备份」下载本地数据。
-            </>
-          )
+          <>
+            暂无任务。可用「全量归档」扫全站（论坛按最新帖往回、书库按最新收录），
+            「增量更新」只补新内容；中断后用「继续归档」。完成后可在
+            <Link
+              to={routes.archive}
+              className="text-foreground underline underline-offset-2"
+            >
+              归档
+            </Link>
+            浏览，或点「导出备份」下载本地数据。
+          </>
         }
       >
         <ul className="space-y-2.5">
