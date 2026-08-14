@@ -229,7 +229,7 @@ export const NAV_ITEMS = [
   },
   {
     href: routes.archive,
-    label: "目录",
+    label: "全部",
     match: (p: string) =>
       p === routes.archive || p === routes.groups,
   },

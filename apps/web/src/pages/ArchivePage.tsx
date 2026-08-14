@@ -3,6 +3,7 @@ import { type ReactNode } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
+import { SectionTabs } from "@/components/section-tabs"
 import {
   FilterTabs,
   ListMeta,
@@ -15,6 +16,7 @@ import { PostList } from "@/components/post-card"
 import { SourceBadge } from "@/components/source-badge"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { groupBooks, type GroupedItem } from "@/lib/book-groups"
+import { useAllTabs } from "@/lib/hub-tabs"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
@@ -83,6 +85,7 @@ export default function ArchivePage() {
   const rawSort = searchParams.get("sort")
   // UI 高亮用论坛侧排序键（书库侧 tid 自动回落 archived_at）
   const sort = parseSort(rawSort, "1")
+  const sectionTabs = useAllTabs(routes.archive)
   const q = parseQuery(searchParams)
   const page = parsePage(searchParams)
 
@@ -298,6 +301,7 @@ export default function ArchivePage() {
           </Link>
         }
       />
+      <SectionTabs items={sectionTabs} />
       <SearchForm
         value={draftQ}
         onChange={setDraftQ}
