@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { ExtractorError } from "../extractor"
 import { openDatabase } from "../storage/db"
 import { Store } from "../storage/store"
 import { sleep } from "./sleep"
@@ -36,6 +37,21 @@ class FailingHandler implements JobHandler {
   type = "failing"
   async run(): Promise<JobResult> {
     throw new Error("boom")
+  }
+}
+
+class PausableHandler implements JobHandler {
+  type = "pausable"
+  ticks = 0
+  async run(ctx: JobContext): Promise<JobResult> {
+    for (let i = 0; i < 4; i++) {
+      await ctx.checkpoint()
+      if (ctx.signal.aborted) break
+      await sleep(10)
+      this.ticks++
+      ctx.reportProgress({ ticks: this.ticks })
+    }
+    return { ticks: this.ticks }
   }
 }
 
@@ -162,6 +178,88 @@ describe("JobRunner", () => {
   test("未知 type → 抛错", async () => {
     const { runner, dir } = makeRunner()
     await expect(runner.start("unknown")).rejects.toThrow(/unknown job type/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("pause → resume → succeeded；暂停期间进度不动", async () => {
+    const { runner, store, dir } = makeRunner()
+    runner.register(new PausableHandler())
+    const job = await runner.start("pausable")
+    await sleep(12)
+    expect(runner.pause(job.id)).toBe(true)
+    expect(store.getJob(job.id)!.status).toBe("paused")
+    expect(runner.pause(job.id)).toBe(false)
+    const ticksAtPause = (
+      JSON.parse(store.getJob(job.id)!.result ?? "{}") as { ticks?: number }
+    ).ticks
+    await sleep(40)
+    const ticksLater = (
+      JSON.parse(store.getJob(job.id)!.result ?? "{}") as { ticks?: number }
+    ).ticks
+    expect(ticksLater).toBe(ticksAtPause)
+    expect(runner.resume(job.id)).toBe(true)
+    expect(store.getJob(job.id)!.status).toBe("running")
+    await sleep(80)
+    expect(store.getJob(job.id)!.status).toBe("succeeded")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("pause → stop → aborted（checkpoint 被 abort 唤醒且不抛）", async () => {
+    const { runner, store, dir } = makeRunner()
+    runner.register(new PausableHandler())
+    const job = await runner.start("pausable")
+    await sleep(12)
+    expect(runner.pause(job.id)).toBe(true)
+    expect(runner.stop(job.id)).toBe(true)
+    await sleep(50)
+    const done = store.getJob(job.id)!
+    expect(done.status).toBe("aborted")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("pause → resume → 再 pause → stop → aborted（二次挂起仍可被唤醒）", async () => {
+    const { runner, store, dir } = makeRunner()
+    runner.register(new PausableHandler())
+    const job = await runner.start("pausable")
+    await sleep(12)
+    expect(runner.pause(job.id)).toBe(true)
+    expect(runner.resume(job.id)).toBe(true)
+    await sleep(10)
+    expect(runner.pause(job.id)).toBe(true)
+    await sleep(20) // 已挂起在第二个 checkpoint
+    expect(runner.stop(job.id)).toBe(true)
+    await sleep(50)
+    expect(store.getJob(job.id)!.status).toBe("aborted")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("暂停中同类型 start → 409", async () => {
+    const { runner, store, dir } = makeRunner()
+    runner.register(new PausableHandler())
+    const job = await runner.start("pausable")
+    await sleep(12)
+    expect(runner.pause(job.id)).toBe(true)
+    try {
+      await runner.start("pausable")
+      expect.unreachable()
+    } catch (e) {
+      expect((e as ExtractorError).statusCode).toBe(409)
+    }
+    // 清理：停掉暂停中的 job 并等收尾再删目录，避免删库时 handler 仍在写
+    runner.stop(job.id)
+    await runner.waitForIdle(2000)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("暂停中 abortAll → aborted，waitForIdle 不超时", async () => {
+    const { runner, store, dir } = makeRunner()
+    runner.register(new PausableHandler())
+    const job = await runner.start("pausable")
+    await sleep(12)
+    runner.pause(job.id)
+    runner.abortAll()
+    expect(await runner.waitForIdle(5000)).toBe(true)
+    expect(store.getJob(job.id)!.status).toBe("aborted")
     rmSync(dir, { recursive: true, force: true })
   })
 })

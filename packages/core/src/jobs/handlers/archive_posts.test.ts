@@ -39,6 +39,7 @@ function makeCtx(payload: Record<string, unknown> = {}): {
     jobId: 1,
     log: (level, message) => logs.push({ level, message }),
     reportProgress: (p) => progress.push(p),
+    checkpoint: async () => {},
     signal: controller.signal,
     payload,
   }

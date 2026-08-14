@@ -5,6 +5,11 @@ export interface JobContext {
   reportProgress(progress: JobResult): void
   signal: AbortSignal
   payload: Record<string, unknown>
+  /**
+   * 暂停检查点：未暂停直通；暂停则挂起直到 resume 或 abort。
+   * abort 时 resolve 不抛（与 sleep 协作取消一致），循环随后看 signal.aborted 退出。
+   */
+  checkpoint(): Promise<void>
 }
 
 export interface JobResult {

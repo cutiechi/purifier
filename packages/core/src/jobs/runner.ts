@@ -4,8 +4,14 @@ import type { Job } from "../storage/types"
 import type { JobHandler, JobContext, JobResult } from "./handler"
 import { sleep } from "./sleep"
 
+interface RunningHandle {
+  controller: AbortController
+  paused: boolean
+  wake: (() => void) | null
+}
+
 export class JobRunner {
-  private running = new Map<number, AbortController>()
+  private running = new Map<number, RunningHandle>()
   /** 同进程内运行中 type 集合：与 DB 检查互为补充，堵住 TOCTOU 双启动 */
   private runningTypes = new Set<string>()
 
@@ -36,7 +42,7 @@ export class JobRunner {
     }
     this.runningTypes.add(type)
     const controller = new AbortController()
-    this.running.set(job.id, controller)
+    this.running.set(job.id, { controller, paused: false, wake: null })
     // 推迟到下一个 macrotask 再跑：
     // 1) start() 的 HTTP 响应能先写出
     // 2) 全同步 handler（如 auto_group）不会在 start 调用栈里堵死事件循环
@@ -54,16 +60,39 @@ export class JobRunner {
 
   /** 触发 abort；返回是否命中在跑的 job。真正改 status 由 runJob finally 处理 */
   stop(jobId: number): boolean {
-    const controller = this.running.get(jobId)
-    if (!controller) return false
-    controller.abort()
+    const h = this.running.get(jobId)
+    if (!h) return false
+    h.controller.abort()
+    h.wake?.() // 唤醒可能挂起的 checkpoint（resolve 不抛）
+    return true
+  }
+
+  /** running → 挂起：写 DB 状态，handler 在下一个 checkpoint 处挂起 */
+  pause(jobId: number): boolean {
+    const h = this.running.get(jobId)
+    if (!h || h.paused) return false
+    if (!this.store.markPaused(jobId)) return false
+    h.paused = true
+    return true
+  }
+
+  /** 恢复挂起任务：写回 running 并唤醒 checkpoint */
+  resume(jobId: number): boolean {
+    const h = this.running.get(jobId)
+    if (!h || !h.paused) return false
+    if (!this.store.markResumed(jobId)) return false
+    h.paused = false
+    const wake = h.wake
+    h.wake = null
+    wake?.()
     return true
   }
 
   /** 进程关闭：abort 全部在跑任务，让 runJob finally 尽快收尾 */
   abortAll(): void {
-    for (const controller of this.running.values()) {
-      controller.abort()
+    for (const h of this.running.values()) {
+      h.controller.abort()
+      h.wake?.()
     }
   }
 
@@ -97,6 +126,17 @@ export class JobRunner {
       signal,
       log: (level, message) => this.store.appendJobLog(jobId, level, message),
       reportProgress: (progress) => this.store.setJobResult(jobId, progress),
+      checkpoint: () =>
+        new Promise<void>((resolve) => {
+          const h = this.running.get(jobId)
+          // 未暂停直通；signal 已 aborted（stop 落在挂起之前，如 handler 还在当前页里）也直通，
+          // 循环随后的 signal.aborted 检查会退出
+          if (!h || !h.paused || signal.aborted) return resolve()
+          h.wake = () => {
+            h.wake = null
+            resolve()
+          }
+        }),
     }
     let status: "succeeded" | "failed" | "aborted" = "succeeded"
     let result: JobResult | null = null
