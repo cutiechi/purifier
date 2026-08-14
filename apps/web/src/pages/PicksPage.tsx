@@ -38,7 +38,7 @@ export default function PicksPage() {
             : "在线榜单与栏目"
         }
       />
-      <PageSiteTabs />
+      <PageSiteTabs sites={["1"]} hideWhenSingle />
       <SectionTabs items={sectionTabs} />
 
       <AsyncBody

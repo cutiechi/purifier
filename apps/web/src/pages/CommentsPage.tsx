@@ -59,7 +59,7 @@ export default function CommentsPage() {
             : "在线榜单与栏目"
         }
       />
-      <PageSiteTabs />
+      <PageSiteTabs sites={["1"]} hideWhenSingle />
       <SectionTabs items={sectionTabs} />
 
       <AsyncBody
