@@ -64,6 +64,12 @@ export function SiteHeader({
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:font-medium"
+      >
+        跳到正文
+      </a>
       <div
         className={cn(
           "mx-auto flex h-14 items-center gap-1.5 px-2.5 sm:gap-2 sm:px-5",
