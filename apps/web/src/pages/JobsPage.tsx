@@ -98,63 +98,88 @@ export default function JobsPage() {
     [page, type, status, sort, order]
   )
 
-  /** 进行中条 + 统计卡数据（与表格筛选无关，独立请求） */
+  /** 进行中条 + 统计卡数据（与表格筛选无关，独立请求）；单项失败降级该卡，不拖垮整页 */
   const loadSide = useCallback(async () => {
-    const [activeRes, s1, s2, groupsRes, ...lasts] = await Promise.all([
-      listJobs({ status: "active", limit: 10, sort: "created_at", order: "desc" }),
-      getArchiveStatus("1"),
-      getArchiveStatus("2"),
-      fetch(`${api.meGroups}?limit=1`).then((r) => r.json() as Promise<{ total?: number }>),
-      ...JOB_TYPES.map((t) =>
-        listJobs({ type: t, status: "finished", limit: 1, sort: "created_at", order: "desc" })
-      ),
-    ])
-    setActive(activeRes.items)
-    setStatuses({ "1": s1, "2": s2 })
-    setGroupTotal(typeof groupsRes.total === "number" ? groupsRes.total : null)
-    const byType: Record<string, Job | undefined> = {}
-    lasts.forEach((res, i) => {
-      byType[JOB_TYPES[i]] = res.items[0]
-    })
-    setLastByType(byType)
+    try {
+      const [activeRes, s1, s2, groupsRes, ...lasts] = await Promise.allSettled([
+        listJobs({ status: "active", limit: 10, sort: "created_at", order: "desc" }),
+        getArchiveStatus("1"),
+        getArchiveStatus("2"),
+        fetch(`${api.meGroups}?limit=1`).then(async (r) => {
+          if (!r.ok) return { total: undefined }
+          return (await r.json()) as { total?: number }
+        }),
+        ...JOB_TYPES.map((t) =>
+          listJobs({ type: t, status: "finished", limit: 1, sort: "created_at", order: "desc" })
+        ),
+      ])
 
-    // 结束通知：active 集合从非空变空（running→paused 不算结束）
-    const prev = prevActiveRef.current
-    const now = new Set(activeRes.items.map((j) => j.id))
-    if (prev.size > 0 && now.size === 0) {
-      for (const id of prev) {
-        try {
-          const job = await getJob(id)
-          if (
-            job &&
-            job.status !== "running" &&
-            job.status !== "paused" &&
-            job.status !== "pending"
-          ) {
-            const title =
-              job.status === "succeeded"
-                ? "任务已完成"
-                : job.status === "aborted"
-                  ? "任务已停止"
-                  : job.status === "failed"
-                    ? "任务失败"
-                    : "任务已结束"
-            const detail = formatJobProgress(job.result) || job.error || ""
-            setToast(detail ? `${title}：${detail}` : title)
-            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-              try {
-                new Notification(title, { body: detail || undefined })
-              } catch {
-                // ignore
+      // 进行中条：列表失败则保留上轮数据，且不推进 prevActiveRef（结束通知不误判/不漏判）
+      if (activeRes.status === "fulfilled") {
+        setActive(activeRes.value.items)
+        const prev = prevActiveRef.current
+        const now = new Set(activeRes.value.items.map((j) => j.id))
+        if (prev.size > 0 && now.size === 0) {
+          for (const id of prev) {
+            try {
+              const job = await getJob(id)
+              if (
+                job &&
+                job.status !== "running" &&
+                job.status !== "paused" &&
+                job.status !== "pending"
+              ) {
+                const title =
+                  job.status === "succeeded"
+                    ? "任务已完成"
+                    : job.status === "aborted"
+                      ? "任务已停止"
+                      : job.status === "failed"
+                        ? "任务失败"
+                        : "任务已结束"
+                const detail = formatJobProgress(job.result) || job.error || ""
+                setToast(detail ? `${title}：${detail}` : title)
+                if (
+                  typeof Notification !== "undefined" &&
+                  Notification.permission === "granted"
+                ) {
+                  try {
+                    new Notification(title, { body: detail || undefined })
+                  } catch {
+                    // ignore
+                  }
+                }
               }
+            } catch {
+              // 任务可能已被删除
             }
           }
-        } catch {
-          // 任务可能已被删除
         }
+        prevActiveRef.current = now
       }
+
+      // 统计卡：单项失败保留上一轮展示
+      if (s1.status === "fulfilled") {
+        setStatuses((prev) => ({ ...prev, "1": s1.value }))
+      }
+      if (s2.status === "fulfilled") {
+        setStatuses((prev) => ({ ...prev, "2": s2.value }))
+      }
+      if (groupsRes.status === "fulfilled" && typeof groupsRes.value.total === "number") {
+        setGroupTotal(groupsRes.value.total)
+      }
+      const byType: Record<string, Job | undefined> = {}
+      let anyLast = false
+      lasts.forEach((res, i) => {
+        if (res.status === "fulfilled") {
+          byType[JOB_TYPES[i]] = res.value.items[0]
+          anyLast = true
+        }
+      })
+      if (anyLast) setLastByType((prev) => ({ ...prev, ...byType }))
+    } catch {
+      // 防御：轮询每 1.5s 调用本函数，任何意外错误都不产生未处理 rejection
     }
-    prevActiveRef.current = now
   }, [])
 
   useEffect(() => {
