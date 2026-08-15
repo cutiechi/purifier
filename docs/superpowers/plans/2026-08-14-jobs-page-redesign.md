@@ -138,7 +138,7 @@ git commit -m "feat(core): jobs paused status with markPaused/markResumed"
 
 **Files:**
 - Modify: `packages/core/src/storage/types.ts`（新增 `JobSortKey`）
-- Modify: `packages/core/src/storage/store.ts`（`listJobs`/`countJobs`/`deleteJobsMany`，删 `clearFinishedJobs`）
+- Modify: `packages/core/src/storage/store.ts`（`listJobs`/`countJobs`/`deleteJobsMany`；`clearFinishedJobs` 本任务**保留**，Task 5 与其最后调用方 `handleJobsClear` 一起删）
 - Test: `packages/core/src/storage/jobs.test.ts`
 
 **Interfaces:**
