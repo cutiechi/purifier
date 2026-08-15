@@ -1,173 +1,189 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
-import {
-  Download,
-  FolderTree,
-  Play,
-  RefreshCw,
-  SkipForward,
-  Trash2,
-} from "lucide-react"
+import { useSearchParams } from "react-router-dom"
+import { Download, Plus, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell, Pager } from "@/components/page-shell"
 import { useScrollTop } from "@/components/form-controls"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
-import { JobRow } from "@/components/job-row"
+import { JobStatsCards } from "@/components/job-stats-cards"
+import { JobsActiveStrip } from "@/components/jobs-active-strip"
+import { JobsTable } from "@/components/jobs-table"
+import { CreateJobModal } from "@/components/create-job-modal"
+import { ME_PAGE_SIZE, totalPages as calcTotalPages } from "@/lib/list-meta"
 import {
-  ME_PAGE_SIZE,
-  totalPages as calcTotalPages,
-} from "@/lib/list-meta"
-import {
-  clearFinishedJobs,
-  deleteJob,
   downloadBackup,
   formatJobProgress,
   getArchiveStatus,
-  getPollMs,
+  getJob,
   listJobs,
-  setPollMs,
-  startJob,
-  stopJob,
-  POLL_OPTIONS,
-  type ArchiveMode,
   type ArchiveStatus,
   type Job,
+  type JobSortKey,
 } from "@/lib/jobs"
-import { api, parsePage, routes, SITES, type SiteId } from "@/lib/routes"
-import { cn } from "@workspace/ui/lib/utils"
+import { api, parsePage, type SiteId } from "@/lib/routes"
+
+const POLL_MS = 1500
+const JOB_TYPES = ["archive_posts", "archive_books", "archive_auto_group"] as const
 
 export default function JobsPage() {
   const confirm = useConfirm()
   const [searchParams, setSearchParams] = useSearchParams()
   const page = parsePage(searchParams)
+  const type = searchParams.get("type") ?? ""
+  const status = searchParams.get("status") ?? ""
+  const sort = (searchParams.get("sort") ?? "created_at") as JobSortKey
+  const order = searchParams.get("order") === "asc" ? "asc" : "desc"
+
   const [jobs, setJobs] = useState<Job[]>([])
   const [nextPage, setNextPage] = useState<number | undefined>(undefined)
   const [total, setTotal] = useState(0)
-  const [status, setStatus] = useState<Record<SiteId, ArchiveStatus | null>>({
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [selected, setSelected] = useState<number[]>([])
+
+  const [active, setActive] = useState<Job[]>([])
+  const [statuses, setStatuses] = useState<Record<SiteId, ArchiveStatus | null>>({
     "1": null,
     "2": null,
   })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [pollMs, setPollMsState] = useState<number>(1500)
+  const [groupTotal, setGroupTotal] = useState<number | null>(null)
+  const [lastByType, setLastByType] = useState<Record<string, Job | undefined>>({})
+  const [modalOpen, setModalOpen] = useState(false)
   const [toast, setToast] = useState("")
-  const prevRunningRef = useRef(false)
+  const prevActiveRef = useRef<Set<number>>(new Set())
 
-  /** 翻页 / 改页：写 page searchParam（page=1 删除参数，保持 URL 干净） */
-  function update(next: { page?: number }) {
+  /** 筛选/排序/翻页写 URL；改筛选或排序时 page 重置 */
+  function update(next: {
+    page?: number
+    type?: string
+    status?: string
+    sort?: string
+    order?: string
+  }) {
     const params = new URLSearchParams(searchParams)
-    if (next.page != null) {
-      if (next.page > 1) params.set("page", String(next.page))
-      else params.delete("page")
+    let resetPage = false
+    for (const [k, v] of Object.entries(next)) {
+      if (v == null || v === "") params.delete(k)
+      else params.set(k, String(v))
+      if (k !== "page") resetPage = true
     }
+    if (resetPage) params.delete("page")
+    else if (next.page === 1) params.delete("page")
     setSearchParams(params, { replace: true })
   }
 
-  useEffect(() => {
-    setPollMsState(getPollMs())
-  }, [])
-
-  const reload = useCallback(
-    async (opts?: { silent?: boolean }): Promise<boolean> => {
-      if (!opts?.silent) setLoading(true)
+  const loadTable = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
       setError("")
       try {
-        const [data, statuses] = await Promise.all([
-          listJobs({ page }),
-          Promise.all([
-            getArchiveStatus("1"),
-            getArchiveStatus("2"),
-          ]),
-        ])
+        const data = await listJobs({
+          page,
+          type: type || undefined,
+          status: status || undefined,
+          sort,
+          order,
+        })
         setJobs(data.items)
         setNextPage(data.nextPage)
         setTotal(data.total)
-        setStatus({ "1": statuses[0], "2": statuses[1] })
-        // 返回「本次结果是否还有 running」，供轮询决定是否继续
-        return data.items.some((j) => j.status === "running")
+        setSelected((prev) => prev.filter((id) => data.items.some((j) => j.id === id)))
       } catch (e) {
         setError(e instanceof Error ? e.message : "未知错误")
-        return false
       } finally {
-        if (!opts?.silent) setLoading(false)
+        if (!silent) setLoading(false)
       }
     },
-    [page]
+    [page, type, status, sort, order]
   )
 
-  useEffect(() => {
-    void reload()
-  }, [reload])
+  /** 进行中条 + 统计卡数据（与表格筛选无关，独立请求） */
+  const loadSide = useCallback(async () => {
+    const [activeRes, s1, s2, groupsRes, ...lasts] = await Promise.all([
+      listJobs({ status: "active", limit: 10, sort: "created_at", order: "desc" }),
+      getArchiveStatus("1"),
+      getArchiveStatus("2"),
+      fetch(`${api.meGroups}?limit=1`).then((r) => r.json() as Promise<{ total?: number }>),
+      ...JOB_TYPES.map((t) =>
+        listJobs({ type: t, status: "finished", limit: 1, sort: "created_at", order: "desc" })
+      ),
+    ])
+    setActive(activeRes.items)
+    setStatuses({ "1": s1, "2": s2 })
+    setGroupTotal(typeof groupsRes.total === "number" ? groupsRes.total : null)
+    const byType: Record<string, Job | undefined> = {}
+    lasts.forEach((res, i) => {
+      byType[JOB_TYPES[i]] = res.items[0]
+    })
+    setLastByType(byType)
 
-  // 删除/清空后页码越界 → 回退到最后一页
+    // 结束通知：active 集合从非空变空（running→paused 不算结束）
+    const prev = prevActiveRef.current
+    const now = new Set(activeRes.items.map((j) => j.id))
+    if (prev.size > 0 && now.size === 0) {
+      for (const id of prev) {
+        try {
+          const job = await getJob(id)
+          if (
+            job &&
+            job.status !== "running" &&
+            job.status !== "paused" &&
+            job.status !== "pending"
+          ) {
+            const title =
+              job.status === "succeeded"
+                ? "任务已完成"
+                : job.status === "aborted"
+                  ? "任务已停止"
+                  : job.status === "failed"
+                    ? "任务失败"
+                    : "任务已结束"
+            const detail = formatJobProgress(job.result) || job.error || ""
+            setToast(detail ? `${title}：${detail}` : title)
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              try {
+                new Notification(title, { body: detail || undefined })
+              } catch {
+                // ignore
+              }
+            }
+          }
+        } catch {
+          // 任务可能已被删除
+        }
+      }
+    }
+    prevActiveRef.current = now
+  }, [])
+
   useEffect(() => {
-    if (loading || error) return
-    if (total <= 0) return
+    void loadTable()
+  }, [loadTable])
+  useEffect(() => {
+    void loadSide()
+  }, [loadSide])
+
+  // 越界回退
+  useEffect(() => {
+    if (loading || error || total <= 0) return
     const maxPage = calcTotalPages(total, ME_PAGE_SIZE)
     if (page > maxPage) update({ page: maxPage })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only on total/page
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clamp only
   }, [loading, error, total, page])
 
   useScrollTop([page])
 
-  // 有 running job 时按 pollMs silent 刷新（用 ref 读 jobs，避免每次 setJobs 重建计时器）
-  const jobsRef = useRef(jobs)
-  jobsRef.current = jobs
+  // active 存在时 1.5s 轮询（绑实例级 active，不绑当前页表格）
+  const hasActive = active.length > 0
   useEffect(() => {
-    let cancelled = false
-    let t: ReturnType<typeof setTimeout> | null = null
-    const tick = async () => {
-      const hasRunning = jobsRef.current.some((j) => j.status === "running")
-      if (!hasRunning || cancelled) return
-      // 用 reload 本次结果决定是否继续轮询：
-      // finally 里读 jobsRef 是 React 提交前的旧值，会多排一次冗余 tick
-      const stillRunning = await reload({ silent: true })
-      if (!cancelled && stillRunning) {
-        t = setTimeout(tick, pollMs)
-      }
-    }
-    // 仅当当前已有 running 时启动轮询
-    if (jobsRef.current.some((j) => j.status === "running")) {
-      t = setTimeout(tick, pollMs)
-    }
-    return () => {
-      cancelled = true
-      if (t) clearTimeout(t)
-    }
-  }, [pollMs, reload, !!jobs.some((j) => j.status === "running")])
-
-  // 运行中 → 结束：完成提示 + 可选系统通知
-  useEffect(() => {
-    const hasRunning = jobs.some((j) => j.status === "running")
-    if (prevRunningRef.current && !hasRunning) {
-      const last = jobs[0]
-      if (last && last.status !== "running" && last.status !== "pending") {
-        const title =
-          last.status === "succeeded"
-            ? "归档任务已完成"
-            : last.status === "aborted"
-              ? "归档任务已停止"
-              : last.status === "failed"
-                ? "归档任务失败"
-                : "归档任务已结束"
-        const detail = formatJobProgress(last.result) || last.error || ""
-        setToast(detail ? `${title}：${detail}` : title)
-        if (
-          typeof Notification !== "undefined" &&
-          Notification.permission === "granted"
-        ) {
-          try {
-            new Notification(title, { body: detail || undefined })
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-    prevRunningRef.current = hasRunning
-  }, [jobs])
+    if (!hasActive) return
+    const t = setInterval(() => {
+      void loadTable(true)
+      void loadSide()
+    }, POLL_MS)
+    return () => clearInterval(t)
+  }, [hasActive, loadTable, loadSide])
 
   useEffect(() => {
     if (!toast) return
@@ -175,164 +191,40 @@ export default function JobsPage() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const requestNotify = () => {
-    if (
-      typeof Notification !== "undefined" &&
-      Notification.permission === "default"
-    ) {
-      void Notification.requestPermission()
-    }
-  }
-
-  const onStart = async (siteId: SiteId, mode: ArchiveMode) => {
-    setBusy(true)
-    setError("")
-    try {
-      requestNotify()
-      await startJob(
-        siteId === "2" ? "archive_books" : "archive_posts",
-        { site: siteId, mode }
-      )
-      if (page !== 1) update({ page: 1 })
-      else await reload({ silent: true })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "启动失败")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const onAutoGroup = async () => {
-    setBusy(true)
-    setError("")
-    try {
-      requestNotify()
-      await startJob("archive_auto_group", { site: "1", minMembers: 2 })
-      if (page !== 1) update({ page: 1 })
-      else await reload({ silent: true })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "启动失败")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const onStop = async (id: number) => {
-    try {
-      await stopJob(id)
-      await reload({ silent: true })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "停止失败")
-    }
-  }
-
-  const onDelete = async (id: number) => {
-    const ok = await confirm({
-      title: "删除该任务？",
-      description: "任务记录及其日志将被永久删除。",
-      confirmLabel: "删除",
-      destructive: true,
-    })
-    if (!ok) return
-    try {
-      await deleteJob(id)
-      await reload({ silent: true })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败")
-    }
-  }
-
-  const onClear = async () => {
-    const ok = await confirm({
-      title: "清空已结束任务？",
-      description: "将删除所有已成功、失败、中断或已停止的任务及其日志。",
-      confirmLabel: "清空",
-      destructive: true,
-    })
-    if (!ok) return
-    try {
-      await clearFinishedJobs()
-      await reload({ silent: true })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "清空失败")
-    }
-  }
-
   const onClearCache = async () => {
-    const ok = await confirm({
-      title: "清空内容缓存？",
-      description: "将删除所有正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。",
-      confirmLabel: "清空",
-      destructive: true,
-    })
-    if (!ok) return
-    try {
-      const res = await fetch(api.meCache, { method: "DELETE" })
-      const json = (await res.json()) as { cleared?: number; error?: string }
-      if (!res.ok) throw new Error(json.error || "清空失败")
-      setToast(`已清除 ${json.cleared ?? 0} 个缓存文件`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "清空失败")
-    }
-  }
-
-  const onChangePoll = (ms: number) => {
-    setPollMs(ms)
-    setPollMsState(ms)
-  }
-
-  const runningJob = jobs.find((j) => j.status === "running")
-  const hasRunning = !!runningJob
-  const lastSuccess = jobs.find((j) => j.status === "succeeded")
-  const startDisabled = busy || hasRunning
-  const canResume = (sid: SiteId) => {
-    const c = status[sid]?.cursor
-    return (
-      !!c?.next_mtid &&
-      (c.status === "interrupted" || c.status === "running")
+    if (
+      !(await confirm({
+        title: "清空内容缓存？",
+        description: "将删除所有正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。",
+        confirmLabel: "清空",
+        destructive: true,
+      }))
     )
+      return
+    const res = await fetch(api.meCache, { method: "DELETE" })
+    const json = (await res.json()) as { cleared?: number; error?: string }
+    setToast(res.ok ? `已清除 ${json.cleared ?? 0} 个缓存文件` : json.error || "清空失败")
   }
-  // running cursor during another machine? local only — allow resume when interrupted/done-with-cursor
-  const resumeEnabled = (sid: SiteId) =>
-    !startDisabled &&
-    !!status[sid]?.cursor?.next_mtid &&
-    status[sid]?.cursor?.status !== "done"
-  const startHint = hasRunning
-    ? "已有任务在运行"
-    : busy
-      ? "启动中…"
-      : undefined
-
-  const cursorHint = (["1", "2"] as SiteId[])
-    .map((sid) => {
-      const s = status[sid]
-      if (!s) return null
-      const parts = [
-        `${SITES[sid].label} · 库内 ${s.total} 条`,
-        sid === "1" && s.maxTid ? `最新 tid ${s.maxTid}` : null,
-        s.cursor
-          ? `游标 ${s.cursor.status}${
-              s.cursor.next_mtid
-                ? ` @ ${s.cursor.next_mtid}`
-                : s.cursor.status === "done"
-                  ? "（已完成）"
-                  : ""
-            } · 已记 ${s.cursor.pages} 页`
-          : "尚无续跑游标",
-      ]
-      return parts.filter(Boolean).join(" · ")
-    })
-    .filter((h): h is string => h !== null)
-
-  // 任务页按站可用：论坛 archive_posts、书库 archive_books
 
   return (
     <PageShell maxWidth="xwide">
       <PageHeader
         title="任务"
-        description="同步目录（论坛与书库）、自动分组与备份"
+        description="同步目录、自动分组与备份"
         action={
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof Notification !== "undefined" && Notification.permission === "default") {
+                  void Notification.requestPermission()
+                }
+                setModalOpen(true)
+              }}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              <Plus size={14} /> 创建任务
+            </button>
             <button
               type="button"
               onClick={() => downloadBackup()}
@@ -347,12 +239,6 @@ export default function JobsPage() {
             >
               <Trash2 size={14} /> 清空缓存
             </button>
-            <Link
-              to={routes.archive}
-              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              返回目录
-            </Link>
           </div>
         }
       />
@@ -366,191 +252,64 @@ export default function JobsPage() {
         </div>
       )}
 
-      {runningJob && (
-        <div className="mb-4 rounded-2xl border border-blue-500/25 bg-blue-500/10 px-3.5 py-3 text-sm text-blue-700 dark:text-blue-300">
-          <div className="font-medium">
-            {runningJob.type === "archive_auto_group"
-              ? "自动分组进行中"
-              : "归档进行中"}
-          </div>
-          <div className="mt-0.5 text-xs opacity-90">
-            {formatJobProgress(runningJob.result) ||
-              (runningJob.type === "archive_auto_group"
-                ? "正在扫描归档并建组…"
-                : "正在抓取首页分页…")}
-            {" · "}
-            <Link
-              to={
-                runningJob.type === "archive_auto_group"
-                  ? routes.groups
-                  : routes.archive
-              }
-              className="underline underline-offset-2"
-            >
-              {runningJob.type === "archive_auto_group"
-                ? "打开分组"
-                : "打开归档目录"}
-            </Link>
-          </div>
-        </div>
-      )}
+      <JobStatsCards
+        statuses={statuses}
+        groupTotal={groupTotal}
+        lastByType={lastByType}
+        activeStates={new Map(active.map((j) => [j.type, j.status] as const))}
+      />
+      <JobsActiveStrip jobs={active} onChanged={() => { void loadSide(); void loadTable(true) }} />
 
-      {!hasRunning && lastSuccess && lastSuccess.result && (
-        <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-800 dark:text-emerald-300">
-          <div className="font-medium">最近一次归档成功</div>
-          <div className="mt-0.5 text-xs opacity-90">
-            {formatJobProgress(lastSuccess.result)}
-            {" · "}
-            <Link
-              to={routes.archive}
-              className="underline underline-offset-2"
-            >
-              查看归档
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {cursorHint.length > 0 && (
-        <div className="mb-3 text-xs text-muted-foreground tabular-nums">
-          {cursorHint.map((h) => (
-            <p key={h}>{h}</p>
-          ))}
-        </div>
-      )}
-
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          {(["1", "2"] as SiteId[]).map((sid) => {
-            const isBook = sid === "2"
-            const st = status[sid]
-            return (
-              <div
-                key={sid}
-                className="flex flex-wrap items-center gap-2"
-              >
-                <span className="text-xs font-semibold text-muted-foreground">
-                  {SITES[sid].label}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void onStart(sid, "full")}
-                  disabled={startDisabled}
-                  title={
-                    startHint ??
-                    (isBook
-                      ? "从第 1 页（最新收录）往后扫"
-                      : "从最新帖往回全量扫描")
-                  }
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-                >
-                  <Play size={14} /> 全量归档
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onStart(sid, "resume")}
-                  disabled={!resumeEnabled(sid)}
-                  title={
-                    resumeEnabled(sid)
-                      ? isBook
-                        ? `从第 ${st?.cursor?.next_mtid} 页继续`
-                        : `从游标 ${st?.cursor?.next_mtid} 继续`
-                      : "没有可续跑的游标（先跑全量或中断后再试）"
-                  }
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-                >
-                  <SkipForward size={14} /> 继续归档
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onStart(sid, "incremental")}
-                  disabled={startDisabled}
-                  title={
-                    isBook
-                      ? "只补比库内更新收录的书"
-                      : "只扫比库内最新 tid 还新的帖子"
-                  }
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-                >
-                  <RefreshCw size={14} /> 增量更新
-                </button>
-              </div>
-            )
-          })}
-          <button
-            type="button"
-            onClick={() => void onAutoGroup()}
-            disabled={startDisabled}
-            title="按书名把归档里多章帖子自动写入分组（≥2 章）"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-          >
-            <FolderTree size={14} /> 归档自动分组
-          </button>
-          <button
-            type="button"
-            onClick={onClear}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-border px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Trash2 size={14} /> 清空已结束
-          </button>
-        </div>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground sm:ml-auto">
-          刷新间隔
-          <select
-            value={pollMs}
-            onChange={(e) => onChangePoll(Number(e.target.value))}
-            className={cn(
-              "h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
-            )}
-          >
-            {POLL_OPTIONS.map((ms) => (
-              <option key={ms} value={ms}>
-                {ms / 1000}s
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* 筛选 */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <select
+          value={type}
+          onChange={(e) => update({ type: e.target.value })}
+          aria-label="类型筛选"
+          className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
+        >
+          <option value="">全部类型</option>
+          <option value="archive_posts">论坛归档</option>
+          <option value="archive_books">书库归档</option>
+          <option value="archive_auto_group">自动分组</option>
+        </select>
+        <select
+          value={status}
+          onChange={(e) => update({ status: e.target.value })}
+          aria-label="状态筛选"
+          className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
+        >
+          <option value="">全部状态</option>
+          <option value="running">运行中</option>
+          <option value="paused">已暂停</option>
+          <option value="succeeded">成功</option>
+          <option value="failed">失败</option>
+          <option value="interrupted">中断</option>
+          <option value="aborted">已停止</option>
+        </select>
       </div>
-
-      {startHint && hasRunning && (
-        <p className="mb-4 text-xs text-muted-foreground">{startHint}</p>
-      )}
-      {(["1", "2"] as SiteId[]).some(canResume) && !hasRunning && (
-        <p className="mb-4 text-xs text-muted-foreground">
-          检测到未完成游标，可点对应站的「继续归档」从中断处接着扫，无需从头开始。
-        </p>
-      )}
 
       <AsyncBody
         loading={loading}
         error={error}
         empty={jobs.length === 0}
-        onRetry={() => void reload()}
-        emptyText={
-          <>
-            暂无任务。可用「全量归档」扫全站（论坛按最新帖往回、书库按最新收录），
-            「增量更新」只补新内容；中断后用「继续归档」。完成后可在
-            <Link
-              to={routes.archive}
-              className="text-foreground underline underline-offset-2"
-            >
-              归档
-            </Link>
-            浏览，或点「导出备份」下载本地数据。
-          </>
-        }
+        onRetry={() => void loadTable()}
+        emptyText="暂无任务记录"
       >
-        <ul className="space-y-2.5">
-          {jobs.map((job) => (
-            <JobRow
-              key={job.id}
-              job={job}
-              pollMs={pollMs}
-              onStop={onStop}
-              onDelete={onDelete}
-            />
-          ))}
-        </ul>
+        <JobsTable
+          jobs={jobs}
+          sort={sort}
+          order={order}
+          onSortChange={(k) =>
+            update({ sort: k, order: k === sort && order === "desc" ? "asc" : "desc" })
+          }
+          selected={selected}
+          onSelectedChange={setSelected}
+          onDeleted={() => {
+            void loadTable(true)
+            void loadSide()
+          }}
+        />
         {(total > ME_PAGE_SIZE || nextPage !== undefined) && (
           <Pager
             page={page}
@@ -558,14 +317,23 @@ export default function JobsPage() {
             totalPages={calcTotalPages(total, ME_PAGE_SIZE)}
             total={total}
             onPrev={() => update({ page: Math.max(1, page - 1) })}
-            onNext={() =>
-              nextPage !== undefined && update({ page: nextPage })
-            }
+            onNext={() => nextPage !== undefined && update({ page: nextPage })}
             onPage={(n) => update({ page: n })}
             disabled={loading}
           />
         )}
       </AsyncBody>
+
+      <CreateJobModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        statuses={statuses}
+        hasActive={hasActive}
+        onStarted={() => {
+          void loadSide()
+          void loadTable(true)
+        }}
+      />
     </PageShell>
   )
 }

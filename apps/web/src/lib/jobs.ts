@@ -252,37 +252,4 @@ export async function deleteJobsMany(ids: number[]): Promise<number> {
   return json.removed
 }
 
-export async function clearFinishedJobs(): Promise<number> {
-  const res = await fetch(api.meJobs, { method: "DELETE" })
-  await throwIfNotOk(res)
-  const json = (await res.json()) as { removed: number }
-  return json.removed
-}
 
-/** 轮询间隔持久化（localStorage） */
-const POLL_MS_KEY = "purifier:jobs:pollMs"
-const POLL_OPTIONS = [1000, 1500, 2000, 5000, 10000] as const
-
-export function getPollMs(): number {
-  try {
-    const raw = Number(localStorage.getItem(POLL_MS_KEY))
-    return POLL_OPTIONS.includes(raw as (typeof POLL_OPTIONS)[number])
-      ? raw
-      : 1500
-  } catch {
-    // 隐私模式/配额：静默，用默认值
-    return 1500
-  }
-}
-
-export function setPollMs(ms: number): void {
-  if (POLL_OPTIONS.includes(ms as (typeof POLL_OPTIONS)[number])) {
-    try {
-      localStorage.setItem(POLL_MS_KEY, String(ms))
-    } catch {
-      // 隐私模式/配额：静默，仅内存态生效
-    }
-  }
-}
-
-export { POLL_OPTIONS }
