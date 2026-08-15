@@ -44,7 +44,7 @@ export function JobsActiveStrip({
                     type="button"
                     title="继续"
                     onClick={() => {
-                      void resumeJob(job.id).then(onChanged)
+                      void resumeJob(job.id).then(onChanged).catch(() => onChanged())
                     }}
                     className="rounded-lg p-1.5 hover:bg-blue-500/15"
                   >
@@ -55,7 +55,7 @@ export function JobsActiveStrip({
                     type="button"
                     title="暂停"
                     onClick={() => {
-                      void pauseJob(job.id).then(onChanged)
+                      void pauseJob(job.id).then(onChanged).catch(() => onChanged())
                     }}
                     className="rounded-lg p-1.5 hover:bg-blue-500/15"
                   >
@@ -66,7 +66,7 @@ export function JobsActiveStrip({
                   type="button"
                   title="停止"
                   onClick={() => {
-                    void stopJob(job.id).then(onChanged)
+                    void stopJob(job.id).then(onChanged).catch(() => onChanged())
                   }}
                   className="rounded-lg p-1.5 hover:bg-blue-500/15"
                 >

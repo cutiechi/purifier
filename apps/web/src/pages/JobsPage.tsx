@@ -43,6 +43,7 @@ export default function JobsPage() {
   const [selected, setSelected] = useState<number[]>([])
 
   const [active, setActive] = useState<Job[]>([])
+  const [sideLoaded, setSideLoaded] = useState(false)
   const [statuses, setStatuses] = useState<Record<SiteId, ArchiveStatus | null>>({
     "1": null,
     "2": null,
@@ -116,6 +117,7 @@ export default function JobsPage() {
 
       // 进行中条：列表失败则保留上轮数据，且不推进 prevActiveRef（结束通知不误判/不漏判）
       if (activeRes.status === "fulfilled") {
+        setSideLoaded(true)
         setActive(activeRes.value.items)
         const prev = prevActiveRef.current
         const now = new Set(activeRes.value.items.map((j) => j.id))
@@ -199,16 +201,17 @@ export default function JobsPage() {
 
   useScrollTop([page])
 
-  // active 存在时 1.5s 轮询（绑实例级 active，不绑当前页表格）
+  // active 存在时 1.5s 轮询（绑实例级 active，不绑当前页表格）；
+  // 首次 active 拉取成功前（sideLoaded=false）也轮询，失败的首拉不会永久停掉轮询
   const hasActive = active.length > 0
   useEffect(() => {
-    if (!hasActive) return
+    if (!hasActive && sideLoaded) return
     const t = setInterval(() => {
       void loadTable(true)
       void loadSide()
     }, POLL_MS)
     return () => clearInterval(t)
-  }, [hasActive, loadTable, loadSide])
+  }, [hasActive, sideLoaded, loadTable, loadSide])
 
   useEffect(() => {
     if (!toast) return
@@ -318,7 +321,10 @@ export default function JobsPage() {
         loading={loading}
         error={error}
         empty={jobs.length === 0}
-        onRetry={() => void loadTable()}
+        onRetry={() => {
+          void loadTable()
+          void loadSide()
+        }}
         emptyText="暂无任务记录"
       >
         <JobsTable
@@ -334,6 +340,7 @@ export default function JobsPage() {
             void loadTable(true)
             void loadSide()
           }}
+          onError={(message) => setError(message)}
         />
         {(total > ME_PAGE_SIZE || nextPage !== undefined) && (
           <Pager

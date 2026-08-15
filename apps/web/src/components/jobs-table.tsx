@@ -101,6 +101,7 @@ export function JobsTable({
   selected,
   onSelectedChange,
   onDeleted,
+  onError,
 }: {
   jobs: Job[]
   sort: JobSortKey
@@ -109,6 +110,7 @@ export function JobsTable({
   selected: number[]
   onSelectedChange: (ids: number[]) => void
   onDeleted: () => void
+  onError: (message: string) => void
 }) {
   const confirm = useConfirm()
   const [openLog, setOpenLog] = useState<number | null>(null)
@@ -131,7 +133,15 @@ export function JobsTable({
       }))
     )
       return
-    await deleteJob(job.id)
+    try {
+      await deleteJob(job.id)
+    } catch (e) {
+      // 删除失败也刷新列表并提示，避免未处理 rejection 与残留选中
+      onSelectedChange(selected.filter((s) => s !== job.id))
+      onDeleted()
+      onError(e instanceof Error ? e.message : "删除失败")
+      return
+    }
     onSelectedChange(selected.filter((s) => s !== job.id))
     onDeleted()
   }
@@ -147,7 +157,14 @@ export function JobsTable({
       }))
     )
       return
-    await deleteJobsMany(selected)
+    try {
+      await deleteJobsMany(selected)
+    } catch (e) {
+      // 失败：刷新列表清理可能已删除的行（loadTable 会修剪失效选中），并提示错误
+      onDeleted()
+      onError(e instanceof Error ? e.message : "删除失败")
+      return
+    }
     onSelectedChange([])
     onDeleted()
   }
