@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertTriangle } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { startJob, type ArchiveMode, type ArchiveStatus } from "@/lib/jobs"
@@ -52,6 +52,26 @@ export function CreateJobModal({
   const [minMembers, setMinMembers] = useState(2)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
+
+  // 聚焦对话框内首个可聚焦控件（与 ConfirmDialog 同一套焦点管理）
+  const focusFirst = useCallback(() => {
+    const el = dialogRef.current
+    if (!el) return
+    const first = el.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    first?.focus()
+  }, [])
+
+  // 关闭前把焦点还给打开前的元素（与 ConfirmDialog 的 finish 一致）
+  const close = useCallback(() => {
+    const prev = prevFocusRef.current
+    prevFocusRef.current = null
+    if (prev && document.contains(prev)) prev.focus()
+    onClose()
+  }, [onClose])
 
   useEffect(() => {
     if (open) {
@@ -61,14 +81,33 @@ export function CreateJobModal({
     }
   }, [open])
 
+  // 打开时记录焦点来源并聚焦首个控件
+  useEffect(() => {
+    if (!open) return
+    prevFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    const t = requestAnimationFrame(() => focusFirst())
+    return () => cancelAnimationFrame(t)
+  }, [open, focusFirst])
+
+  // 步骤切换后把焦点移入新步骤的首个控件
+  useEffect(() => {
+    if (!open) return
+    const t = requestAnimationFrame(() => focusFirst())
+    return () => cancelAnimationFrame(t)
+  }, [open, step, focusFirst])
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
+      // ConfirmDialog 的 document 监听先触发并 preventDefault，此时不重复关闭
+      if (e.key === "Escape" && !e.defaultPrevented) close()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, onClose])
+  }, [open, close])
 
   if (!open) return null
 
@@ -99,7 +138,7 @@ export function CreateJobModal({
         await startJob(kind, { site, mode })
       }
       onStarted()
-      onClose()
+      close()
     } catch (e) {
       setError(e instanceof Error ? e.message : "启动失败")
     } finally {
@@ -114,10 +153,34 @@ export function CreateJobModal({
       aria-modal="true"
       aria-label="创建任务"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget) close()
       }}
     >
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-lg">
+      <div
+        ref={dialogRef}
+        className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-lg"
+        onKeyDown={(e) => {
+          // Tab 循环圈在对话框内（与 ConfirmDialog 同一套）
+          if (e.key !== "Tab") return
+          const el = dialogRef.current
+          if (!el) return
+          const focusables = Array.from(
+            el.querySelectorAll<HTMLElement>(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+          )
+          if (focusables.length === 0) return
+          const first = focusables[0]!
+          const last = focusables[focusables.length - 1]!
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault()
+            last.focus()
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault()
+            first.focus()
+          }
+        }}
+      >
         <h2 className="text-base font-semibold text-foreground">
           创建任务{step === 2 ? " · 选择参数" : ""}
         </h2>
@@ -201,7 +264,7 @@ export function CreateJobModal({
             </span>
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               className="rounded-lg px-2 py-1 underline underline-offset-2"
             >
               查看进行中任务
@@ -213,7 +276,7 @@ export function CreateJobModal({
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="min-h-10 rounded-xl px-4 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             取消
