@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import {
-  extractCandidateTids,
+  extractCandidates,
   computeSimilarity,
   filterCandidates,
 } from "./group-supplement"
@@ -21,18 +21,31 @@ function makeReply(overrides: Partial<ReplyNode> = {}): ReplyNode {
   }
 }
 
-test("extractCandidateTids from links and subject text", () => {
+test("extractCandidates from links and subject text", () => {
   const replies: ReplyNode[] = [
     makeReply({
+      tid: "100",
       subject: "Next chapter",
       links: [{ tid: "200", title: "Title 200" }],
     }),
     makeReply({
+      tid: "101",
       subject: "See also tid=300 and 12345678",
     }),
   ]
-  const tids = extractCandidateTids(replies)
-  expect(tids.sort()).toEqual(["12345678", "200", "300"])
+  const sources = extractCandidates(replies)
+  expect(sources.map((s) => s.tid).sort()).toEqual([
+    "100",
+    "101",
+    "12345678",
+    "200",
+    "300",
+  ])
+  expect(sources.find((s) => s.tid === "200")?.sourceTitle).toBe("Title 200")
+  expect(sources.find((s) => s.tid === "300")?.sourceTitle).toBe(
+    "See also tid=300 and 12345678"
+  )
+  expect(sources.find((s) => s.tid === "100")?.sourceTitle).toBe("Next chapter")
 })
 
 test("computeSimilarity for chapter pairs", () => {

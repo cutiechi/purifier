@@ -60,6 +60,7 @@ export function ItemActions({
   refreshing,
   characterSlot,
   replies,
+  contentLinks,
   currentTitle,
 }: {
   kind: "post" | "book"
@@ -70,8 +71,9 @@ export function ItemActions({
   refreshing: boolean
   /** 「人物」section，渲染在分隔线与阅读偏好之上 */
   characterSlot?: ReactNode
-  /** 以下两个仅在 kind=post 时由 ReadPage 传入，用于补充分组 */
+  /** 以下仅在 kind=post 时由 ReadPage 传入，用于补充分组 */
   replies?: ReplyNode[]
+  contentLinks?: { tid: string; title: string; index: number }[]
   currentTitle?: string
 }) {
   const site = useSite()
@@ -195,12 +197,13 @@ export function ItemActions({
           刷新
         </button>
 
-        {/* 补充分组（仅 post 且已有分组时显示） */}
-        {kind === "post" && state?.groupId != null && replies != null && (
+        {/* 补充分组（仅 post 显示） */}
+        {kind === "post" && replies != null && (
           <GroupSupplementPanel
-            groupId={state.groupId}
-            groupTitle={state.groupTitle ?? ""}
+            groupId={state?.groupId}
+            groupTitle={state?.groupTitle}
             replies={replies}
+            contentLinks={contentLinks}
             currentTid={id}
             currentTitle={currentTitle ?? ""}
             onSuccess={() => void reload()}

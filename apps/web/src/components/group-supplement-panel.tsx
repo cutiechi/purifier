@@ -1,18 +1,21 @@
 import { useCallback, useState } from "react"
 import type { ReplyNode } from "@/components/reply-list"
 import {
-  extractCandidateTids,
+  extractCandidates,
   filterCandidates,
+  computeSimilarity,
   type CandidateItem,
 } from "@/lib/group-supplement"
+import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"
 import { api } from "@/lib/routes"
 import { useSite } from "@/hooks/use-site"
 import { Loader2 } from "lucide-react"
 
 interface Props {
-  groupId: number
-  groupTitle: string
+  groupId?: number
+  groupTitle?: string
   replies: ReplyNode[]
+  contentLinks?: { tid: string; title: string; index: number }[]
   currentTid: string
   currentTitle: string
   onSuccess?: () => void
@@ -22,6 +25,7 @@ export function GroupSupplementPanel({
   groupId,
   groupTitle,
   replies,
+  contentLinks,
   currentTid,
   currentTitle,
   onSuccess,
@@ -37,42 +41,50 @@ export function GroupSupplementPanel({
     setPhase("loading")
     setSubmitError("")
 
-    const tids = extractCandidateTids(replies).filter(
-      (tid) => tid !== currentTid
+    const replySources = extractCandidates(replies).filter(
+      (c) => c.tid !== currentTid
     )
 
-    if (tids.length === 0) {
-      setCandidates([])
-      setPhase("ready")
-      return
-    }
+    // contentLinks 已有标题，直接作为候选
+    const linkCandidates =
+      contentLinks
+        ?.filter((l) => l.tid !== currentTid)
+        .map((l) => ({ tid: l.tid, title: l.title })) ?? []
 
-    const titleMap = new Map<string, string>()
+    const linkTidSet = new Set(linkCandidates.map((c) => c.tid))
+    // replies 中提取的 tid 排除 contentLinks 已覆盖的
+    const uniqueReplySources = replySources.filter(
+      (c) => !linkTidSet.has(c.tid)
+    )
+
+    const raw: { tid: string; title: string }[] = [...linkCandidates]
+
     await Promise.all(
-      tids.map(async (tid) => {
+      uniqueReplySources.map(async (src) => {
         try {
           const res = await fetch(
-            `${api.posts}?tid=${encodeURIComponent(tid)}&site=${site}`
+            `${api.posts}?tid=${encodeURIComponent(src.tid)}&site=${site}`
           )
           if (res.ok) {
             const json = (await res.json()) as { title: string }
-            titleMap.set(tid, json.title)
+            raw.push({ tid: src.tid, title: json.title })
+            return
           }
         } catch {
           // ignore individual failures
         }
+        // API 失败：用 sourceTitle 兜底，若相似度够高仍保留
+        const score = computeSimilarity(currentTitle, src.sourceTitle)
+        if (score > 0.3) {
+          raw.push({ tid: src.tid, title: src.sourceTitle })
+        }
       })
     )
-
-    const raw = Array.from(titleMap.entries()).map(([tid, title]) => ({
-      tid,
-      title,
-    }))
 
     const filtered = filterCandidates(currentTitle, raw)
     setCandidates(filtered)
     setPhase("ready")
-  }, [replies, currentTid, currentTitle, site])
+  }, [replies, contentLinks, currentTid, currentTitle, site])
 
   const toggle = (tid: string) => {
     setCandidates((prev) =>
@@ -87,28 +99,45 @@ export function GroupSupplementPanel({
 
     setPhase("submitting")
     try {
-      const groupRes = await fetch(`${api.meGroups}/${groupId}`)
-      if (!groupRes.ok) {
-        setSubmitError("获取分组信息失败")
-        setPhase("ready")
-        return
-      }
-      const groupJson = (await groupRes.json()) as {
-        group: {
-          key: string
-          title: string
-          author: string | null
-          genre: string | null
-          items: { tid: string; title: string }[]
-        }
-      }
-      const group = groupJson.group
+      let key: string
+      let title: string
+      let author: string | null = null
+      let genre: string | null = null
+      let baseItems: { tid: string; title: string }[]
 
-      const existingTids = new Set(group.items.map((i) => i.tid))
+      if (groupId != null) {
+        const groupRes = await fetch(`${api.meGroups}/${groupId}`)
+        if (!groupRes.ok) {
+          setSubmitError("获取分组信息失败")
+          setPhase("ready")
+          return
+        }
+        const groupJson = (await groupRes.json()) as {
+          group: {
+            key: string
+            title: string
+            author: string | null
+            genre: string | null
+            items: { tid: string; title: string }[]
+          }
+        }
+        const group = groupJson.group
+        key = group.key
+        title = group.title
+        author = group.author
+        genre = group.genre
+        baseItems = group.items
+      } else {
+        key = groupKeyFromTitle(currentTitle)
+        title = groupSearchTitle(currentTitle)
+        baseItems = [{ tid: currentTid, title: currentTitle }]
+      }
+
+      const existingTids = new Set(baseItems.map((i) => i.tid))
       const newItems = selected.filter((s) => !existingTids.has(s.tid))
 
       if (newItems.length === 0) {
-        setSubmitError("所选帖子已在分组中")
+        setSubmitError(groupId != null ? "所选帖子已在分组中" : "所选帖子与当前帖子重复")
         setPhase("ready")
         return
       }
@@ -117,12 +146,12 @@ export function GroupSupplementPanel({
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          key: group.key,
-          title: group.title,
-          author: group.author,
-          genre: group.genre,
+          key,
+          title,
+          author,
+          genre,
           items: [
-            ...group.items,
+            ...baseItems,
             ...newItems.map((n) => ({ tid: n.tid, title: n.title })),
           ],
         }),
@@ -146,7 +175,7 @@ export function GroupSupplementPanel({
       setSubmitError(e instanceof Error ? e.message : "请求失败")
       setPhase("ready")
     }
-  }, [candidates, groupId, onSuccess])
+  }, [candidates, groupId, currentTitle, currentTid, onSuccess])
 
   if (phase === "idle") {
     return (
@@ -174,7 +203,7 @@ export function GroupSupplementPanel({
   return (
     <div className="flex flex-col gap-2 px-3 py-2">
       <div className="text-xs font-medium text-muted-foreground">
-        补充分组 — 《{groupTitle}》
+        {groupTitle != null ? `补充分组 — 《${groupTitle}》` : "创建分组"}
       </div>
       {candidates.length === 0 ? (
         <div className="text-sm text-muted-foreground">未检测到相关帖子</div>

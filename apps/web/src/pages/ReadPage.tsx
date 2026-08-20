@@ -282,6 +282,7 @@ export default function ReadPage() {
                     onRefresh={() => void fetchContent({ refresh: true })}
                     refreshing={refreshing}
                     replies={content.replies}
+                    contentLinks={content.links}
                     currentTitle={content.title}
                     characterSlot={
                       <CharacterPanel

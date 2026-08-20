@@ -13,30 +13,52 @@ const DECORATIONS_RE = /[【】〖〗《》]/g
 const CHAPTER_SUFFIX_RE = /[第\s]*[\d一二三四五六七八九十百千]+[章回节篇集卷]/g
 const CONTINUATION_KEYWORDS = /续|下|next|后续|下章|下一章|下回|第二章|第三章/
 
-export function extractCandidateTids(replies: ReplyNode[]): string[] {
-  const set = new Set<string>()
+export interface CandidateSource {
+  tid: string
+  /** 跟帖中关联的标题（link.title 或 subject），API 失败时 fallback 用 */
+  sourceTitle: string
+}
+
+export function extractCandidates(replies: ReplyNode[]): CandidateSource[] {
+  const map = new Map<string, string>()
   function walk(nodes: ReplyNode[]) {
     for (const node of nodes) {
+      const subject = node.subject
+      // 跟帖本身也可能是一个相关帖子
+      if (node.tid && !map.has(node.tid)) {
+        map.set(node.tid, subject)
+      }
+      // 优先取 link 里的标题，否则 fallback 到 subject
+      const fallbackTitle = subject
       if (node.links) {
         for (const link of node.links) {
-          if (link.tid) set.add(link.tid)
+          if (link.tid) {
+            const existing = map.get(link.tid)
+            if (!existing || existing === link.tid) {
+              map.set(link.tid, link.title || fallbackTitle)
+            }
+          }
         }
       }
-      const subject = node.subject
       let m: RegExpExecArray | null
       TID_RE.lastIndex = 0
       while ((m = TID_RE.exec(subject)) !== null) {
-        set.add(m[1]!)
+        const tid = m[1]!
+        if (!map.has(tid)) map.set(tid, fallbackTitle)
       }
       NUMERIC_TID_RE.lastIndex = 0
       while ((m = NUMERIC_TID_RE.exec(subject)) !== null) {
-        set.add(m[0]!)
+        const tid = m[0]!
+        if (!map.has(tid)) map.set(tid, fallbackTitle)
       }
       walk(node.children)
     }
   }
   walk(replies)
-  return Array.from(set)
+  return Array.from(map.entries()).map(([tid, sourceTitle]) => ({
+    tid,
+    sourceTitle,
+  }))
 }
 
 function normalizeTitle(title: string): string {
