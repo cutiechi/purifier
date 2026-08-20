@@ -86,6 +86,26 @@ describe("parseReplies tree scale", () => {
       Array.from({ length: 500 }, (_, i) => String(i + 2))
     )
   })
+
+  test("extracts links from reply subject html", () => {
+    const items = [
+      {
+        tid: "100",
+        subject: 'Next: <a href="index.php?app=forum&act=threadview&tid=200">Title 200</a>',
+        dateline: "2024-01-01",
+        size: 100,
+      },
+      {
+        tid: "101",
+        subject: "Plain text without links",
+        dateline: "2024-01-01",
+        size: 50,
+      },
+    ]
+    const tree = ex.parseReplies(JSON.stringify(items), "1")
+    expect(tree[0]?.links).toEqual([{ tid: "200", title: "Title 200" }])
+    expect(tree[1]?.links).toBeUndefined()
+  })
 })
 
 describe("extractPreHtml", () => {

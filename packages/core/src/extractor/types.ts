@@ -37,6 +37,8 @@ export interface ReplyItem {
   subject: string
   dateline: string
   size: number
+  /** 从原始 subject HTML 中提取的站内 /read/:tid 链接 */
+  links?: { tid: string; title: string }[]
 }
 
 export interface ReplyNode extends ReplyItem {

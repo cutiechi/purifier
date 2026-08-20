@@ -665,15 +665,18 @@ export class Cool18Extractor implements Extractor {
       const r = r0 as Record<string, unknown>
       const replyTid = String(r.tid ?? "")
       if (!replyTid) continue
+      const subjectHtml = String(r.subject ?? "")
+      const links = this.extractReplyLinks(subjectHtml)
       items.push({
         tid: replyTid,
         uptid: String(r.uptid ?? tid),
         rootid: String(r.rootid ?? tid),
         uid: String(r.uid ?? ""),
         username: this.stripHtml(String(r.username ?? "")),
-        subject: this.stripHtml(String(r.subject ?? "")),
+        subject: this.stripHtml(subjectHtml),
         dateline: String(r.dateline ?? ""),
         size: parseInt(String(r.size ?? "0"), 10) || 0,
+        links: links.length > 0 ? links : undefined,
       })
     }
 
@@ -877,6 +880,21 @@ export class Cool18Extractor implements Extractor {
       .replace(/<[^>]+>/g, "")
       .replace(/\\\//g, "/")
       .trim()
+  }
+
+  private extractReplyLinks(html: string): { tid: string; title: string }[] {
+    const $ = cheerio.load(`<div>${html}</div>`)
+    const out: { tid: string; title: string }[] = []
+    $("a").each((_i, el) => {
+      const href = $(el).attr("href") ?? ""
+      const match = href.match(/[?&]tid=(\d+)/)
+      if (match) {
+        const tid = match[1]!
+        const title = $(el).text().trim()
+        if (tid && title) out.push({ tid, title })
+      }
+    })
+    return out
   }
 
   /**
