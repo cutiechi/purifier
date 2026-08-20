@@ -8,6 +8,8 @@ import { TagChips } from "@/components/tag-chips"
 import { useSite } from "@/hooks/use-site"
 import { api } from "@/lib/routes"
 import { cn } from "@workspace/ui/lib/utils"
+import { GroupSupplementPanel } from "./group-supplement-panel"
+import type { ReplyNode } from "@/components/reply-list"
 
 export interface ItemState {
   kind: "post" | "book"
@@ -57,6 +59,8 @@ export function ItemActions({
   onRefresh,
   refreshing,
   characterSlot,
+  replies,
+  currentTitle,
 }: {
   kind: "post" | "book"
   id: string
@@ -66,6 +70,9 @@ export function ItemActions({
   refreshing: boolean
   /** 「人物」section，渲染在分隔线与阅读偏好之上 */
   characterSlot?: ReactNode
+  /** 以下两个仅在 kind=post 时由 ReadPage 传入，用于补充分组 */
+  replies?: ReplyNode[]
+  currentTitle?: string
 }) {
   const site = useSite()
   const confirm = useConfirm()
@@ -187,6 +194,18 @@ export function ItemActions({
           />
           刷新
         </button>
+
+        {/* 补充分组（仅 post 且已有分组时显示） */}
+        {kind === "post" && state?.groupId != null && replies != null && (
+          <GroupSupplementPanel
+            groupId={state.groupId}
+            groupTitle={state.groupTitle ?? ""}
+            replies={replies}
+            currentTid={id}
+            currentTitle={currentTitle ?? ""}
+            onSuccess={() => void reload()}
+          />
+        )}
 
         {/* 标签 */}
         <TagEditor

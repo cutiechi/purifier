@@ -281,6 +281,8 @@ export default function ReadPage() {
                     reload={reload}
                     onRefresh={() => void fetchContent({ refresh: true })}
                     refreshing={refreshing}
+                    replies={content.replies}
+                    currentTitle={content.title}
                     characterSlot={
                       <CharacterPanel
                         clusters={clusters}
