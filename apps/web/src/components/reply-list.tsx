@@ -11,6 +11,8 @@ export interface ReplyNode {
   dateline: string
   size: number
   children: ReplyNode[]
+  /** 从原始 subject HTML 中提取的站内 /read/:tid 链接 */
+  links?: { tid: string; title: string }[]
 }
 
 function countNodes(nodes: ReplyNode[]): number {
