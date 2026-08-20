@@ -39,6 +39,9 @@ export interface ItemState {
   tags: string[]
   read_progress: number | null
   lastChapter: number | null
+  /** 该帖子所属分组（仅 post 可能有） */
+  groupId?: number
+  groupTitle?: string
 }
 
 export interface ListQuery {

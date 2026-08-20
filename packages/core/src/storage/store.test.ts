@@ -696,6 +696,35 @@ test("setProgress / getState round-trip read_progress", () => {
   }
 })
 
+test("getState returns group info when post is in a group", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("1", "post", "111", "Title A", "url")
+    store.upsertGroup({
+      key: "group-a",
+      title: "Group A",
+      items: [{ tid: "111", title: "Title A" }],
+    })
+    const state = store.getState("1", "post", "111")
+    expect(state?.groupId).toBeGreaterThan(0)
+    expect(state?.groupTitle).toBe("Group A")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("getState omits group fields when post is not in a group", () => {
+  const { store, dir } = makeStore()
+  try {
+    store.recordVisit("1", "post", "222", "Title B", "url")
+    const state = store.getState("1", "post", "222")
+    expect(state?.groupId).toBeUndefined()
+    expect(state?.groupTitle).toBeUndefined()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test("setProgress returns false for missing item", () => {
   const { store, dir } = makeStore()
   try {

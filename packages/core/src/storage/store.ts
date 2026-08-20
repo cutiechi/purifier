@@ -257,6 +257,18 @@ export class Store {
         "SELECT tag FROM tags WHERE site = ?1 AND kind = ?2 AND id = ?3 ORDER BY created_at, rowid"
       )
       .all(site, kind, id) as { tag: string }[]
+    const groupRow =
+      kind === "post"
+        ? (this.db
+            .query(
+              `SELECT g.id, g.title
+               FROM groups g
+               JOIN group_items gi ON gi.group_id = g.id
+               WHERE gi.tid = ?1
+               LIMIT 1`
+            )
+            .get(id) as { id: number; title: string } | null)
+        : null
     return {
       site,
       kind,
@@ -270,6 +282,8 @@ export class Store {
       tags: tagRows.map((r) => r.tag),
       read_progress: row.read_progress,
       lastChapter: row.last_chapter,
+      groupId: groupRow?.id,
+      groupTitle: groupRow?.title,
     }
   }
 
