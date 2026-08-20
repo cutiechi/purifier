@@ -22,6 +22,8 @@ export interface ItemState {
   read_progress: number | null
   site: string
   lastChapter: number | null
+  groupId?: number
+  groupTitle?: string
 }
 
 /** 打开页面时回填 /api/me/state（按站点区分，避免跨站串用 state） */
@@ -155,7 +157,7 @@ export function ItemActions({
         </span>
       }
     >
-      <div className="flex w-72 flex-col gap-1">
+      <div className="flex w-80 flex-col gap-1 sm:w-96">
         {/* 收藏 */}
         <button
           type="button"
