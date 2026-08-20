@@ -84,7 +84,17 @@ export interface ReplyItem {
 
 在 `stripHtml(String(r.subject ?? ""))` 之前，先用 cheerio 解析原始 HTML，提取所有 `<a>` 标签中指向同站的链接，解析出 `tid` 和链接文本，写入 `links` 字段。提取逻辑复用现有 `extractLinksFromDom` 的链接过滤规则（只保留同站）。
 
-### 3.3 获取候选帖子标题
+### 3.3 新增 `GET /api/me/groups/:id`
+
+现有 API 没有按 ID 获取单个分组详情的接口。前端在追加成员前需要知道分组的现有成员列表（`PUT /api/me/groups` 是全量 upsert）。新增：
+
+```
+GET /api/me/groups/:id
+```
+
+返回 `{ group }`，结构与 `listGroupsPage` 中的单条分组一致（含 `items` 成员列表）。后端直接复用已有的 `store.getGroup(id)`。
+
+### 3.4 获取候选帖子标题
 
 前端提取候选 tid 后，需要获取对应帖子的实际标题以做相似度比较。候选数量极少（通常 1-3 个），前端直接并行调用现有接口：
 
@@ -109,7 +119,7 @@ GET /api/posts?tid=<candidate>&site=1
 3. **过滤**：
    - 去重（Set）
    - 过滤当前阅读帖子的 `tid`
-   - 过滤已和当前帖子同属同一分组的 `tid`（通过 `state.groupId` 查询分组现有成员对比）
+   - 过滤已和当前帖子同属同一分组的 `tid`（前端先调用 `GET /api/me/groups/:groupId` 获取现有成员列表进行对比）
 
 ### 4.2 获取标题并计算相似度
 
@@ -182,26 +192,18 @@ sm:w-96（384px）在 sm 及以上
 
 用户点击「确认加入」后：
 
-1. 前端组装现有分组成员 + 新勾选成员的完整列表
-2. 调用 `PUT /api/me/groups`
-   - `key` 使用现有分组的 key（需要新增 API 或通过 `groupId` 获取 key，见 5.5）
-   - `items` 为完整成员列表 `{tid, title}[]`
+1. 前端调用 `GET /api/me/groups/:groupId` 获取分组详情（含现有成员列表和 `key`）
+2. 组装现有成员 + 新勾选成员的完整列表
+3. 调用 `PUT /api/me/groups`
+   - `key` 使用分组原 `key`
    - `title`/`author`/`genre` 保持原值不变
-3. 后端 `upsertGroup` 会检查一帖一组约束
-4. 若某个候选 tid 已属于其他分组，后端返回 409 `tid already in another group`
-5. 前端收到 409 时：
+   - `items` 为完整成员列表 `{tid, title}[]`（upsert 覆盖）
+4. 后端 `upsertGroup` 会检查一帖一组约束
+5. 若某个候选 tid 已属于其他分组，后端返回 409 `tid already in another group`
+6. 前端收到 409 时：
    - 若部分成功部分失败，提示「以下帖子已属于其他分组，无法加入：tid=xxx, tid=yyy」
    - 若全部冲突，提示「所选帖子均已属于其他分组」
    - 面板保持打开，用户可取消冲突项后重试
-
-### 5.5 分组 key 的获取
-
-`PUT /api/me/groups` 需要 `key` 作为标识，但当前 `state` 只返回 `groupId`。有两种方式：
-
-- **方式A**：扩展 `state` 同时返回 `groupKey`（推荐，最小改动）
-- **方式B**：新增 `GET /api/me/groups/:id` 接口，前端先查 key 再更新
-
-本设计采用 **方式A**：`store.getState` 的 group 查询中一并返回 `key`，`ItemState` 增加 `groupKey?: string`。
 
 ## 6. 错误处理与边界情况
 
@@ -226,7 +228,7 @@ sm:w-96（384px）在 sm 及以上
 
 ## 8. 测试要点
 
-1. **后端**：`getState` 正确返回/不返回 `groupId`/`groupKey`/`groupTitle`；`parseReplies` 正确提取/不提取 `links`。
+1. **后端**：`getState` 正确返回/不返回 `groupId`/`groupTitle`；`parseReplies` 正确提取/不提取 `links`；`GET /api/me/groups/:id` 正确返回分组详情。
 2. **前端**：无分组时不显示按钮；有分组但跟帖无候选时正确提示空状态；相似度计算对典型标题对（如「第一章」与「第二章」）正确识别。
 3. **集成**：一帖一组冲突时 409 处理正确；成功追加后 `ItemState` 或分组信息正确刷新。
 4. **UI**：操作面板宽度在移动端和桌面端均显示正常；新增按钮不破坏现有 Popover 布局。
