@@ -1523,6 +1523,14 @@ async function handleGroupUpsert(req: Request): Promise<Response> {
   return jsonOk({ ok: true, group }, NO_STORE_HEADERS)
 }
 
+function handleGroupGet(id: number): Response {
+  const group = store.getGroup(id)
+  if (!group) {
+    return jsonError("group not found", 404)
+  }
+  return jsonOk({ group }, NO_STORE_HEADERS)
+}
+
 function handleGroupDelete(id: number): Response {
   store.deleteGroup(id)
   return jsonOk({ ok: true }, NO_STORE_HEADERS)
@@ -1692,10 +1700,9 @@ async function routeInner(req: Request): Promise<Response> {
       const id = Number(groupsSub[1])
       const sub = groupsSub[2]
       if (sub === undefined) {
-        if (req.method !== "DELETE") {
-          throw new ExtractorError("method not allowed", 405)
-        }
-        return handleGroupDelete(id)
+        if (req.method === "GET") return handleGroupGet(id)
+        if (req.method === "DELETE") return handleGroupDelete(id)
+        throw new ExtractorError("method not allowed", 405)
       }
       if (sub === "items") {
         if (req.method !== "DELETE") {
