@@ -40,7 +40,7 @@ describe("extractContent", () => {
 </html>`
     const res = ex.extractContent(html)
     expect(res.links).toEqual([])
-    expect(res.content).toContain('/read/777')
+    expect(res.content).toContain("/read/777")
   })
 })
 
@@ -96,7 +96,8 @@ describe("parseReplies tree scale", () => {
     const items = [
       {
         tid: "100",
-        subject: 'Next: <a href="index.php?app=forum&act=threadview&tid=200">Title 200</a>',
+        subject:
+          'Next: <a href="index.php?app=forum&act=threadview&tid=200">Title 200</a>',
         dateline: "2024-01-01",
         size: 100,
       },
@@ -115,9 +116,9 @@ describe("parseReplies tree scale", () => {
 
 describe("extractPreHtml", () => {
   test("throws 404 when no content pre exists", () => {
-    expect(() => ex.extractContent("<html><body>nothing</body></html>")).toThrow(
-      ExtractorError
-    )
+    expect(() =>
+      ex.extractContent("<html><body>nothing</body></html>")
+    ).toThrow(ExtractorError)
   })
 })
 
@@ -214,6 +215,25 @@ describe("extractPreHtml 清洗加固", () => {
     expect(res.content).toContain("点我")
   })
 
+  test("cool18.com.evil.io 后缀伪装不当站内链接", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，含伪装外链 <a href="https://cool18.com.evil.io/?tid=999">点我</a> 结尾`
+      )
+    )
+    expect(res.content).not.toContain("/read/999")
+    expect(res.content).toContain("点我")
+  })
+
+  test("协议相对 cool18 主机仍视为站内链接", () => {
+    const res = ex.extractContent(
+      postHtml(
+        `这是一段足够长的正文内容，含协议相对站内链接 <a href="//www.cool18.com/bbs4/index.php?app=forum&act=threadview&tid=888">站内</a> 结尾`
+      )
+    )
+    expect(res.content).toContain("/read/888")
+  })
+
   test("纯相对链接（index.php?...）视为站内链接（上游新格式）", () => {
     const res = ex.extractContent(
       postHtml(
@@ -265,25 +285,75 @@ describe("extractPreHtml 清洗加固", () => {
   })
 })
 
+/** 构造 cool18 bookview 页（<!--bodybegin--> 后含正文 pre） */
+function bookHtml(preInner: string): string {
+  return `<!DOCTYPE html>
+<html>
+<head><title>测试书籍 - 书库</title></head>
+<body>
+<div class="show_content">
+<center><font size="6"><b>测试书籍</b></font></center>
+送交者: 佚名
+</div>
+<!--bodybegin-->
+<pre>${preInner}</pre>
+</body>
+</html>`
+}
+
 describe("软 404 检测", () => {
   test("含验证码墙文本的短 pre → 404", () => {
     expect(() =>
-      ex.extractContent(
-        postHtml("请稍候，正在验证您不是机器人，验证码加载中…")
-      )
+      ex.extractContent(postHtml("请稍候，正在验证您不是机器人，验证码加载中…"))
     ).toThrow(ExtractorError)
   })
 
   test("过短的 pre（疑似错误页）→ 404", () => {
     expect(() => ex.extractContent(postHtml("短"))).toThrow(ExtractorError)
   })
+
+  test("无 #content-section 时取最长 pre 并正常解析（fallback 回归）", () => {
+    const html = `<!DOCTYPE html>
+<html>
+<head><title>回归</title></head>
+<body>
+<pre>不足二十字</pre>
+<pre>这是一段足够长的正文内容，用于验证 fallback 分支不会误判为软 404。</pre>
+</body>
+</html>`
+    const res = ex.extractContent(html)
+    expect(res.content).toContain("fallback 分支")
+  })
+})
+
+describe("extractBookContent 软 404", () => {
+  test("空正文 pre → 404", () => {
+    expect(() => ex.extractBookContent(bookHtml(""))).toThrow(ExtractorError)
+  })
+
+  test("验证码墙短 pre → 404", () => {
+    expect(() =>
+      ex.extractBookContent(
+        bookHtml("请稍候，正在验证您不是机器人，验证码加载中…")
+      )
+    ).toThrow(ExtractorError)
+  })
+
+  test("正常正文不受影响", () => {
+    const r = ex.extractBookContent(
+      bookHtml("这是一段足够长的书籍正文内容，用于验证正常页面不会被误伤。")
+    )
+    expect(r.title).toBe("测试书籍")
+    expect(r.meta.author).toBe("佚名")
+    expect(r.content).toContain("书籍正文")
+  })
 })
 
 describe("sanitizeCool18Keywords", () => {
   test("剔除装饰符号并截断到 7 字符（≥8 字符上游恒 0 条）", () => {
-    expect(sanitizeCool18Keywords("爱上操弄小妖精的花穴（原名: 淫乱行动）")).toBe(
-      "爱上操弄小妖精"
-    )
+    expect(
+      sanitizeCool18Keywords("爱上操弄小妖精的花穴（原名: 淫乱行动）")
+    ).toBe("爱上操弄小妖精")
     expect(sanitizeCool18Keywords("妖女妖女妖女妖女")).toBe("妖女妖女妖女妖")
   })
 

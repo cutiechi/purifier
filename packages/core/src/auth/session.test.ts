@@ -49,6 +49,12 @@ describe("cookies", () => {
     })
   })
 
+  test("malformed percent-encoding skipped, no URIError", () => {
+    expect(parseCookieHeader("bad=%E0%A4%A; good=1; a=%ZZ")).toEqual({
+      good: "1",
+    })
+  })
+
   test("isSecureRequest proto header", () => {
     expect(
       isSecureRequest({

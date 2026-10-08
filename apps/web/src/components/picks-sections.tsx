@@ -78,22 +78,25 @@ function ChipLink({
   )
 }
 
-/** 扫文单条：整行 raw title 卡片 + 标题行右侧「搜索相似」触发器 + 展开面板 */
+/** 扫文单条：整行 raw title 卡片 + 卡片右侧「搜索相似」触发器 + 展开面板 */
 function PicksSimilarSingle({ link }: { link: PickLink }) {
   const [open, setOpen] = useState(false)
   const groupKey = groupKeyFromTitle(link.title)
+  if (!groupKey) {
+    return <PostCard href={readPath(link.tid)} title={link.title} />
+  }
   return (
     <div className="flex flex-col gap-1.5">
-      <PostCard
-        href={readPath(link.tid)}
-        title={link.title}
-        trailing={
-          groupKey ? (
-            <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
-          ) : undefined
-        }
-      />
-      {groupKey && open && (
+      {/* 触发器渲染在卡片 (Link) 之外：button 嵌套在 a 内是非法 HTML */}
+      <div className="flex items-center gap-2">
+        <PostCard
+          href={readPath(link.tid)}
+          title={link.title}
+          className="min-w-0 flex-1"
+        />
+        <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+      </div>
+      {open && (
         <SimilarSearchPanel
           title={groupSearchTitle(link.title)}
           groupKey={groupKey}

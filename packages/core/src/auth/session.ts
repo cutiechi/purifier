@@ -59,7 +59,9 @@ export function sessionToAuthMe(p: SessionPayload): AuthMe {
   return { enabled: true, sub: p.sub, email: p.email, name: p.name }
 }
 
-export function parseCookieHeader(header: string | null): Record<string, string> {
+export function parseCookieHeader(
+  header: string | null
+): Record<string, string> {
   if (header === null) return {}
   const out: Record<string, string> = {}
   for (const pair of header.split(";")) {
@@ -67,9 +69,14 @@ export function parseCookieHeader(header: string | null): Record<string, string>
     if (trimmed === "") continue
     const eq = trimmed.indexOf("=")
     if (eq === -1) continue
-    const name = decodeURIComponent(trimmed.slice(0, eq).trim())
-    const value = decodeURIComponent(trimmed.slice(eq + 1).trim())
-    out[name] = value
+    // 畸形百分号编码会抛 URIError：跳过该 cookie 而不是让整个请求 500
+    try {
+      const name = decodeURIComponent(trimmed.slice(0, eq).trim())
+      const value = decodeURIComponent(trimmed.slice(eq + 1).trim())
+      out[name] = value
+    } catch {
+      /* skip malformed cookie pair */
+    }
   }
   return out
 }

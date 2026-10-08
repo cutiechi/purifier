@@ -1,7 +1,7 @@
 import { IconSearch } from "@/components/icons"
 import { cn } from "@workspace/ui/lib/utils"
 
-/** 「搜索相似」入口按钮：容器渲染在标题行最右侧，点击开合下方搜索结果面板 */
+/** 「搜索相似」入口按钮：由容器渲染在卡片外右侧，点击开合下方搜索结果面板 */
 export function SimilarTrigger({
   open,
   onToggle,
@@ -14,13 +14,7 @@ export function SimilarTrigger({
   return (
     <button
       type="button"
-      onClick={(e) => {
-        // 触发器可能位于卡片 <Link> 内部（PostCard 的 trailing 插槽），
-        // 拦截事件避免点击触发页面跳转
-        e.preventDefault()
-        e.stopPropagation()
-        onToggle()
-      }}
+      onClick={onToggle}
       aria-expanded={open}
       aria-label="搜索相似"
       className={cn(
@@ -32,6 +26,7 @@ export function SimilarTrigger({
       )}
     >
       <IconSearch size={13} />
+      {/* 移动端只留图标：文字常驻会挤压卡片标题空间（aria-label 保证可访问名） */}
       <span className="hidden sm:inline">搜索相似</span>
     </button>
   )

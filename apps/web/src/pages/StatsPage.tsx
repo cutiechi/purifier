@@ -79,29 +79,54 @@ export default function StatsPage() {
     }
   }, [reloadKey])
 
-  const hasSessions = !!data && (data.summary.trackedSince !== null)
+  const hasSessions = !!data && data.summary.trackedSince !== null
+  // 无阅读会话但已有收藏/标签/书签等库存时，仍展示页面（含库存区）
+  const hasInventory =
+    !!data && Object.values(data.inventory).some((n) => n > 0)
   const maxHour = data ? Math.max(1, ...data.timeOfDay) : 1
+  const topMax = data?.topItems[0]?.durationS ?? 0
 
   return (
     <PageShell maxWidth="xwide">
-      <PageHeader title="统计" description="阅读时长 · 连读 · 时段（论坛与书库）" />
+      <PageHeader
+        title="统计"
+        description="阅读时长 · 连读 · 时段（论坛与书库）"
+      />
 
       <AsyncBody
         loading={loading}
         error={error}
-        empty={!hasSessions}
+        empty={!hasSessions && !hasInventory}
         emptyText="还没有阅读记录，读几篇再来看看吧"
         onRetry={() => setReloadKey((k) => k + 1)}
       >
         {data && (
           <div className="space-y-8">
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <StatCard value={formatDuration(data.summary.totalDurationS)} label="累计时长" />
-              <StatCard value={String(data.summary.currentStreak)} label="当前连读(天)" />
-              <StatCard value={String(data.summary.longestStreak)} label="最长连读(天)" />
-              <StatCard value={String(data.summary.activeDays)} label="活跃天数" />
-              <StatCard value={formatDuration(data.summary.thisWeekS)} label="本周时长" />
-              <StatCard value={formatDuration(data.summary.thisMonthS)} label="本月时长" />
+              <StatCard
+                value={formatDuration(data.summary.totalDurationS)}
+                label="累计时长"
+              />
+              <StatCard
+                value={String(data.summary.currentStreak)}
+                label="当前连读(天)"
+              />
+              <StatCard
+                value={String(data.summary.longestStreak)}
+                label="最长连读(天)"
+              />
+              <StatCard
+                value={String(data.summary.activeDays)}
+                label="活跃天数"
+              />
+              <StatCard
+                value={formatDuration(data.summary.thisWeekS)}
+                label="本周时长"
+              />
+              <StatCard
+                value={formatDuration(data.summary.thisMonthS)}
+                label="本月时长"
+              />
               {data.summary.trackedSince != null && (
                 <StatCard
                   value={formatDateTime(data.summary.trackedSince)}
@@ -123,12 +148,19 @@ export default function StatsPage() {
                     key={h}
                     title={`${h}:00 · ${formatDuration(s)}`}
                     className="flex-1 rounded-t bg-primary/70"
-                    style={{ height: `${(s / maxHour) * 100}%`, minHeight: s > 0 ? 2 : 0 }}
+                    style={{
+                      height: `${(s / maxHour) * 100}%`,
+                      minHeight: s > 0 ? 2 : 0,
+                    }}
                   />
                 ))}
               </div>
               <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-                <span>0</span><span>6</span><span>12</span><span>18</span><span>23</span>
+                <span>0</span>
+                <span>6</span>
+                <span>12</span>
+                <span>18</span>
+                <span>23</span>
               </div>
             </section>
 
@@ -141,12 +173,16 @@ export default function StatsPage() {
                   <ul className="space-y-2">
                     {data.topItems.map((t) => {
                       const href =
-                        t.kind === "post" ? readPath(t.id, t.site) : bookPath(t.id, { site: t.site })
+                        t.kind === "post"
+                          ? readPath(t.id, t.site)
+                          : bookPath(t.id, { site: t.site })
                       return (
                         <li key={`${t.site}:${t.kind}:${t.id}`}>
                           <Link to={href} className="block">
                             <div className="flex items-center justify-between gap-3">
-                              <span className="line-clamp-1 text-sm text-foreground">{t.title}</span>
+                              <span className="line-clamp-1 text-sm text-foreground">
+                                {t.title}
+                              </span>
                               <span className="shrink-0 text-xs text-muted-foreground">
                                 {formatDuration(t.durationS)}
                               </span>
@@ -155,7 +191,7 @@ export default function StatsPage() {
                               <div
                                 className="h-full rounded bg-primary/70"
                                 style={{
-                                  width: `${(t.durationS / data.topItems[0].durationS) * 100}%`,
+                                  width: `${topMax > 0 ? (t.durationS / topMax) * 100 : 0}%`,
                                 }}
                               />
                             </div>
@@ -174,13 +210,21 @@ export default function StatsPage() {
                   <ul className="space-y-1.5">
                     {data.recentSessions.map((r, i) => {
                       const href =
-                        r.kind === "post" ? readPath(r.id, r.site) : bookPath(r.id, { site: r.site })
+                        r.kind === "post"
+                          ? readPath(r.id, r.site)
+                          : bookPath(r.id, { site: r.site })
                       return (
                         <li key={i}>
-                          <Link to={href} className="flex items-center justify-between gap-3 text-sm">
-                            <span className="line-clamp-1 text-foreground">{r.title}</span>
+                          <Link
+                            to={href}
+                            className="flex items-center justify-between gap-3 text-sm"
+                          >
+                            <span className="line-clamp-1 text-foreground">
+                              {r.title}
+                            </span>
                             <span className="shrink-0 text-xs text-muted-foreground">
-                              {formatDateTime(r.startedAt)} · {formatDuration(r.durationS)}
+                              {formatDateTime(r.startedAt)} ·{" "}
+                              {formatDuration(r.durationS)}
                             </span>
                           </Link>
                         </li>
@@ -195,11 +239,20 @@ export default function StatsPage() {
               <SectionLabel>库存</SectionLabel>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <StatCard value={String(data.inventory.history)} label="历史" />
-                <StatCard value={String(data.inventory.favorites)} label="收藏" />
+                <StatCard
+                  value={String(data.inventory.favorites)}
+                  label="收藏"
+                />
                 <StatCard value={String(data.inventory.tags)} label="标签" />
                 <StatCard value={String(data.inventory.groups)} label="分组" />
-                <StatCard value={String(data.inventory.characters)} label="角色" />
-                <StatCard value={String(data.inventory.bookmarks)} label="书签" />
+                <StatCard
+                  value={String(data.inventory.characters)}
+                  label="角色"
+                />
+                <StatCard
+                  value={String(data.inventory.bookmarks)}
+                  label="书签"
+                />
               </div>
             </section>
           </div>

@@ -13,33 +13,45 @@ function DeleteHistoryButton({
 }) {
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        const ok = await confirm({
-          title: "删除历史记录？",
-          description: `从浏览历史删除「${item.title}」。`,
-          confirmLabel: "删除",
-          destructive: true,
-        })
-        if (!ok) return
-        setBusy(true)
-        try {
-          const res = await fetch(
-            `${api.meHistory}?kind=${item.kind}&id=${encodeURIComponent(item.id)}`,
-            { method: "DELETE" }
-          )
-          if (res.ok) reload()
-        } finally {
-          setBusy(false)
-        }
-      }}
-      className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
-    >
-      删除
-    </button>
+    <span className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          const ok = await confirm({
+            title: "删除历史记录？",
+            description: `从浏览历史删除「${item.title}」。`,
+            confirmLabel: "删除",
+            destructive: true,
+          })
+          if (!ok) return
+          setBusy(true)
+          setError("")
+          try {
+            const res = await fetch(
+              `${api.meHistory}?kind=${item.kind}&id=${encodeURIComponent(item.id)}&site=${encodeURIComponent(item.site)}`,
+              { method: "DELETE" }
+            )
+            if (res.ok) reload()
+            else setError("删除失败")
+          } catch {
+            setError("网络异常")
+          } finally {
+            setBusy(false)
+          }
+        }}
+        className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
+      >
+        删除
+      </button>
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -54,6 +66,7 @@ function HistoryToolbar({
 }) {
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
 
   const clearPage = async () => {
     if (items.length === 0) return
@@ -65,15 +78,23 @@ function HistoryToolbar({
     })
     if (!ok) return
     setBusy(true)
+    setError("")
     try {
       const res = await fetch(api.meHistory, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map((it) => ({ kind: it.kind, id: it.id })),
+          items: items.map((it) => ({
+            kind: it.kind,
+            id: it.id,
+            site: it.site,
+          })),
         }),
       })
       if (res.ok) reload()
+      else setError("清空失败，请重试")
+    } catch {
+      setError("网络异常，请重试")
     } finally {
       setBusy(false)
     }
@@ -88,9 +109,13 @@ function HistoryToolbar({
     })
     if (!ok) return
     setBusy(true)
+    setError("")
     try {
       const res = await fetch(`${api.meHistory}?all=1`, { method: "DELETE" })
       if (res.ok) reload()
+      else setError("清空失败，请重试")
+    } catch {
+      setError("网络异常，请重试")
     } finally {
       setBusy(false)
     }
@@ -114,6 +139,11 @@ function HistoryToolbar({
       >
         清空全部
       </button>
+      {error && (
+        <p role="alert" className="basis-full text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

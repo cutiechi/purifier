@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Settings2, Star, Tag } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconRefreshCw, IconStar } from "@/components/icons"
@@ -32,7 +32,9 @@ export interface ItemState {
 export function useItemState(kind: "post" | "book", id: string) {
   const site = useSite()
   const [state, setState] = useState<ItemState | null>(null)
+  const seqRef = useRef(0)
   const reload = useCallback(async () => {
+    const seq = ++seqRef.current
     if (!id) return
     try {
       const res = await fetch(
@@ -40,6 +42,8 @@ export function useItemState(kind: "post" | "book", id: string) {
       )
       if (!res.ok) return
       const json = (await res.json()) as ItemState
+      // 过期响应（条目/站点已切换）不回填，防旧状态覆盖新条目
+      if (seq !== seqRef.current) return
       setState(json)
     } catch {
       // 状态读取失败静默，不影响正文展示
@@ -79,6 +83,7 @@ export function ItemActions({
   const site = useSite()
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState("")
 
   const toggleFavorite = async () => {
     if (state?.favorited) {
@@ -92,6 +97,7 @@ export function ItemActions({
       if (!ok) return
     }
     setBusy(true)
+    setActionError("")
     try {
       const method = state?.favorited ? "DELETE" : "PUT"
       const res = await fetch(
@@ -102,20 +108,36 @@ export function ItemActions({
           body: JSON.stringify({ site }),
         }
       )
-      if (res.ok) await reload()
+      if (res.ok) {
+        await reload()
+      } else {
+        setActionError("收藏操作失败，请重试")
+      }
+    } catch {
+      setActionError("网络异常，请重试")
     } finally {
       setBusy(false)
     }
   }
 
   const saveTags = async (tags: string[]) => {
-    const res = await fetch(api.meTags, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, id, tags, site }),
-    })
-    if (res.ok) await reload()
-    return res.ok
+    try {
+      const res = await fetch(api.meTags, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, id, tags, site }),
+      })
+      if (!res.ok) {
+        setActionError("标签保存失败，请重试")
+        return false
+      }
+      await reload()
+      setActionError("")
+      return true
+    } catch {
+      setActionError("网络异常，请重试")
+      return false
+    }
   }
 
   const [removing, setRemoving] = useState<string | null>(null)
@@ -138,94 +160,99 @@ export function ItemActions({
       style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 1.25rem)" }}
     >
       <Popover
-      side="top"
-      align="end"
-      triggerAriaLabel="阅读操作与偏好"
-      trigger={
-        <span
-          className={cn(
-            "relative inline-flex size-11 items-center justify-center rounded-2xl border border-border/80 bg-card/95 shadow-md backdrop-blur transition-colors sm:size-10",
-            favorited
-              ? "text-amber-600 dark:text-amber-400"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        side="top"
+        align="end"
+        triggerAriaLabel="阅读操作与偏好"
+        trigger={
+          <span
+            className={cn(
+              "relative inline-flex size-11 items-center justify-center rounded-2xl border border-border/80 bg-card/95 shadow-md backdrop-blur transition-colors sm:size-10",
+              favorited
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Settings2 className="size-5 sm:size-4" />
+            {favorited && (
+              <Star
+                className="absolute top-1 right-1 size-2.5 fill-current"
+                aria-hidden
+              />
+            )}
+            {hasTags && (
+              <Tag className="absolute right-1 bottom-1 size-2.5" aria-hidden />
+            )}
+          </span>
+        }
+      >
+        <div className="flex w-80 flex-col gap-1 sm:w-96">
+          {actionError && (
+            <p
+              role="alert"
+              className="rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
+            >
+              {actionError}
+            </p>
           )}
-        >
-          <Settings2 className="size-5 sm:size-4" />
-          {favorited && (
-            <Star
-              className="absolute top-1 right-1 size-2.5 fill-current"
-              aria-hidden
+          {/* 收藏 */}
+          <button
+            type="button"
+            onClick={() => void toggleFavorite()}
+            disabled={busy}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50",
+              favorited
+                ? "text-amber-600 hover:bg-amber-400/10 dark:text-amber-400"
+                : "hover:bg-accent"
+            )}
+          >
+            <IconStar size={14} filled={favorited} />
+            {favorited ? "已收藏" : "收藏"}
+          </button>
+
+          {/* 刷新 */}
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            <IconRefreshCw
+              size={14}
+              className={refreshing ? "animate-spin" : undefined}
+            />
+            刷新
+          </button>
+
+          {/* 补充分组（仅 post 显示） */}
+          {kind === "post" && replies != null && (
+            <GroupSupplementPanel
+              groupId={state?.groupId}
+              groupTitle={state?.groupTitle}
+              replies={replies}
+              contentLinks={contentLinks}
+              currentTid={id}
+              currentTitle={currentTitle ?? ""}
+              onSuccess={() => void reload()}
             />
           )}
-          {hasTags && (
-            <Tag
-              className="absolute right-1 bottom-1 size-2.5"
-              aria-hidden
-            />
-          )}
-        </span>
-      }
-    >
-      <div className="flex w-80 flex-col gap-1 sm:w-96">
-        {/* 收藏 */}
-        <button
-          type="button"
-          onClick={() => void toggleFavorite()}
-          disabled={busy}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50",
-            favorited
-              ? "text-amber-600 hover:bg-amber-400/10 dark:text-amber-400"
-              : "hover:bg-accent"
-          )}
-        >
-          <IconStar size={14} filled={favorited} />
-          {favorited ? "已收藏" : "收藏"}
-        </button>
 
-        {/* 刷新 */}
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
-        >
-          <IconRefreshCw
-            size={14}
-            className={refreshing ? "animate-spin" : undefined}
+          {/* 标签 */}
+          <TagEditor
+            tags={state?.tags ?? []}
+            onSave={saveTags}
+            onRemove={(tag) => void removeTag(tag)}
+            removing={removing}
           />
-          刷新
-        </button>
 
-        {/* 补充分组（仅 post 显示） */}
-        {kind === "post" && replies != null && (
-          <GroupSupplementPanel
-            groupId={state?.groupId}
-            groupTitle={state?.groupTitle}
-            replies={replies}
-            contentLinks={contentLinks}
-            currentTid={id}
-            currentTitle={currentTitle ?? ""}
-            onSuccess={() => void reload()}
-          />
-        )}
+          {/* 人物 */}
+          {characterSlot}
 
-        {/* 标签 */}
-        <TagEditor
-          tags={state?.tags ?? []}
-          onSave={saveTags}
-          onRemove={(tag) => void removeTag(tag)}
-          removing={removing}
-        />
+          <div className="my-2 border-t border-border" />
 
-        {/* 人物 */}
-        {characterSlot}
-
-        <div className="my-2 border-t border-border" />
-
-        {/* 阅读偏好 */}
-        <ReadingSettingsPanel />
-      </div>
+          {/* 阅读偏好 */}
+          <ReadingSettingsPanel />
+        </div>
       </Popover>
     </div>
   )
@@ -262,15 +289,18 @@ function TagEditor({
 
   const submit = async () => {
     setBusy(true)
-    const next = value
-      .split(/[，,]/)
-      .map((t) => t.trim())
-      .filter(Boolean)
-    const ok = await onSave(next)
-    setBusy(false)
-    if (ok) {
-      setValue("")
-      setEditing(false)
+    try {
+      const next = value
+        .split(/[，,]/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+      const ok = await onSave(next)
+      if (ok) {
+        setValue("")
+        setEditing(false)
+      }
+    } finally {
+      setBusy(false)
     }
   }
 

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
+import { readdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   assertSafeId,
   clearCache,
   contentCachePath,
+  deleteItemCaches,
   readContentCache,
   readRepliesCache,
   repliesCachePath,
@@ -57,6 +59,39 @@ describe("content cache", () => {
     await writeContentCache(dir, "1", "book", "2", "v2")
     expect((await readContentCache(dir, "1", "book", "2"))?.data).toBe("v2")
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("同一 key 并发写：互不覆盖 tmp，最终文件完整", async () => {
+    const dir = tempDir()
+    const big = "x".repeat(100_000)
+    await Promise.all([
+      writeContentCache(dir, "1", "post", "42", `A${big}`),
+      writeContentCache(dir, "1", "post", "42", `B${big}`),
+    ])
+    const hit = await readContentCache(dir, "1", "post", "42")
+    expect(hit?.data === `A${big}` || hit?.data === `B${big}`).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("deleteItemCaches", () => {
+  test("删除正文/回复/章节缓存，跳过 .tmp，不影响其它条目", async () => {
+    await writeContentCache(dir, "1", "post", "10", "body")
+    await writeRepliesCache(dir, "1", "10", [])
+    await writeContentCache(dir, "1", "book", "7", "toc")
+    await writeContentCache(dir, "1", "book", "7", "ch1", 1)
+    // 模拟进行中的原子写临时文件
+    await writeFile(
+      join(dir, "cache", "1", "post-10.html.123-1.tmp"),
+      "partial"
+    )
+    const n = await deleteItemCaches(dir, "1", "post", "10")
+    expect(n).toBe(2)
+    expect(await readContentCache(dir, "1", "post", "10")).toBeNull()
+    expect(await readRepliesCache(dir, "1", "10")).toBeNull()
+    expect((await readContentCache(dir, "1", "book", "7", 1))?.data).toBe("ch1")
+    const left = await readdir(join(dir, "cache", "1"))
+    expect(left).toContain("post-10.html.123-1.tmp")
   })
 })
 

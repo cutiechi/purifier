@@ -63,6 +63,7 @@ export default function ReadPage() {
     rect: DOMRect
   } | null>(null)
   const [mutationError, setMutationError] = useState("")
+  const [bookmarkError, setBookmarkError] = useState("")
   // PUT/DELETE 失败时展示错误；成功后清除（add 成功才更新名单，remove 失败已回滚）。
   // 跨组同名 PUT 409 → 引导去面板合并。
   const handleAdd = async (name: string, clusterId?: number) => {
@@ -88,16 +89,16 @@ export default function ReadPage() {
       setMutationError(e instanceof Error ? e.message : "删除失败")
     }
   }
-  // 浮条保存书签：409（该篇/章已满）等错误写入 mutationError 展示
+  // 浮条保存书签：409（该篇已满）等错误写主界面横幅（人物面板里的 mutationError 看不见）
   const handleBookmark = async (quote: string, note: string) => {
     const p = document.documentElement.scrollHeight - window.innerHeight
     const scrollProgress = p <= 0 ? 0 : window.scrollY / p
     try {
       await addBookmark({ quote, note, scrollProgress })
-      setMutationError("")
+      setBookmarkError("")
     } catch (e) {
       const status = (e as { status?: number } | null)?.status
-      setMutationError(
+      setBookmarkError(
         status === 409
           ? "该书签已满（50），请先删除旧的"
           : e instanceof Error
@@ -169,7 +170,7 @@ export default function ReadPage() {
       setError("")
       try {
         const res = await fetch(
-          `${api.posts}?tid=${encodeURIComponent(tid)}${refresh ? "&refresh=1" : ""}`,
+          `${api.posts}?tid=${encodeURIComponent(tid)}&site=${site}${refresh ? "&refresh=1" : ""}`,
           { signal: opts?.signal }
         )
         const json = await res.json()
@@ -193,7 +194,7 @@ export default function ReadPage() {
         }
       }
     },
-    [tid]
+    [tid, site]
   )
 
   useEffect(() => {
@@ -202,6 +203,11 @@ export default function ReadPage() {
     fetchContent({ signal: controller.signal })
     return () => controller.abort()
   }, [fetchContent])
+
+  // 换帖清书签错误（上一条的失败反馈不带到新帖）
+  useEffect(() => {
+    setBookmarkError("")
+  }, [tid])
 
   // 定位 effect（独立于进度 hook）：内容与书签都就绪且有有效 target 时决策一次
   // （ref 按 bm+id+site 防重滚；换 bm/换帖重新决策）。双 rAF 等字体与布局稳定后再滚。
@@ -260,6 +266,14 @@ export default function ReadPage() {
               {refreshNotice && (
                 <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
                   {refreshNotice}
+                </div>
+              )}
+              {bookmarkError && (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-2.5 text-sm text-destructive"
+                >
+                  {bookmarkError}
                 </div>
               )}
               <ArticleView

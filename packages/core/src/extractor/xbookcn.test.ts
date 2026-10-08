@@ -120,3 +120,37 @@ describe("lists", () => {
     expect(e.hasNextPage(fx("toc.html"))).toBe(false)
   })
 })
+
+describe("软 404 / 拦截页防护", () => {
+  test("章节页空正文 → 404", () => {
+    expect(() =>
+      e.extractBookContent(
+        '<html><body><main><h1>第一章</h1><div id="read-article"></div></main></body></html>',
+        { chapter: "1" }
+      )
+    ).toThrow(/chapter content not found/)
+  })
+
+  test("章节页验证码墙 → 404", () => {
+    expect(() =>
+      e.extractBookContent(
+        '<html><body><main><h1>提示</h1><div id="read-article">请稍候，正在验证您不是机器人，验证码加载中…</div></main></body></html>',
+        { chapter: "1" }
+      )
+    ).toThrow(/chapter content not found/)
+  })
+
+  test("目录页无有效文本 → 404", () => {
+    expect(() =>
+      e.extractBookContent("<html><body><main></main></body></html>")
+    ).toThrow(/book content not found/)
+  })
+
+  test("目录页验证码墙 → 404", () => {
+    expect(() =>
+      e.extractBookContent(
+        "<html><body><main>请稍候，正在验证您不是机器人，验证码加载中…</main></body></html>"
+      )
+    ).toThrow(/book content not found/)
+  })
+})

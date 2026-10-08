@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio"
 import { fetchUpstream } from "../upstream"
 import { sanitizeContentHtml } from "./sanitize"
+import { isSoft404Text } from "./soft404"
 import {
   Extractor,
   ChapterLink,
@@ -22,13 +23,6 @@ import {
 
 /** 回复树最大深度：线性深链也截断，防递归爆栈 */
 export const MAX_REPLY_DEPTH = 512
-
-/** 正文最小文本长度：低于此值视为软 404（错误页/验证页残留片段） */
-const MIN_PRE_TEXT_LEN = 20
-/** 墙页判定：短文本（<此长度）含墙标记才判墙，避免长正文误伤 */
-const WALL_PAGE_MAX_LEN = 200
-const WALL_PAGE_RE =
-  /验证码|cloudflare|captcha|安全检查|cf[-_ ]?challenge|blocked/i
 
 /** threadsearch 关键词最大字符数：实测 ≥8 字符查询恒返 0 结果 */
 const SEARCH_MAX_KEYWORDS = 7
@@ -79,14 +73,19 @@ export class Cool18Extractor implements Extractor {
         .trim()
 
     // 优先 #content-section pre；否则取最长的 pre
-    let pre = $("#content-section pre").first()
     let preHtml = ""
-    if (pre.length) {
-      preHtml = pre.html() || ""
+    let preText = ""
+    const sectionPre = $("#content-section pre").first()
+    if (sectionPre.length) {
+      preHtml = sectionPre.html() || ""
+      preText = sectionPre.text()
     } else {
       $("pre").each((_i, el) => {
         const h = $(el).html() || ""
-        if (h.length > preHtml.length) preHtml = h
+        if (h.length > preHtml.length) {
+          preHtml = h
+          preText = $(el).text()
+        }
       })
     }
     if (!preHtml) {
@@ -95,12 +94,7 @@ export class Cool18Extractor implements Extractor {
 
     // 软 404 / 验证码墙：正文过短，或短文本含墙标记 → 不当正文，
     // 避免验证页/拦截页被清洗后写入磁盘缓存永久返回
-    const preText = pre.text() || ""
-    const t = preText.trim()
-    if (
-      t.length < MIN_PRE_TEXT_LEN ||
-      (t.length < WALL_PAGE_MAX_LEN && WALL_PAGE_RE.test(t))
-    ) {
+    if (isSoft404Text(preText)) {
       throw new ExtractorError("content not found", 404)
     }
 
@@ -206,7 +200,9 @@ export class Cool18Extractor implements Extractor {
       })
       preHtml = best
     }
-    if (!preHtml.trim()) {
+    // 软 404 / 验证码墙：空正文或拦截页同样判 404，避免写入持久缓存
+    const preText = $("<div>").html(preHtml).text()
+    if (isSoft404Text(preText)) {
       throw new ExtractorError("book content not found", 404)
     }
 
@@ -825,10 +821,7 @@ export class Cool18Extractor implements Extractor {
     })
   }
 
-  async fetchHomeLinks(
-    mtid: string,
-    signal?: AbortSignal
-  ): Promise<HomePage> {
+  async fetchHomeLinks(mtid: string, signal?: AbortSignal): Promise<HomePage> {
     // 仅允许数字游标，防止脏 query 注入
     if (!/^\d+$/.test(mtid)) {
       throw new ExtractorError("invalid mtid", 400)
@@ -875,10 +868,7 @@ export class Cool18Extractor implements Extractor {
       seen.add(tid)
 
       // 下一页游标：本批主帖中最小的 tid（与原站 _mtid 推进逻辑一致）
-      if (
-        nextMtid === null ||
-        parseInt(tid, 10) < parseInt(nextMtid, 10)
-      ) {
+      if (nextMtid === null || parseInt(tid, 10) < parseInt(nextMtid, 10)) {
         nextMtid = tid
       }
 
@@ -927,17 +917,35 @@ export class Cool18Extractor implements Extractor {
   }
 
   /**
-   * 仅同站（站内相对路径或 cool18.com）URL 才抽取站内 id，
+   * 仅同站（站内相对路径或 cool18.com 主机）URL 才抽取站内 id，
    * 防外站 tid=/cid= 参数误判为站内链。
    * //host/... 是协议相对外链，不能因 startsWith("/") 误判为站内。
    * 纯相对（index.php?...）是站内相对路径：无 scheme、不以 // 开头即接受。
    */
   private static isSameSiteHref(href: string): boolean {
-    return (
-      (href.startsWith("/") && !href.startsWith("//")) ||
-      /cool18\.com/i.test(href) ||
-      (!href.startsWith("//") && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href))
-    )
+    if (href.startsWith("//")) {
+      // 协议相对外链：按 https 解析 host 判断
+      return Cool18Extractor.isCool18Host(`https:${href}`)
+    }
+    if (href.startsWith("/")) return true
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
+      // 带 scheme 的绝对 URL：仅 http(s) 且 host 为 cool18.com/子域
+      return Cool18Extractor.isCool18Host(href)
+    }
+    // 纯相对（index.php?...）
+    return true
+  }
+
+  /** host 精确匹配 cool18.com 或其子域（防 cool18.com.evil.io 之类后缀伪装） */
+  private static isCool18Host(url: string): boolean {
+    try {
+      const u = new URL(url)
+      if (u.protocol !== "http:" && u.protocol !== "https:") return false
+      const host = u.hostname.toLowerCase()
+      return host === "cool18.com" || host.endsWith(".cool18.com")
+    } catch {
+      return false
+    }
   }
 
   private extractTid(href: string): string | null {

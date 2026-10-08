@@ -23,6 +23,7 @@ const JobsPage = lazy(() => import("@/pages/JobsPage"))
 const ArchivePage = lazy(() => import("@/pages/ArchivePage"))
 const StatsPage = lazy(() => import("@/pages/StatsPage"))
 const LoginPage = lazy(() => import("@/pages/LoginPage"))
+const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"))
 
 function PageFallback() {
   return (
@@ -39,9 +40,7 @@ function PageFallback() {
 function RouteBoundary({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   // 只用 resetKey：导航清错误状态但不重挂 children（key 会连页面一起 remount，丢失状态）
-  return (
-    <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
-  )
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
 }
 
 export function App() {
@@ -221,7 +220,7 @@ export function App() {
             path="*"
             element={
               <RouteBoundary>
-                <HomePage />
+                <NotFoundPage />
               </RouteBoundary>
             }
           />

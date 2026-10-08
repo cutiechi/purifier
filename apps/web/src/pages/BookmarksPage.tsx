@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { useConfirm } from "@/components/confirm-dialog"
-import {
-  ListMeta,
-  SearchForm,
-  useScrollTop,
-} from "@/components/form-controls"
+import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
 import { type Bookmark } from "@/hooks/use-bookmarks"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
@@ -48,32 +44,44 @@ function DeleteBookmarkButton({
 }) {
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        const ok = await confirm({
-          title: "删除书签？",
-          description: `移除「${item.title}」的这条摘录。`,
-          confirmLabel: "删除",
-          destructive: true,
-        })
-        if (!ok) return
-        setBusy(true)
-        try {
-          const res = await fetch(`${api.meBookmarks}/${item.id}`, {
-            method: "DELETE",
+    <span className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          const ok = await confirm({
+            title: "删除书签？",
+            description: `移除「${item.title}」的这条摘录。`,
+            confirmLabel: "删除",
+            destructive: true,
           })
-          if (res.ok) reload()
-        } finally {
-          setBusy(false)
-        }
-      }}
-      className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
-    >
-      删除
-    </button>
+          if (!ok) return
+          setBusy(true)
+          setError("")
+          try {
+            const res = await fetch(`${api.meBookmarks}/${item.id}`, {
+              method: "DELETE",
+            })
+            if (res.ok) reload()
+            else setError("删除失败")
+          } catch {
+            setError("网络异常")
+          } finally {
+            setBusy(false)
+          }
+        }}
+        className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
+      >
+        删除
+      </button>
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -232,9 +240,7 @@ export default function BookmarksPage() {
         empty={items.length === 0}
         onRetry={() => void reload()}
         emptyText={
-          q || kind
-            ? "没有匹配的书签"
-            : "还没有书签，阅读时选中正文即可添加"
+          q || kind ? "没有匹配的书签" : "还没有书签，阅读时选中正文即可添加"
         }
       >
         <PostList>

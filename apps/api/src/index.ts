@@ -163,7 +163,8 @@ function isDeleteItem(
     (kind === "post" || kind === "book") &&
     typeof id === "string" &&
     /^[A-Za-z0-9]+$/.test(id) &&
-    (site === undefined || typeof site === "string")
+    (site === undefined ||
+      (typeof site === "string" && /^[A-Za-z0-9]+$/.test(site)))
   )
 }
 
@@ -538,7 +539,8 @@ async function handleBrowse(url: URL): Promise<Response> {
 
   const site = url.searchParams.get("site") ?? undefined
   const siteId = site ?? DEFAULT_SITE
-  const cacheKey = `browse:${siteId}:${type ?? ""}:${q ?? ""}:${page}`
+  // encode：type/q 可含 ":"，不 encode 会产生跨语义 key 撞车
+  const cacheKey = `browse:${encodeURIComponent(siteId)}:${encodeURIComponent(type ?? "")}:${encodeURIComponent(q ?? "")}:${page}`
   const hit = getListMemCache<unknown>(cacheKey)
   if (hit) return jsonOk(hit, LIST_CACHE_HEADERS)
 
@@ -562,14 +564,12 @@ async function handleSearch(url: URL): Promise<Response> {
   const results = await Promise.all(
     Object.keys(SITES).map(async (site) => {
       try {
-        const cacheKey = `browse:${site}::${q}:${page}`
+        // 独立 search: 命名空间 + encode q，避免与 browse 的 key 互串
+        const cacheKey = `search:${encodeURIComponent(site)}:${encodeURIComponent(q)}:${page}`
         const hit = getListMemCache<CategoryPage>(cacheKey)
         if (hit) return { site, page: hit }
         const extractor = resolveSite(site)
-        const result = await extractor.fetchCategoryPage(
-          { keywords: q },
-          page
-        )
+        const result = await extractor.fetchCategoryPage({ keywords: q }, page)
         setListMemCache(cacheKey, result)
         return { site, page: result }
       } catch (err) {
@@ -589,7 +589,9 @@ async function handleSearch(url: URL): Promise<Response> {
     error,
   }))
   const failures = results.filter(
-    (r): r is {
+    (
+      r
+    ): r is {
       site: string
       page: null
       error: string
@@ -599,9 +601,7 @@ async function handleSearch(url: URL): Promise<Response> {
 
   if (failures.length === Object.keys(SITES).length) {
     const first = failures[0]!.err
-    const status = failures.every(
-      (f) => f.err instanceof UpstreamTimeoutError
-    )
+    const status = failures.every((f) => f.err instanceof UpstreamTimeoutError)
       ? 504
       : first instanceof ExtractorError
         ? first.statusCode
@@ -653,7 +653,11 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
     // 全清历史：顺带清全部内容缓存（无按站精确枚举文件，整清 cache/）
     const removed = store.clearHistory(site)
     if (!site) {
-      await clearCache(DATA_DIR)
+      try {
+        await clearCache(DATA_DIR)
+      } catch (err) {
+        console.warn("[cache] clear failed:", err)
+      }
     }
     // 带 site 时不全清 cache 目录（避免误伤他站）；单站孤儿缓存可接受，下次 refresh 覆盖
     return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
@@ -666,7 +670,14 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
     const id = meIdParam(url)
     const siteId = site ?? "1"
     const existed = store.deleteItem(siteId, kind, id)
-    if (existed) await deleteItemCaches(DATA_DIR, siteId, kind, id)
+    // DB 已删，缓存清理尽力而为：磁盘失败不把成功操作报成失败
+    if (existed) {
+      try {
+        await deleteItemCaches(DATA_DIR, siteId, kind, id)
+      } catch (err) {
+        console.warn("[cache] delete failed:", err)
+      }
+    }
     return jsonOk({ ok: true, removed: existed ? 1 : 0 }, NO_STORE_HEADERS)
   }
 
@@ -695,8 +706,14 @@ async function handleHistoryDelete(req: Request): Promise<Response> {
     id: it.id,
   }))
   const removed = store.deleteItems(pairs)
+  // DB 已删，缓存清理尽力而为：磁盘失败不把成功操作报成失败
   await Promise.all(
-    pairs.map((p) => deleteItemCaches(DATA_DIR, p.site, p.kind, p.id))
+    pairs.map((p) =>
+      deleteItemCaches(DATA_DIR, p.site, p.kind, p.id).catch((err) => {
+        console.warn("[cache] delete failed:", err)
+        return 0
+      })
+    )
   )
   return jsonOk({ ok: true, removed }, NO_STORE_HEADERS)
 }
@@ -983,15 +1000,24 @@ async function handleFavoriteWrite(
   const url = new URL(req.url)
   const kind = meKindParam(url)
   const id = meIdParam(url)
-  // site 走 body（Task 10 前端 PUT body 带 site）；无 body（旧客户端）默认 "1"
+  // site 走 body（Task 10 前端 PUT body 带 site）；空 body 才允许默认 "1"，
+  // 非空 body 必须是合法 JSON，畸形 body 不能静默按 site=1 执行
   let site = "1"
-  try {
-    const body: unknown = await req.json()
-    if (body && typeof body === "object" && "site" in body) {
-      if (typeof body.site === "string") site = body.site
+  const rawBody = await req.text()
+  if (rawBody.trim() !== "") {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawBody)
+    } catch {
+      return jsonError("invalid json body", 400)
     }
-  } catch {
-    // 无 body → site 保持默认 "1"
+    if (parsed && typeof parsed === "object" && "site" in parsed) {
+      const siteRaw = parsed.site
+      if (typeof siteRaw !== "string" || !Object.hasOwn(SITES, siteRaw)) {
+        return jsonError("invalid site", 400)
+      }
+      site = siteRaw
+    }
   }
   if (favorite) {
     const ok = store.addFavorite(site, kind, id)
@@ -1308,8 +1334,9 @@ function handleJobsList(url: URL): Response {
   const q = jobsListQuery(url)
   const items = store.listJobs(q)
   const total = store.countJobs(q)
+  // 前端分页语义 offset=(page-1)*limit → nextPage 必须是整数页号
   const nextPage =
-    q.offset + q.limit < total ? q.offset / q.limit + 2 : undefined
+    q.offset + q.limit < total ? Math.floor(q.offset / q.limit) + 2 : undefined
   return jsonOk(
     { items: items.map(parseJob), nextPage, total },
     NO_STORE_HEADERS
@@ -1378,12 +1405,18 @@ async function handleJobsBatchDelete(req: Request): Promise<Response> {
   ) {
     throw new ExtractorError("ids must be a non-empty number[]", 400)
   }
+  // 与历史批量删除对齐：单次最多 1000，防御超长数组放大 IN 展开
+  if (ids.length > 1000) {
+    throw new ExtractorError("ids too many (max 1000)", 400)
+  }
   const active = ids
     .map((id) => store.getJob(id))
     .filter((j): j is Job => j !== null)
     .find(
       (j) =>
-        j.status === "running" || j.status === "paused" || j.status === "pending"
+        j.status === "running" ||
+        j.status === "paused" ||
+        j.status === "pending"
     )
   if (active) {
     return jsonError(
@@ -1756,21 +1789,18 @@ async function routeInner(req: Request): Promise<Response> {
         const enabled = authConfig.enabled
         if (!enabled) throw new AuthError("oidc disabled", 400)
         const { url, state, codeVerifier } = await oidc!.authorizationUrl()
-        return appendCookies(
-          jsonOk({ url }, NO_STORE_HEADERS),
-          [
-            serializeCookie(COOKIE_OAUTH_STATE, state, {
-              maxAge: OAUTH_COOKIE_MAX_AGE_S,
-              secure: cookieOpts(req).secure,
-              httpOnly: true,
-            }),
-            serializeCookie(COOKIE_OAUTH_VERIFIER, codeVerifier, {
-              maxAge: OAUTH_COOKIE_MAX_AGE_S,
-              secure: cookieOpts(req).secure,
-              httpOnly: true,
-            }),
-          ]
-        )
+        return appendCookies(jsonOk({ url }, NO_STORE_HEADERS), [
+          serializeCookie(COOKIE_OAUTH_STATE, state, {
+            maxAge: OAUTH_COOKIE_MAX_AGE_S,
+            secure: cookieOpts(req).secure,
+            httpOnly: true,
+          }),
+          serializeCookie(COOKIE_OAUTH_VERIFIER, codeVerifier, {
+            maxAge: OAUTH_COOKIE_MAX_AGE_S,
+            secure: cookieOpts(req).secure,
+            httpOnly: true,
+          }),
+        ])
       }
       case "/api/auth/callback": {
         if (req.method !== "POST") {
@@ -1806,39 +1836,33 @@ async function routeInner(req: Request): Promise<Response> {
           },
           sessionSecret
         )
-        return appendCookies(
-          jsonOk({ ok: true, user }, NO_STORE_HEADERS),
-          [
-            clearCookie(COOKIE_OAUTH_STATE, {
-              secure,
-              httpOnly: true,
-            }),
-            clearCookie(COOKIE_OAUTH_VERIFIER, {
-              secure,
-              httpOnly: true,
-            }),
-            serializeCookie(COOKIE_SESSION, session, {
-              maxAge: SESSION_MAX_AGE_S,
-              secure,
-              httpOnly: true,
-            }),
-          ]
-        )
+        return appendCookies(jsonOk({ ok: true, user }, NO_STORE_HEADERS), [
+          clearCookie(COOKIE_OAUTH_STATE, {
+            secure,
+            httpOnly: true,
+          }),
+          clearCookie(COOKIE_OAUTH_VERIFIER, {
+            secure,
+            httpOnly: true,
+          }),
+          serializeCookie(COOKIE_SESSION, session, {
+            maxAge: SESSION_MAX_AGE_S,
+            secure,
+            httpOnly: true,
+          }),
+        ])
       }
       case "/api/auth/logout": {
         if (req.method !== "POST") {
           throw new ExtractorError("method not allowed", 405)
         }
         const secure = cookieOpts(req).secure
-        return appendCookies(
-          jsonOk({ ok: true }, NO_STORE_HEADERS),
-          [
-            clearCookie(COOKIE_SESSION, { secure, httpOnly: true }),
-            // 防御性清理残留的 OAuth 流程 cookie
-            clearCookie(COOKIE_OAUTH_STATE, { secure, httpOnly: true }),
-            clearCookie(COOKIE_OAUTH_VERIFIER, { secure, httpOnly: true }),
-          ]
-        )
+        return appendCookies(jsonOk({ ok: true }, NO_STORE_HEADERS), [
+          clearCookie(COOKIE_SESSION, { secure, httpOnly: true }),
+          // 防御性清理残留的 OAuth 流程 cookie
+          clearCookie(COOKIE_OAUTH_STATE, { secure, httpOnly: true }),
+          clearCookie(COOKIE_OAUTH_VERIFIER, { secure, httpOnly: true }),
+        ])
       }
       case "/api/posts":
         requireGet(req)

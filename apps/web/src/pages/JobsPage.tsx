@@ -24,7 +24,11 @@ import {
 import { api, parsePage, type SiteId } from "@/lib/routes"
 
 const POLL_MS = 1500
-const JOB_TYPES = ["archive_posts", "archive_books", "archive_auto_group"] as const
+const JOB_TYPES = [
+  "archive_posts",
+  "archive_books",
+  "archive_auto_group",
+] as const
 
 export default function JobsPage() {
   const confirm = useConfirm()
@@ -44,15 +48,21 @@ export default function JobsPage() {
 
   const [active, setActive] = useState<Job[]>([])
   const [sideLoaded, setSideLoaded] = useState(false)
-  const [statuses, setStatuses] = useState<Record<SiteId, ArchiveStatus | null>>({
+  const [statuses, setStatuses] = useState<
+    Record<SiteId, ArchiveStatus | null>
+  >({
     "1": null,
     "2": null,
   })
   const [groupTotal, setGroupTotal] = useState<number | null>(null)
-  const [lastByType, setLastByType] = useState<Record<string, Job | undefined>>({})
+  const [lastByType, setLastByType] = useState<Record<string, Job | undefined>>(
+    {}
+  )
   const [modalOpen, setModalOpen] = useState(false)
   const [toast, setToast] = useState("")
   const prevActiveRef = useRef<Set<number>>(new Set())
+  /** 表格请求序号：仅最新请求可回填数据/错误/loading，防乱序覆盖 */
+  const tableSeqRef = useRef(0)
 
   /** 筛选/排序/翻页写 URL；改筛选或排序时 page 重置 */
   function update(next: {
@@ -76,8 +86,12 @@ export default function JobsPage() {
 
   const loadTable = useCallback(
     async (silent = false) => {
-      if (!silent) setLoading(true)
-      setError("")
+      const seq = ++tableSeqRef.current
+      // 非静默才清错误：轮询先清会让 ErrorBox 闪一下再恢复
+      if (!silent) {
+        setLoading(true)
+        setError("")
+      }
       try {
         const data = await listJobs({
           page,
@@ -86,14 +100,22 @@ export default function JobsPage() {
           sort,
           order,
         })
+        // 过期响应（筛选/翻页已变或被新轮询取代）不回填，防乱序覆盖新数据
+        if (seq !== tableSeqRef.current) return
         setJobs(data.items)
         setNextPage(data.nextPage)
         setTotal(data.total)
-        setSelected((prev) => prev.filter((id) => data.items.some((j) => j.id === id)))
+        setSelected((prev) =>
+          prev.filter((id) => data.items.some((j) => j.id === id))
+        )
+        setError("")
       } catch (e) {
-        setError(e instanceof Error ? e.message : "未知错误")
+        if (seq !== tableSeqRef.current) return
+        // 静默轮询失败保持现状：瞬时网络抖动不把整页切成 ErrorBox
+        if (!silent) setError(e instanceof Error ? e.message : "未知错误")
       } finally {
-        if (!silent) setLoading(false)
+        // 最新请求（含静默）settle 后才解锁 loading，防被取代的非静默请求提前解除
+        if (seq === tableSeqRef.current) setLoading(false)
       }
     },
     [page, type, status, sort, order]
@@ -102,18 +124,31 @@ export default function JobsPage() {
   /** 进行中条 + 统计卡数据（与表格筛选无关，独立请求）；单项失败降级该卡，不拖垮整页 */
   const loadSide = useCallback(async () => {
     try {
-      const [activeRes, s1, s2, groupsRes, ...lasts] = await Promise.allSettled([
-        listJobs({ status: "active", limit: 10, sort: "created_at", order: "desc" }),
-        getArchiveStatus("1"),
-        getArchiveStatus("2"),
-        fetch(`${api.meGroups}?limit=1`).then(async (r) => {
-          if (!r.ok) return { total: undefined }
-          return (await r.json()) as { total?: number }
-        }),
-        ...JOB_TYPES.map((t) =>
-          listJobs({ type: t, status: "finished", limit: 1, sort: "created_at", order: "desc" })
-        ),
-      ])
+      const [activeRes, s1, s2, groupsRes, ...lasts] = await Promise.allSettled(
+        [
+          listJobs({
+            status: "active",
+            limit: 10,
+            sort: "created_at",
+            order: "desc",
+          }),
+          getArchiveStatus("1"),
+          getArchiveStatus("2"),
+          fetch(`${api.meGroups}?limit=1`).then(async (r) => {
+            if (!r.ok) return { total: undefined }
+            return (await r.json()) as { total?: number }
+          }),
+          ...JOB_TYPES.map((t) =>
+            listJobs({
+              type: t,
+              status: "finished",
+              limit: 1,
+              sort: "created_at",
+              order: "desc",
+            })
+          ),
+        ]
+      )
 
       // 进行中条：列表失败则保留上轮数据，且不推进 prevActiveRef（结束通知不误判/不漏判）
       if (activeRes.status === "fulfilled") {
@@ -167,7 +202,10 @@ export default function JobsPage() {
       if (s2.status === "fulfilled") {
         setStatuses((prev) => ({ ...prev, "2": s2.value }))
       }
-      if (groupsRes.status === "fulfilled" && typeof groupsRes.value.total === "number") {
+      if (
+        groupsRes.status === "fulfilled" &&
+        typeof groupsRes.value.total === "number"
+      ) {
         setGroupTotal(groupsRes.value.total)
       }
       const byType: Record<string, Job | undefined> = {}
@@ -223,7 +261,8 @@ export default function JobsPage() {
     if (
       !(await confirm({
         title: "清空内容缓存？",
-        description: "将删除所有正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。",
+        description:
+          "将删除所有正文/书库 HTML 与回复 JSON 缓存，不影响历史、收藏与标签。",
         confirmLabel: "清空",
         destructive: true,
       }))
@@ -231,7 +270,11 @@ export default function JobsPage() {
       return
     const res = await fetch(api.meCache, { method: "DELETE" })
     const json = (await res.json()) as { cleared?: number; error?: string }
-    setToast(res.ok ? `已清除 ${json.cleared ?? 0} 个缓存文件` : json.error || "清空失败")
+    setToast(
+      res.ok
+        ? `已清除 ${json.cleared ?? 0} 个缓存文件`
+        : json.error || "清空失败"
+    )
   }
 
   return (
@@ -244,7 +287,10 @@ export default function JobsPage() {
             <button
               type="button"
               onClick={() => {
-                if (typeof Notification !== "undefined" && Notification.permission === "default") {
+                if (
+                  typeof Notification !== "undefined" &&
+                  Notification.permission === "default"
+                ) {
                   void Notification.requestPermission()
                 }
                 setModalOpen(true)
@@ -286,7 +332,13 @@ export default function JobsPage() {
         lastByType={lastByType}
         activeStates={new Map(active.map((j) => [j.type, j.status] as const))}
       />
-      <JobsActiveStrip jobs={active} onChanged={() => { void loadSide(); void loadTable(true) }} />
+      <JobsActiveStrip
+        jobs={active}
+        onChanged={() => {
+          void loadSide()
+          void loadTable(true)
+        }}
+      />
 
       {/* 筛选 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -332,7 +384,10 @@ export default function JobsPage() {
           sort={sort}
           order={order}
           onSortChange={(k) =>
-            update({ sort: k, order: k === sort && order === "desc" ? "asc" : "desc" })
+            update({
+              sort: k,
+              order: k === sort && order === "desc" ? "asc" : "desc",
+            })
           }
           selected={selected}
           onSelectedChange={setSelected}

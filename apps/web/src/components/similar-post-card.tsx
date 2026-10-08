@@ -8,6 +8,7 @@ import {
   type GroupMember,
 } from "@/lib/groups"
 import type { SiteId } from "@/lib/routes"
+import { cn } from "@workspace/ui/lib/utils"
 
 export function SimilarPostCard({
   href,
@@ -54,26 +55,21 @@ export function SimilarPostCard({
   const seed: GroupMember = { tid, title: rawTitle }
   return (
     <div className="flex flex-col gap-1.5">
-      <ListPostCard
-        href={href}
-        rawTitle={rawTitle}
-        rank={rank}
-        index={index}
-        statValue={statValue}
-        statUnit={statUnit}
-        showGenre={showGenre}
-        className={className}
-        trailing={
-          badge ? (
-            <span className="flex shrink-0 items-center gap-2">
-              {badge}
-              <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
-            </span>
-          ) : (
-            <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
-          )
-        }
-      />
+      {/* 触发器渲染在卡片 (Link) 之外：button 嵌套在 a 内是非法 HTML */}
+      <div className="flex items-center gap-2">
+        <ListPostCard
+          href={href}
+          rawTitle={rawTitle}
+          rank={rank}
+          index={index}
+          statValue={statValue}
+          statUnit={statUnit}
+          showGenre={showGenre}
+          className={cn("min-w-0 flex-1", className)}
+          trailing={badge}
+        />
+        <SimilarTrigger open={open} onToggle={() => setOpen((v) => !v)} />
+      </div>
       {open && (
         <SimilarSearchPanel
           title={groupSearchTitle(rawTitle)}

@@ -35,9 +35,7 @@ type AuthContextValue = {
   buttonText: string
   login: () => Promise<void>
   logout: () => Promise<void>
-  completeCallback: (
-    url: string
-  ) => Promise<{ ok: true } | { error: string }>
+  completeCallback: (url: string) => Promise<{ ok: true } | { error: string }>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -156,9 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const completeCallback = useCallback(
-    async (
-      url: string
-    ): Promise<{ ok: true } | { error: string }> => {
+    async (url: string): Promise<{ ok: true } | { error: string }> => {
       try {
         const res = await fetch(api.authCallback, {
           method: "POST",
@@ -201,7 +197,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       completeCallback,
     }),
-    [ready, enabled, loggedOut, user, buttonText, login, logout, completeCallback]
+    [
+      ready,
+      enabled,
+      loggedOut,
+      user,
+      buttonText,
+      login,
+      logout,
+      completeCallback,
+    ]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -220,6 +225,8 @@ export function safeFrom(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
     return "/"
   }
+  // 控制字符（\n 等）会被 URL 解析剥离，可把路径改造成 //host 跨源，一律拒绝
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return "/"
   // 反斜杠会被 WHATWG URL 解析当作正斜杠（/\\evil.com → //evil.com 跨源），一并拒绝
   if (raw.includes("\\") || raw.includes("://")) return "/"
   return raw

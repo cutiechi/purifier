@@ -20,6 +20,13 @@ export function assertSafeId(id: string): void {
   }
 }
 
+/** 进程内自增序号：tmp 名唯一，防并发写同一 key 时覆盖/rename ENOENT */
+let tmpSeq = 0
+function uniqueTmpPath(path: string): string {
+  tmpSeq += 1
+  return `${path}.${process.pid}-${tmpSeq}.tmp`
+}
+
 export interface CacheEntry<T> {
   data: T
   mtimeMs: number
@@ -79,7 +86,7 @@ export async function writeContentCache(
   const path = contentCachePath(dataDir, site, kind, id, chapter)
   await mkdir(join(dataDir, "cache", site), { recursive: true })
   // 原子写：先 tmp 再 rename，避免崩溃留下截断文件被当成命中
-  const tmp = `${path}.tmp`
+  const tmp = uniqueTmpPath(path)
   await writeFile(tmp, html, "utf8")
   await rename(tmp, path)
 }
@@ -112,7 +119,7 @@ export async function writeRepliesCache(
 ): Promise<void> {
   await mkdir(join(dataDir, "cache", site), { recursive: true })
   const path = repliesCachePath(dataDir, site, id)
-  const tmp = `${path}.tmp`
+  const tmp = uniqueTmpPath(path)
   await writeFile(tmp, JSON.stringify(replies), "utf8")
   await rename(tmp, path)
 }
@@ -134,6 +141,9 @@ export async function deleteItemCaches(
   try {
     const files = await readdir(dir)
     for (const name of files) {
+      // 跳过 .tmp（进行中的原子写临时文件；删除会让在途 rename ENOENT）。
+      // 崩溃遗留的 .tmp 由 clearCache 统一清理。
+      if (name.endsWith(".tmp")) continue
       const hit =
         kind === "post"
           ? name === `post-${id}.html` ||
@@ -143,7 +153,6 @@ export async function deleteItemCaches(
             name.startsWith(`book-${id}-ch`) ||
             name.startsWith(`book-${id}.`)
       if (!hit) continue
-      // 跳过进行中的 .tmp（rename 目标会覆盖）
       try {
         await rm(join(dir, name), { force: true })
         n++

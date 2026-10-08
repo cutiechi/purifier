@@ -229,4 +229,20 @@ describe("groups", () => {
 
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test("listGroups 全量返回：超过 100 组不截断；分页仍受上限约束", () => {
+    const { store, dir } = makeStore()
+    for (let i = 1; i <= 120; i++) {
+      store.upsertGroup({
+        key: `k${i}`,
+        title: `Book ${i}`,
+        items: [{ tid: String(i), title: `Book ${i}（1）` }],
+      })
+    }
+    expect(store.listGroups()).toHaveLength(120)
+    expect(store.listGroupsPage({ page: 1, limit: 1000 }).items).toHaveLength(
+      100
+    )
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio"
 import { fetchUpstream } from "../upstream"
 import { sanitizeContentHtml } from "./sanitize"
+import { isSoft404Text } from "./soft404"
 import {
   type BookContentResponse,
   type CategoryLink,
@@ -104,6 +105,10 @@ export class XbookcnExtractor implements Extractor {
 
   private extractToc(html: string): BookContentResponse {
     const $ = cheerio.load(html)
+    // 软 404 / 拦截页：页面无有效文本（空页 / 验证码墙）→ 404，不写缓存
+    if (isSoft404Text($("main").text())) {
+      throw new ExtractorError("book content not found", 404)
+    }
     const title = $("main h1").first().text().trim()
 
     const metaSection = $("main .tk-meta").first()
@@ -173,7 +178,12 @@ export class XbookcnExtractor implements Extractor {
           .trim() || undefined
     }
 
-    const rawArticle = $("#read-article").html() ?? ""
+    const $article = $("#read-article")
+    // 软 404 / 拦截页：空正文或验证码墙 → 404，避免写入持久缓存
+    if (isSoft404Text($article.text())) {
+      throw new ExtractorError("chapter content not found", 404)
+    }
+    const rawArticle = $article.html() ?? ""
     const cid = cidFromUrl(
       $("nav a[href^='/novel/']").first().attr("href") ?? ""
     )
@@ -230,10 +240,7 @@ export class XbookcnExtractor implements Extractor {
    * - mtid=0 或空 → 抓首页 `/`，解析「时间线更新」卡片；nextMtid="1"
    * - mtid=n (n≥1) → 抓 `/novels/{n}`（实测 /novels/1 可用）；有「下一页」则 nextMtid=String(n+1)
    */
-  async fetchHomeLinks(
-    mtid: string,
-    signal?: AbortSignal
-  ): Promise<HomePage> {
+  async fetchHomeLinks(mtid: string, signal?: AbortSignal): Promise<HomePage> {
     const page = parseInt(mtid, 10) || 0
     const url = page >= 1 ? `${this.homeUrl}/novels/${page}` : this.homeUrl
     const resp = await fetchUpstream(url, { signal })

@@ -17,33 +17,45 @@ function UnfavoriteButton({
 }) {
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        const ok = await confirm({
-          title: "取消收藏？",
-          description: `将从收藏中移除「${item.title}」。`,
-          confirmLabel: "取消收藏",
-          destructive: true,
-        })
-        if (!ok) return
-        setBusy(true)
-        try {
-          const res = await fetch(
-            `${api.meFavorites}?kind=${item.kind}&id=${encodeURIComponent(item.id)}`,
-            { method: "DELETE" }
-          )
-          if (res.ok) reload()
-        } finally {
-          setBusy(false)
-        }
-      }}
-      className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
-    >
-      取消收藏
-    </button>
+    <span className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          const ok = await confirm({
+            title: "取消收藏？",
+            description: `将从收藏中移除「${item.title}」。`,
+            confirmLabel: "取消收藏",
+            destructive: true,
+          })
+          if (!ok) return
+          setBusy(true)
+          setError("")
+          try {
+            const res = await fetch(
+              `${api.meFavorites}?kind=${item.kind}&id=${encodeURIComponent(item.id)}&site=${encodeURIComponent(item.site)}`,
+              { method: "DELETE" }
+            )
+            if (res.ok) reload()
+            else setError("取消失败")
+          } catch {
+            setError("网络异常")
+          } finally {
+            setBusy(false)
+          }
+        }}
+        className="min-h-9 shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 sm:min-h-0"
+      >
+        取消收藏
+      </button>
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </span>
   )
 }
 

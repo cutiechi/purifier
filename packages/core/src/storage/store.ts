@@ -598,36 +598,42 @@ export class Store {
     chapter?: number | null
     scrollProgress: number
   }): AddBookmarkResult {
-    const exists = this.db
-      .query("SELECT 1 FROM items WHERE site = ?1 AND kind = ?2 AND id = ?3")
-      .get(input.site, input.kind, input.id)
-    if (!exists) return { ok: false, reason: "not_found" }
-    const quote = normalizeBookmarkQuote(input.quote)
-    if (quote === null) return { ok: false, reason: "invalid_quote" }
-    const chapter = input.chapter ?? null
-    const count = this.db
-      .query(
-        "SELECT COUNT(*) AS n FROM bookmarks WHERE site = ?1 AND kind = ?2 AND item_id = ?3 AND chapter IS ?4"
-      )
-      .get(input.site, input.kind, input.id, chapter) as { n: number }
-    if (Number(count.n) >= BOOKMARKS_PER_SCOPE_CAP)
-      return { ok: false, reason: "full" }
-    const res = this.db
-      .query(
-        `INSERT INTO bookmarks (site, kind, item_id, chapter, quote, note, scroll_progress, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
-      )
-      .run(
-        input.site,
-        input.kind,
-        input.id,
-        chapter,
-        quote,
-        normalizeBookmarkNote(input.note ?? ""),
-        Math.max(0, Math.min(1, input.scrollProgress)),
-        this.now()
-      )
-    return { ok: true, bookmark: this.getBookmark(Number(res.lastInsertRowid))! }
+    // 上限检查与插入同事务：并发下避免两个请求都通过 cap 检查后双双写入
+    return this.db.transaction((): AddBookmarkResult => {
+      const exists = this.db
+        .query("SELECT 1 FROM items WHERE site = ?1 AND kind = ?2 AND id = ?3")
+        .get(input.site, input.kind, input.id)
+      if (!exists) return { ok: false, reason: "not_found" }
+      const quote = normalizeBookmarkQuote(input.quote)
+      if (quote === null) return { ok: false, reason: "invalid_quote" }
+      const chapter = input.chapter ?? null
+      const count = this.db
+        .query(
+          "SELECT COUNT(*) AS n FROM bookmarks WHERE site = ?1 AND kind = ?2 AND item_id = ?3 AND chapter IS ?4"
+        )
+        .get(input.site, input.kind, input.id, chapter) as { n: number }
+      if (Number(count.n) >= BOOKMARKS_PER_SCOPE_CAP)
+        return { ok: false, reason: "full" }
+      const res = this.db
+        .query(
+          `INSERT INTO bookmarks (site, kind, item_id, chapter, quote, note, scroll_progress, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+        )
+        .run(
+          input.site,
+          input.kind,
+          input.id,
+          chapter,
+          quote,
+          normalizeBookmarkNote(input.note ?? ""),
+          Math.max(0, Math.min(1, input.scrollProgress)),
+          this.now()
+        )
+      return {
+        ok: true,
+        bookmark: this.getBookmark(Number(res.lastInsertRowid))!,
+      }
+    })()
   }
 
   /** 单篇/单章书签列表，最近收藏在前；chapter 默认 null（帖与整本 book） */
@@ -648,11 +654,11 @@ export class Store {
   }
 
   /** 跨站书签列表；q 匹配 quote / note / 标题（NOCASE），kind 可选；每页 PAGE_SIZE */
-  listBookmarks(query: {
-    q?: string
-    kind?: string
-    page?: number
-  }): { items: Bookmark[]; nextPage: number | undefined; total: number } {
+  listBookmarks(query: { q?: string; kind?: string; page?: number }): {
+    items: Bookmark[]
+    nextPage: number | undefined
+    total: number
+  } {
     const q = query.q ?? ""
     const kind = query.kind || null
     const page = Math.max(1, query.page ?? 1)
@@ -959,16 +965,13 @@ export class Store {
    * 全量分组（导出 / 兼容旧调用）。量大时优先 listGroupsPage。
    */
   listGroups(q?: string): Group[] {
-    return this.listGroupsPage({
-      q,
-      page: 1,
-      limit: 100_000,
-    }).items
+    return this.listGroupsPage({ q, all: true }).items
   }
 
   /**
    * 分组分页列表：q 匹配 title/author/genre/成员标题；
    * sort=updated|title|chapters；favorited 只看已收藏。
+   * all=true 时不分页返回全部（导出用），page/limit 被忽略。
    */
   listGroupsPage(opts: {
     q?: string
@@ -976,9 +979,11 @@ export class Store {
     limit?: number
     favorited?: boolean
     sort?: "updated" | "title" | "chapters"
+    all?: boolean
   }): { items: Group[]; nextPage?: number; total: number } {
     const q = opts.q?.trim() ?? ""
     const page = Math.max(1, opts.page ?? 1)
+    const all = opts.all === true
     const limit = Math.min(100, Math.max(1, opts.limit ?? PAGE_SIZE))
     const sort = opts.sort ?? "updated"
     const favOnly = opts.favorited === true
@@ -1009,16 +1014,18 @@ export class Store {
       .get(q, favOnly ? 1 : 0) as { n: number }
     const total = Number(totalRow.n ?? 0)
 
-    const rows = this.db
-      .query(
-        `SELECT g.id, g.key, g.title, g.author, g.genre, g.favorited, g.favorited_at,
+    const rowsSql = `SELECT g.id, g.key, g.title, g.author, g.genre, g.favorited, g.favorited_at,
                 g.created_at, g.updated_at
          FROM groups g
          ${where}
-         ORDER BY ${orderSql}
-         LIMIT ?3 OFFSET ?4`
-      )
-      .all(q, favOnly ? 1 : 0, limit + 1, (page - 1) * limit) as {
+         ORDER BY ${orderSql}`
+    const rows = (
+      all
+        ? this.db.query(rowsSql).all(q, favOnly ? 1 : 0)
+        : this.db
+            .query(`${rowsSql} LIMIT ?3 OFFSET ?4`)
+            .all(q, favOnly ? 1 : 0, limit + 1, (page - 1) * limit)
+    ) as {
       id: number
       key: string
       title: string
@@ -1030,7 +1037,7 @@ export class Store {
       updated_at: number
     }[]
 
-    const hasMore = rows.length > limit
+    const hasMore = !all && rows.length > limit
     const pageRows = hasMore ? rows.slice(0, limit) : rows
     const byGroup = this.membersForGroupIds(pageRows.map((r) => r.id))
 
@@ -1547,7 +1554,9 @@ export class Store {
 
   hasRunningOfType(type: string): boolean {
     const row = this.db
-      .query("SELECT 1 FROM jobs WHERE type=?1 AND status IN ('running','paused') LIMIT 1")
+      .query(
+        "SELECT 1 FROM jobs WHERE type=?1 AND status IN ('running','paused') LIMIT 1"
+      )
       .get(type)
     return !!row
   }
