@@ -40,6 +40,9 @@ export function SimilarSearchPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [results, setResults] = useState<SearchHit[]>([])
+  const [nextPage, setNextPage] = useState<number | null>(null)
+  const [moreLoading, setMoreLoading] = useState(false)
+  const [moreError, setMoreError] = useState("")
   const [known, setKnown] = useState<Set<string>>(
     () => new Set(seedItems.map((s) => s.tid))
   )
@@ -57,6 +60,8 @@ export function SimilarSearchPanel({
   async function load() {
     setLoading(true)
     setError("")
+    setMoreError("")
+    setNextPage(null)
     try {
       // 「已加入」以服务端为准：每次展开都拉（个人组量小，不做跨页缓存）。
       // 分组状态拉取失败时中止，避免用「仅 seed」的过期 known 渲染已加入项并重复 PUT。
@@ -82,12 +87,45 @@ export function SimilarSearchPanel({
       // 章节顺序：按 tid 数字升序（与折叠组内成员排序一致）
       const links = (json.links ?? []).sort((a, b) => compareTid(a.tid, b.tid))
       setResults(links)
+      setNextPage(json.nextPage ?? null)
       setKnown(new Set([...serverTids, ...seedRef.current.map((s) => s.tid)]))
       setSelected(new Set())
     } catch (e) {
       setError(e instanceof Error ? e.message : "未知错误")
     } finally {
       setLoading(false)
+    }
+  }
+
+  // 翻页累加：上游每页 100 条且按时间倒序，相关系列帖可能在后续页
+  async function loadMore() {
+    if (nextPage === null || moreLoading) return
+    setMoreLoading(true)
+    setMoreError("")
+    try {
+      const res = await fetch(
+        `${api.browse}?q=${encodeURIComponent(title)}&site=1&page=${nextPage}`
+      )
+      const json = (await res.json()) as BrowseResponse
+      if (!res.ok) {
+        setMoreError((json as { error?: string }).error || "请求失败")
+        return
+      }
+      setResults((prev) => {
+        const seen = new Set<string>()
+        const merged = [...prev, ...(json.links ?? [])].filter((h) => {
+          if (seen.has(h.tid)) return false
+          seen.add(h.tid)
+          return true
+        })
+        merged.sort((a, b) => compareTid(a.tid, b.tid))
+        return merged
+      })
+      setNextPage(json.nextPage ?? null)
+    } catch (e) {
+      setMoreError(e instanceof Error ? e.message : "未知错误")
+    } finally {
+      setMoreLoading(false)
     }
   }
 
@@ -295,6 +333,21 @@ export function SimilarSearchPanel({
               )
             })}
           </PostList>
+          {nextPage !== null && (
+            <div className="mt-2 flex flex-col items-center gap-1">
+              <button
+                type="button"
+                disabled={moreLoading}
+                onClick={() => void loadMore()}
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-foreground transition-colors disabled:opacity-50"
+              >
+                {moreLoading ? "加载中…" : "加载更多"}
+              </button>
+              {moreError && (
+                <p className="text-xs text-destructive">{moreError}</p>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
