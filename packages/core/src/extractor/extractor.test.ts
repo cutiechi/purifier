@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { Cool18Extractor, MAX_REPLY_DEPTH } from "./extractor"
+import {
+  cool18KeywordSearchUrl,
+  Cool18Extractor,
+  MAX_REPLY_DEPTH,
+  sanitizeCool18Keywords,
+} from "./extractor"
 import { ExtractorError } from "./types"
 
 const ex = new Cool18Extractor()
@@ -271,5 +276,42 @@ describe("软 404 检测", () => {
 
   test("过短的 pre（疑似错误页）→ 404", () => {
     expect(() => ex.extractContent(postHtml("短"))).toThrow(ExtractorError)
+  })
+})
+
+describe("sanitizeCool18Keywords", () => {
+  test("剔除装饰符号并截断到 7 字符（≥8 字符上游恒 0 条）", () => {
+    expect(sanitizeCool18Keywords("爱上操弄小妖精的花穴（原名: 淫乱行动）")).toBe(
+      "爱上操弄小妖精"
+    )
+    expect(sanitizeCool18Keywords("妖女妖女妖女妖女")).toBe("妖女妖女妖女妖")
+  })
+
+  test("保留书名中的字母数字", () => {
+    expect(sanitizeCool18Keywords("魅世妖女5")).toBe("魅世妖女5")
+    expect(sanitizeCool18Keywords("AI辅助 01-22")).toBe("AI辅助012")
+  })
+
+  test("短词原样（去空白）", () => {
+    expect(sanitizeCool18Keywords("  魅世妖女 ")).toBe("魅世妖女")
+  })
+})
+
+describe("cool18KeywordSearchUrl", () => {
+  test("不带 first=1（否则漏掉跟帖形式的续篇）", () => {
+    const url = cool18KeywordSearchUrl("https://x/index.php", "魅世妖女", 1)
+    expect(url).not.toContain("first=")
+    expect(url).toContain(`keywords=${encodeURIComponent("魅世妖女")}`)
+    expect(url).not.toContain("&p=")
+  })
+
+  test("page>1 带 p 参数", () => {
+    const url = cool18KeywordSearchUrl("https://x/index.php", "魅世妖女", 2)
+    expect(url).toContain("&p=2")
+  })
+
+  test("清洗后为空时回退原文（纯符号查询不崩）", () => {
+    const url = cool18KeywordSearchUrl("https://x/index.php", "。。。", 1)
+    expect(url).toContain(`keywords=${encodeURIComponent("。。。")}`)
   })
 })

@@ -30,6 +30,33 @@ const WALL_PAGE_MAX_LEN = 200
 const WALL_PAGE_RE =
   /验证码|cloudflare|captcha|安全检查|cf[-_ ]?challenge|blocked/i
 
+/** threadsearch 关键词最大字符数：实测 ≥8 字符查询恒返 0 结果 */
+const SEARCH_MAX_KEYWORDS = 7
+
+/**
+ * cool18 threadsearch 查询词清洗。
+ * 上游按「单字 AND」匹配标题（不要求连续、顺序无关）：
+ * - 符号/装饰字符同样参与 AND，但标题里写法常不一致，一律剔除，只留汉字与字母数字；
+ * - ≥8 字符查询恒返 0 结果，截断到头 7 个字符（书名前缀最具区分度）。
+ */
+export function sanitizeCool18Keywords(raw: string): string {
+  const cleaned = raw.replace(/[^\p{Script=Han}A-Za-z0-9]/gu, "")
+  return Array.from(cleaned).slice(0, SEARCH_MAX_KEYWORDS).join("")
+}
+
+/**
+ * 关键词搜索 URL。不带 first=1：该参数只搜主帖，
+ * 会漏掉以跟帖形式发布的续篇（实测「魅世妖女」少搜到 4 篇）。
+ */
+export function cool18KeywordSearchUrl(
+  homeUrl: string,
+  keywords: string,
+  page: number
+): string {
+  const kw = sanitizeCool18Keywords(keywords) || keywords.trim()
+  return `${homeUrl}?act=threadsearch&app=forum&keywords=${encodeURIComponent(kw)}&submit=${encodeURIComponent("栏目搜索")}${page > 1 ? `&p=${page}` : ""}`
+}
+
 export class Cool18Extractor implements Extractor {
   name = "cool18"
   homeUrl = "https://www.cool18.com/bbs4/index.php"
@@ -724,7 +751,7 @@ export class Cool18Extractor implements Extractor {
     if (query.type) {
       url = `${this.homeUrl}?action=search&act=threadsearch&app=forum&type=${encodeURIComponent(query.type)}&submit=${encodeURIComponent("查询")}${page > 1 ? `&p=${page}` : ""}`
     } else if (query.keywords) {
-      url = `${this.homeUrl}?act=threadsearch&app=forum&keywords=${encodeURIComponent(query.keywords)}&submit=${encodeURIComponent("栏目搜索")}&first=1${page > 1 ? `&p=${page}` : ""}`
+      url = cool18KeywordSearchUrl(this.homeUrl, query.keywords, page)
     } else {
       throw new ExtractorError("missing type or keywords", 400)
     }
@@ -771,8 +798,10 @@ export class Cool18Extractor implements Extractor {
       link.index = idx + 1
     })
 
-    // 分页：原站分页栏有「下一页」链接则还有后续页
-    const hasNext = $("nav.pagination-bar a.next").length > 0
+    // 分页：原站分页栏有「下一页」链接则还有后续页；
+    // 上游空页也照渲染「下一页」（p 无限递增），空页一律视为末页
+    const hasNext =
+      unique.length > 0 && $("nav.pagination-bar a.next").length > 0
     const nextPage = hasNext ? page + 1 : null
 
     return { category, links: unique, nextPage }
