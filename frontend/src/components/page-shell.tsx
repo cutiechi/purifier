@@ -1,0 +1,44 @@
+import { type ReactNode } from "react"
+import { SiteHeader } from "@/components/site-header"
+import { pageWidthClass, type PageWidth } from "@/components/reading-settings"
+import { cn } from "@/lib/utils"
+
+export function PageShell({
+  children,
+  showBack,
+  className,
+  maxWidth,
+}: {
+  children: ReactNode
+  showBack?: boolean
+  className?: string
+  maxWidth?: PageWidth
+}) {
+  const widthClass = pageWidthClass(maxWidth ?? "normal")
+
+  return (
+    <div className="relative min-h-svh bg-background">
+      {/* soft ambient glow */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,oklch(0.7_0.08_260_/0.12),transparent_70%)] dark:bg-[radial-gradient(ellipse_at_top,oklch(0.45_0.08_280_/0.18),transparent_70%)]"
+      />
+      <SiteHeader showBack={showBack} />
+      <main
+        id="main"
+        tabIndex={-1}
+        className={cn(
+          "relative mx-auto w-full px-3.5 py-5 sm:px-5 sm:py-8",
+          widthClass,
+          className
+        )}
+      >
+        {children}
+      </main>
+    </div>
+  )
+}
+
+export { Spinner, ErrorBox, EmptyState, AsyncBody } from "@/components/ui-state"
+export { PageHeader } from "@/components/page-header"
+export { Pager } from "@/components/pager"

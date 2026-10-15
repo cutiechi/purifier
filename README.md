@@ -1,121 +1,76 @@
 # Purifier
 
-Cool18 净化阅读端：Bun API + Vite React SPA。抓取并清洗 cool18 的帖子、书库、分类和榜单内容，提供适配移动端的干净阅读体验。
+纯净小说与论坛阅读应用：**Go 1.22+ Chi API + Vite React 19 SPA**。抓取并安全清洗论坛与小说书库内容，提供极致轻量、排版干净、适配全端的阅读体验。
 
-## 功能
+## 核心特性
 
-- 首页时间线：无限滚动加载最新主帖
-- 帖子阅读：清洗后的正文、章节链接、元信息和跟帖树
-- 书库阅读：按 `cid` 读取藏文
-- 分类与搜索：题材分类、栏目关键词、分页浏览
-- 榜单页：精华、扫文推荐、评论榜、人气榜
-- 深色 / 浅色主题
+- **内容源垂直切片（Vertical Slice）**：论坛源（Cool18）与小说源（XChina）业务与模型彻底隔离。
+- **个人资产中心**：统一归口于 `/api/v1/me/*`，跨站聚合阅读历史、收藏、标签、书签、阅读进度与阅读统计。
+- **现代化阅读体验**：支持跟帖评论树折叠浏览、角色颜色高亮关联聚类、字号行距偏好设置、深色/浅色自适应主题。
+- **生产级后端架构**：纯 Go 静态编译、Singleflight 防击穿、二级磁盘原子缓存、标准 ANSI SQL DAO（为平迁 PG 做好完整解耦准备）。
+- **标准 OIDC 认证**：支持 Pocket-ID / Keycloak PKCE 授权码登录与 JWT 会话管理。
+- **极致轻量容器**：生产 Docker 镜像仅约 **21.8 MB**，毫秒级快速启动。
 
 ## 技术栈
 
-- Bun 1.3：workspaces、HTTP server、前端构建与依赖管理
-- Vite 7 + React 19 + React Router 7
-- Tailwind CSS 4 + lucide-react + next-themes
-- `@workspace/core`：基于 Cheerio 的上游抓取与 HTML 清洗
-- Turbo：任务编排（build / typecheck / dev）
+- **后端**：Go 1.22+，Chi (`go-chi/chi/v5`)，modernc.org/sqlite (预备一键平迁 PostgreSQL)，goquery
+- **前端**：Vite + React 19 + React Router 7 + Tailwind CSS 4 + shadcn/ui (Base UI 原语)
+- **容器**：Alpine Linux 极精简运行时 + 预置非 root 安全用户与健康探针
 
 ## 目录结构
 
 ```text
-apps/
-  api/                 # Bun 原生 HTTP API + SPA 静态托管
-  web/                 # Vite React 前端
-packages/
-  core/                # 抓取器、上游请求、缓存与错误工具
-  ui/                  # 共享样式与工具函数
-  typescript-config/   # 共享 TS 配置
+backend/                # Go 后端工程
+├── cmd/server/         # 服务启动入口、优雅停机
+├── internal/
+│   ├── config/         # 环境变量配置
+│   ├── core/           # 核心网络池、Singleflight 防击穿、DOM 遍历安全清洗管道
+│   ├── storage/        # 持久化存储 DAO (标准 ANSI SQL)
+│   ├── provider/       # 垂直内容源领域 (Cool18 论坛 / XChina 书库)
+│   ├── jobs/           # 异步归档任务系统
+│   ├── auth/           # OIDC Discovery 与会话鉴权
+│   └── api/            # Chi 总路由、v1 切片、兼容层与前端 SPA 托管
+frontend/               # Vite + React 19 前端工程
+├── src/
+│   ├── components/ui/  # 标准 shadcn/ui 组件
+│   ├── pages/          # 业务页面级组件
+│   └── lib/            # 前端路由、API 客户端与鉴权
+Dockerfile              # 生产极简多阶段构建单镜像
+AGENTS.md               # 团队工程规范与运维发布运维指南
 ```
 
 ## 快速开始
 
-需要 Bun 1.3.14+。
+### 本地开发
+
+1. **启动后端服务**（默认端口 `:3001`）：
+   ```bash
+   cd backend
+   go run ./cmd/server
+   ```
+
+2. **启动前端开发服务器**（端口 `:3000`，自动代理 `/api` 到 `:3001`）：
+   ```bash
+   cd frontend
+   bun install
+   bun run dev
+   ```
+
+### 自动化测试与检查
 
 ```bash
-bun install
-bun run dev:api   # API 在 :3001
-bun run dev:web   # 前端在 :3000，/api 代理到 :3001
+# 后端测试
+cd backend && go test ./...
+
+# 前端类型检查与构建
+cd frontend && bun run typecheck && bun run build
 ```
 
-也可以直接 `bun run dev` 同时启动两端。
-
-## 生产运行
-
-```bash
-bun run build:web
-WEB_DIST=apps/web/dist PORT=3000 bun run start
-```
-
-生产模式下同一个 API 进程同时提供静态 SPA；非 `/api` 路由回退到 `index.html`，由前端路由接管。
-
-## Docker
+## 生产运行 (Docker)
 
 ```bash
 docker build -t purifier:latest .
-docker run -p 3000:3000 -e HTTPS_PROXY=http://host:7890 purifier:latest
+docker run -d -p 3000:3000 -v purifier_data:/data purifier:latest
 ```
 
-如果部署环境无法直连上游 cool18，需要设置 `HTTPS_PROXY` / `HTTP_PROXY`。
-
-历史、收藏、标签与内容缓存持久化在容器内 `/data`（`DATA_DIR`），用卷挂载保存：
-
-```bash
-docker run -p 3000:3000 -v purifier-data:/data purifier:latest
-```
-
-## 环境变量
-
-| 变量                           | 默认值                        | 说明                                       |
-| ---------------------------- | -------------------------- | ---------------------------------------- |
-| `PORT`                       | `3001`（Docker 内 `3000`）    | API 监听端口                                 |
-| `HOSTNAME`                   | `0.0.0.0`                  | 监听地址                                     |
-| `WEB_DIST`                   | `apps/web/dist`            | Vite 构建产物目录                              |
-| `DATA_DIR`                   | `./data`（Docker 内 `/data`） | SQLite 库与内容缓存目录                          |
-| `HTTPS_PROXY` / `HTTP_PROXY` | 无                          | 上游请求使用的代理                                |
-| `API_PROXY`                  | `http://127.0.0.1:3001`    | Vite dev 的 `/api` 代理目标                   |
-| `OIDC_ISSUER`                | 无                          | OIDC 发行方（Pocket ID）URL；与其它 4 项任一缺失则关闭并告警 |
-| `OIDC_CLIENT_ID`             | 无                          | OIDC 客户端 ID                              |
-| `OIDC_CLIENT_SECRET`         | 无                          | OIDC 客户端密钥                               |
-| `OIDC_REDIRECT_URI`          | 无                          | OIDC 回调地址；须与 Pocket ID Client 注册一致       |
-| `AUTH_SECRET`                | 无                          | 会话签名密钥（HMAC，≥32 字符，过短启动退出）；轮换使全部会话失效     |
-| `OIDC_BUTTON_TEXT`           | `使用 Pocket ID 登录`          | 登录按钮文案（可选）                               |
-
-## OIDC 登录（可选）
-
-配置 `OIDC_ISSUER`、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_REDIRECT_URI` 与 `AUTH_SECRET`（可选 `OIDC_BUTTON_TEXT`）后开启 Pocket ID 登录门锁：未登录访问 `/api` 返回 401，前端引导到登录页。变量只配一部分时 OIDC 保持关闭并打印告警，行为与未配置一致。
-
-- Pocket ID 后台新建 Client 时，回调地址只填 `OIDC_REDIRECT_URI`（本地开发为 `http://localhost:3000/login`），不需要额外路径。
-- OIDC 只锁谁能进实例，登录者共享同一 SQLite；不建用户表。
-- 反向代理（Nginx / Caddy 等）终止 TLS 时需透传 `X-Forwarded-Proto: https`，否则会话 Cookie 不会按安全请求下发。
-
-## API
-
-| 路径                    | 参数                  | 说明                                  |
-| ----------------------- | --------------------- | ------------------------------------- |
-| `GET /api/health`       | 无                    | 健康检查                              |
-| `GET /api/posts`        | `tid` 或 `mtid`       | 帖子正文，或首页分页列表              |
-| `GET /api/books`        | `cid`                 | 书库内容                              |
-| `GET /api/browse`       | `type` 或 `q`，`page` | 分类 / 关键词列表                     |
-| `GET /api/categories`   | 无                    | 分类入口                              |
-| `GET /api/featured`     | 无                    | 首页精华热贴                          |
-| `GET /api/picks`        | 无                    | 扫文推荐分组                          |
-| `GET /api/comments`     | 无                    | 评论榜                                |
-| `GET /api/trending`     | 无                    | 人气榜                                |
-| `GET /api/me/history`   | `q`、`kind`、`page`   | 阅读历史 `{ items, nextPage? }`       |
-| `GET /api/me/favorites` | `q`、`kind`、`page`   | 收藏列表；`PUT` / `DELETE` 收藏或取消 |
-| `GET /api/me/tags`      | 无                    | 标签及计数；`PUT` 整体替换标签        |
-| `GET /api/me/items`     | `tag`、`q`、`page`    | 按标签精确筛选条目                    |
-| `GET /api/me/state`     | `kind`、`id`          | 条目收藏 / 标签 / 访问状态            |
-| `DELETE /api/me/cache`  | 无                    | 清空内容缓存 `{ cleared: n }`         |
-
-错误统一返回 `{ "error": "..." }`，并带对应的 HTTP 状态码。`GET /api/posts` 与 `GET /api/books` 带 `refresh=1` 时跳过缓存强制抓取上游：成功则覆盖缓存，失败则回退旧缓存并附 `refreshError`；缓存命中与刷新响应均为 `no-store`。
-
-## 注意事项
-
-- 上游是 HTML 页面，选择器变更可能导致抓取失效；解析逻辑集中在 `packages/core/src/extractor`。
-- 正文只保留清洗后的安全 HTML 与站内 `/read/:tid`、`/book/:cid` 链接，外部链接仅保留文字。
-- 列表接口默认 `Cache-Control: s-maxage=60`，正文接口为 `s-maxage=300`。
+运维发布、数据安全备份与回滚详情参见 [AGENTS.md](AGENTS.md)。
