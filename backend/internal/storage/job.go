@@ -113,6 +113,56 @@ func (s *Store) MarkResumed(ctx context.Context, id int64) (bool, error) {
 	return rows > 0, nil
 }
 
+// MarkJobsAsError 把指定状态的任务一次性收尾为 error，返回影响行数。
+// 用单条 UPDATE 而非分页遍历：ListJobs 的 limit 会截断，超出的行将永久
+// 停留在活动态，使 HasRunningOfType 永久拒绝该类型的新任务。
+func (s *Store) MarkJobsAsError(ctx context.Context, statuses []string, errMsg string) (int64, error) {
+	if len(statuses) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(statuses))
+	args := make([]any, 0, len(statuses)+3)
+	args = append(args, model.JobStatusError, errMsg, time.Now().UnixMilli())
+	for i, st := range statuses {
+		placeholders[i] = "?"
+		args = append(args, st)
+	}
+
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE status IN (%s)`,
+		strings.Join(placeholders, ", "),
+	), args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RequeuePaused 把 paused 任务置回 pending，供启动恢复重新入队。
+func (s *Store) RequeuePaused(ctx context.Context, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE jobs SET status = ? WHERE id = ? AND status = ?",
+		model.JobStatusPending, id, model.JobStatusPaused,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := res.RowsAffected()
+	return rows > 0, nil
+}
+
+// ListJobsByStatus 返回指定状态的全部任务（无分页上限）。
+// 启动恢复需要完整集合，不能用 ListJobs 的 limit 截断。
+func (s *Store) ListJobsByStatus(ctx context.Context, status string) ([]model.Job, error) {
+	items := []model.Job{}
+	err := s.db.SelectContext(ctx, &items,
+		"SELECT * FROM jobs WHERE status = ? ORDER BY created_at ASC", status)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // UpdateJobResult 更新进度 result 字段
 func (s *Store) UpdateJobResult(ctx context.Context, id int64, result string) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE jobs SET result = ? WHERE id = ?", result, id)
