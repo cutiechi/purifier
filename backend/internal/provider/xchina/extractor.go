@@ -341,7 +341,12 @@ func ParseHotPosts(rawHTML string) []model.HotPost {
 		rankText := strings.TrimSpace(a.Find("span").First().Text())
 		titleText := strings.TrimSpace(a.Find("span").Eq(1).Text())
 		if titleText == "" {
-			titleText = strings.TrimSpace(a.Text())
+			// 回退：取最后一个 span（避免把首个 span 的名次拼进标题）
+			if spans := a.Find("span"); spans.Length() > 1 {
+				titleText = strings.TrimSpace(spans.Last().Text())
+			} else {
+				titleText = strings.TrimSpace(a.Text())
+			}
 		}
 		if cid == "" || titleText == "" {
 			return
