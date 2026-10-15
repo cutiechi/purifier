@@ -271,8 +271,6 @@ func (s *Store) ListFavorites(ctx context.Context, q ListQuery) (*ListResult, er
 		LIMIT ? OFFSET ?
 	`, whereClause)
 
-	args = append(args, limit, offset)
-
 	total, err := s.countList(ctx, fmt.Sprintf("SELECT COUNT(*) FROM favorites f INNER JOIN items i ON i.site = f.site AND i.kind = f.kind AND i.id = f.id %s", whereClause), args)
 	if err != nil {
 		return nil, err
