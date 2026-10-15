@@ -88,9 +88,10 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 		})
 
 		r.Get("/posts", func(w http.ResponseWriter, r *http.Request) {
-			site := r.URL.Query().Get("site")
-			if site == "" {
-				site = cool18.Cool18SiteID
+			site, err := resolveSiteParam(r.URL.Query().Get("site"))
+			if err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+				return
 			}
 			tid := r.URL.Query().Get("tid")
 			mtid := r.URL.Query().Get("mtid")
@@ -145,9 +146,10 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			}
 			chapterStr := r.URL.Query().Get("chapter")
 			refresh := r.URL.Query().Get("refresh") == "1"
-			site := r.URL.Query().Get("site")
-			if site == "" {
-				site = cool18.Cool18SiteID // 文档约定：site 默认 1
+			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
+			if siteErr != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+				return
 			}
 
 			// site=1：Cool18 书库藏文（bookview 整本一页，无章节模型）
@@ -201,7 +203,12 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 		})
 
 		r.Get("/categories", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
+			if siteErr != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+				return
+			}
+			if site == xchina.XChinaSiteID {
 				links, err := deps.XChinaService.GetCategories(r.Context())
 				if err != nil {
 					httputil.Error(w, err)
@@ -212,29 +219,32 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			}
 			deps.Cool18Handler.HandleCategories(w, r)
 		})
-		// 书库站无这些板块（能力位判定，与 legacy extractor 的 notSupported 404 对齐）
-		unsupportedOnLibrary := func(name string) http.HandlerFunc {
+		// 书库站无这些板块（与 legacy extractor 的 notSupported 404 对齐）
+		unsupportedOnLibrary := func(name string, handler http.HandlerFunc) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+				site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
+				if siteErr != nil {
+					httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+					return
+				}
+				if site == xchina.XChinaSiteID {
 					httputil.JSONError(w, http.StatusNotFound,
 						fmt.Sprintf("site 2 does not support %s", name))
 					return
 				}
-				switch name {
-				case "featured":
-					deps.Cool18Handler.HandleFeatured(w, r)
-				case "picks":
-					deps.Cool18Handler.HandlePicks(w, r)
-				default:
-					deps.Cool18Handler.HandleComments(w, r)
-				}
+				handler(w, r)
 			}
 		}
-		r.Get("/featured", unsupportedOnLibrary("featured"))
-		r.Get("/picks", unsupportedOnLibrary("picks"))
-		r.Get("/comments", unsupportedOnLibrary("comments"))
+		r.Get("/featured", unsupportedOnLibrary("featured", deps.Cool18Handler.HandleFeatured))
+		r.Get("/picks", unsupportedOnLibrary("picks", deps.Cool18Handler.HandlePicks))
+		r.Get("/comments", unsupportedOnLibrary("comments", deps.Cool18Handler.HandleComments))
 		r.Get("/trending", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
+			if siteErr != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+				return
+			}
+			if site == xchina.XChinaSiteID {
 				posts, err := deps.XChinaService.GetTrending(r.Context())
 				if err != nil {
 					httputil.Error(w, err)
@@ -246,7 +256,11 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			deps.Cool18Handler.HandleTrending(w, r)
 		})
 		r.Get("/browse", func(w http.ResponseWriter, r *http.Request) {
-			site := r.URL.Query().Get("site")
+			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
+			if siteErr != nil {
+				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
+				return
+			}
 			if site == xchina.XChinaSiteID {
 				categoryType := r.URL.Query().Get("type")
 				keywords := r.URL.Query().Get("q")
@@ -283,6 +297,19 @@ func strconvAtoi(s string) (int, error) {
 		return 0, errors.New("invalid number")
 	}
 	return n, nil
+}
+
+// resolveSiteParam 校验 site 查询参数：空视为默认站，未知站返回错误。
+// legacy resolveSite 对未知站点同样报 400，避免拼错时静默回落到论坛数据。
+func resolveSiteParam(raw string) (string, error) {
+	switch raw {
+	case "":
+		return cool18.Cool18SiteID, nil
+	case cool18.Cool18SiteID, xchina.XChinaSiteID:
+		return raw, nil
+	default:
+		return "", fmt.Errorf("unknown site: %s", raw)
+	}
 }
 
 // fileServer 静态资源托管，未匹配文件自动 fallback 回 index.html
