@@ -6,7 +6,7 @@ import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
-import { PageShell, AsyncBody } from "@/components/page-shell"
+import { AsyncBody, PageShell, SectionLabel } from "@/components/page-shell"
 import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
 import { BookCover } from "@/components/book-cover"
@@ -402,7 +402,7 @@ export default function BookPage() {
         onRetry={fetchBook}
         emptyText="内容不存在"
       >
-        {book && (
+        {book && loadedKey === currentKey ? (
           <>
             {refreshNotice && (
               <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
@@ -440,63 +440,76 @@ export default function BookPage() {
             )}
             {isToc && (
               <div className="flex flex-col gap-8">
-                <header className="flex flex-col sm:flex-row gap-6 items-start">
-                  <div className="shrink-0 mx-auto sm:mx-0 shadow-lg rounded-xl overflow-hidden">
-                    <BookCover
-                      title={book.title}
-                      author={book.meta?.author}
-                      size="lg"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="outline" className="border-primary/20 text-primary">
-                        网络小说
-                      </Badge>
-                      {book.chapters?.length ? (
+                <header className="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-5">
+                    <div className="shrink-0 shadow-lg rounded-xl overflow-hidden">
+                      <BookCover
+                        title={book.title}
+                        author={book.meta?.author}
+                        size="lg"
+                      />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge
-                          variant="secondary"
-                          className="font-normal text-muted-foreground"
+                          variant="outline"
+                          className="border-primary/20 text-primary"
                         >
-                          共 {book.chapters.length} 章
+                          网络小说
                         </Badge>
-                      ) : null}
-                    </div>
-                    <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-                      {book.title}
-                    </h1>
-                    {book.meta?.author && (
-                      <p className="text-sm font-medium text-muted-foreground">
-                        作者：<span className="text-foreground">{book.meta.author}</span>
-                      </p>
-                    )}
-                    {book.intro && (
-                      <p className="text-sm leading-relaxed whitespace-pre-line text-muted-foreground/90 pt-1 line-clamp-4">
-                        {book.intro}
-                      </p>
-                    )}
-                    <div className="pt-2 flex items-center gap-3 flex-wrap">
-                      <Link
-                        to={bookPath(cid, { site, chapter: "1" })}
-                        className="inline-flex items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
-                      >
-                        开始阅读
-                      </Link>
-                      {actions}
+                        {book.chapters?.length ? (
+                          <Badge
+                            variant="secondary"
+                            className="font-normal text-muted-foreground"
+                          >
+                            共 {book.chapters.length} 章
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-[1.75rem]">
+                        {book.title}
+                      </h1>
+                      {book.meta?.author && (
+                        <p className="text-sm text-muted-foreground">
+                          作者：
+                          <span className="text-foreground">
+                            {book.meta.author}
+                          </span>
+                        </p>
+                      )}
                     </div>
                   </div>
+                  {book.intro ? (
+                    <p className="max-w-xl text-sm leading-relaxed whitespace-pre-line text-muted-foreground sm:text-right">
+                      {book.intro}
+                    </p>
+                  ) : null}
                 </header>
 
+                <div className="mb-4 flex items-center gap-3">
+                  <Link
+                    to={bookPath(cid, {
+                      site,
+                      chapter: String(state?.lastChapter ?? 1),
+                    })}
+                    className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+                  >
+                    开始阅读
+                  </Link>
+                  {actions}
+                </div>
+
                 {(book.chapters ?? []).length > 0 && (
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-base font-semibold tracking-tight text-foreground">
-                        章节列表
-                      </h2>
-                      <span className="text-xs text-muted-foreground">
-                        共 {book.chapters?.length} 章
-                      </span>
-                    </div>
+                  <section>
+                    <SectionLabel
+                      action={
+                        <span className="text-xs text-muted-foreground">
+                          共 {book.chapters?.length} 章
+                        </span>
+                      }
+                    >
+                      章节列表
+                    </SectionLabel>
                     <PostList>
                       {(book.chapters ?? []).map((ch) => (
                         <PostCard
@@ -518,9 +531,7 @@ export default function BookPage() {
                 )}
                 {book.related && book.related.length > 0 && (
                   <section>
-                    <h3 className="mb-3 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                      相关推荐
-                    </h3>
+                    <SectionLabel>相关推荐</SectionLabel>
                     <PostList>
                       {book.related.map((r) => (
                         <PostCard
@@ -627,7 +638,7 @@ export default function BookPage() {
               </>
             )}
           </>
-        )}
+        ) : null}
       </AsyncBody>
       <ReadingSelectionToolbar
         clusters={clusters}

@@ -10,6 +10,9 @@ import { characterHighlight } from "@/lib/character-highlight"
 
 function withParagraphs(html: string): string {
   // 后端 extractPreHtml 已清洗；前端再 DOMPurify 兜底（纵深防御）。
+  // 目录页 DTO 没有 content 字段，跨页（目录 → 章节）渲染竞态可能先拿到它；
+  // 兜底为空串，避免 .split 抛 TypeError 打崩整个阅读页。
+  if (!html) return ""
   return html
     .split(/\n{2,}/)
     .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
@@ -79,6 +82,7 @@ export function ContentBody({
 }
 
 export function SourceLink({ href }: { href: string }) {
+  if (!href) return null
   return (
     <a
       href={href}

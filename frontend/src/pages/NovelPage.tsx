@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react"
+import { useCallback } from "react"
 import { Link } from "react-router-dom"
-import { PageShell, AsyncBody } from "@/components/page-shell"
+import { PageHeader, PageShell, SectionLabel } from "@/components/page-shell"
+import { PostCard, PostList } from "@/components/post-card"
+import { AsyncBody } from "@/components/ui-state"
+import { SectionTabs } from "@/components/section-tabs"
+import { useAsyncList } from "@/hooks/use-async-list"
 import { api, bookPath, browsePath, routes } from "@/lib/routes"
-import { BookCover } from "@/components/book-cover"
+import { useDiscoverTabs } from "@/lib/hub-tabs"
 
 interface BookItem {
   index: number
@@ -10,150 +14,98 @@ interface BookItem {
   tid: string
 }
 
-interface HomeData {
-  category: string
-  links: BookItem[]
+interface CategoryItem {
+  label: string
+  url: string
+  kind: "type" | "column" | "other"
 }
 
-const NOVEL_TAGS = [
-  "玄幻",
-  "仙侠",
-  "都市",
-  "武侠",
-  "科幻",
-  "奇幻",
-  "同人",
-  "言情",
-  "穿越",
-  "历史",
-  "悬疑",
-  "网游",
-] as const
+const pickBooks = (json: Record<string, unknown>): BookItem[] =>
+  (json.links as BookItem[]) ?? []
 
+const pickCategories = (json: Record<string, unknown>): CategoryItem[] =>
+  (json.links as CategoryItem[]) ?? []
+
+/** 书库首页：话题材入口 + 热门推荐（结构与论坛「发现/首页」一致） */
 export default function NovelPage() {
-  const [data, setData] = useState<HomeData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const sectionTabs = useDiscoverTabs(routes.novel)
+  const books = useAsyncList(api.booksHome, pickBooks)
+  const categories = useAsyncList(`${api.categories}?site=2`, pickCategories)
+  const reload = useCallback(() => {
+    books.reload()
+    categories.reload()
+  }, [books, categories])
 
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    fetch(api.booksHome)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`书库加载异常: ${res.status}`)
-        return (await res.json()) as HomeData
-      })
-      .then((d) => {
-        if (active) {
-          setData(d)
-          setLoading(false)
-        }
-      })
-      .catch((e) => {
-        if (active) {
-          setError(e instanceof Error ? e.message : "获取小说列表失败")
-          setLoading(false)
-        }
-      })
-    return () => {
-      active = false
-    }
-  }, [])
+  const error = books.error || categories.error
+  const loading = books.loading || categories.loading
 
   return (
     <PageShell>
-      <div className="flex flex-col gap-8 pb-12">
-        {/* 顶部标语与热门分类标签 */}
-        <section className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-                纯净小说书库
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                沉浸式网文阅读，无弹窗、无转码广告、极速正文解析
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link
-                to={routes.trending + "?site=2"}
-                className="inline-flex h-9 items-center justify-center rounded-xl border border-border/60 bg-card/60 px-3.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-              >
-                🔥 书库排行榜
-              </Link>
-            </div>
-          </div>
+      <PageHeader
+        title="小说书库"
+        description={
+          categories.items.length
+            ? `共 ${categories.items.length} 个题材 · 无弹窗、无转码广告`
+            : "沉浸式网文阅读，无弹窗、无转码广告"
+        }
+      />
+      <SectionTabs items={sectionTabs} />
 
-          {/* 常用分类快捷 Pill */}
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            {NOVEL_TAGS.map((tag) => (
-              <Link
-                key={tag}
-                to={browsePath({ site: "2", type: tag })}
-                className="inline-flex items-center rounded-lg border border-border/50 bg-secondary/60 px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:border-primary/40 hover:bg-secondary hover:text-foreground"
-              >
-                {tag}
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        {/* 推荐书单列表 */}
-        <section className="flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-            <h2 className="text-lg font-semibold tracking-tight text-foreground">
-              热门推荐
-            </h2>
-            <Link
-              to={browsePath({ site: "2", type: "玄幻" })}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              浏览更多 &rarr;
-            </Link>
-          </div>
-
-          <AsyncBody
-            loading={loading}
-            error={error}
-            empty={!data || data.links.length === 0}
-            emptyText="书库暂无推荐小说"
-            onRetry={() => window.location.reload()}
-          >
-            {data && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {data.links.map((b) => (
+      <AsyncBody
+        loading={loading}
+        error={error}
+        empty={books.items.length === 0 && categories.items.length === 0}
+        onRetry={reload}
+        emptyText="书库暂无推荐"
+      >
+        <div className="flex flex-col gap-10 pb-12">
+          {categories.items.length > 0 && (
+            <section>
+              <SectionLabel>题材</SectionLabel>
+              <div className="flex flex-wrap items-center gap-2">
+                {categories.items.slice(0, 12).map((c) => (
                   <Link
-                    key={b.tid}
-                    to={bookPath(b.tid, { site: "2" })}
-                    className="group relative flex gap-3.5 rounded-2xl border border-border/60 bg-card/50 p-3.5 transition-all hover:border-border hover:bg-card hover:shadow-sm"
+                    key={c.url}
+                    to={c.url}
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-border/60 bg-card/60 px-3 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-accent"
                   >
-                    <BookCover title={b.title} size="md" />
-                    <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
-                      <div className="flex flex-col gap-1">
-                        <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
-                          {b.title}
-                        </h3>
-                        <span className="text-xs text-muted-foreground">
-                          书号 #{b.tid}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between pt-2">
-                        <span className="inline-flex items-center rounded-md bg-secondary/80 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-                          连载网文
-                        </span>
-                        <span className="text-xs font-medium text-primary/80 group-hover:text-primary">
-                          阅读目录 &rarr;
-                        </span>
-                      </div>
-                    </div>
+                    {c.label}
                   </Link>
                 ))}
               </div>
-            )}
-          </AsyncBody>
-        </section>
-      </div>
+            </section>
+          )}
+
+          <section>
+            <SectionLabel
+              action={
+                <Link
+                  to={browsePath({ site: "2", type: "fantasy" })}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  浏览更多 &rarr;
+                </Link>
+              }
+            >
+              热门推荐
+            </SectionLabel>
+            <PostList>
+              {books.items.map((b) => (
+                <PostCard
+                  key={b.tid}
+                  href={bookPath(b.tid, { site: "2" })}
+                  title={b.title}
+                  leading={
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-medium text-muted-foreground tabular-nums">
+                      {b.index}
+                    </span>
+                  }
+                />
+              ))}
+            </PostList>
+          </section>
+        </div>
+      </AsyncBody>
     </PageShell>
   )
 }

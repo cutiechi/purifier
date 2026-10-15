@@ -105,3 +105,37 @@ func TestBuildReplyTreeCycleTerminates(t *testing.T) {
 		t.Fatalf("BuildReplyTree on cycle failed: %v", err)
 	}
 }
+
+// 回归：栏目链接必须是 SPA 内部 /browse 路由，不能透出上游相对 URL
+func TestExtractCategoryLinksAreSPARoutes(t *testing.T) {
+	html := `<div class="ext_org_title">
+      <a href="index.php?act=threadsearch&app=forum&keywords=原创&submit=栏目搜索&first=1&p=0">书屋原创区</a>
+      <a href="index.php?action=search&act=threadsearch&app=forum&type=%E9%83%BD%E5%B8%82&submit=%E6%9F%A5%E8%AF%A2">都市</a>
+      <a href="https://evil.example.com/x">外链</a>
+    </div>`
+
+	links, err := ExtractCategoryLinks(html)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 2 {
+		t.Fatalf("want 2 links (外链被剔除), got %d: %+v", len(links), links)
+	}
+	for _, l := range links {
+		if !strings.HasPrefix(l.URL, "/browse?") {
+			t.Errorf("url must be an internal /browse route, got %q", l.URL)
+		}
+		if l.Label == "" {
+			t.Errorf("missing label for %q", l.URL)
+		}
+	}
+	if links[0].URL != "/browse?q=%E5%8E%9F%E5%88%9B" {
+		t.Errorf("column link wrong: %q", links[0].URL)
+	}
+	if links[1].URL != "/browse?type=%E9%83%BD%E5%B8%82" {
+		t.Errorf("type link wrong: %q", links[1].URL)
+	}
+	if links[0].Kind != "column" || links[1].Kind != "type" {
+		t.Errorf("kinds wrong: %q / %q", links[0].Kind, links[1].Kind)
+	}
+}

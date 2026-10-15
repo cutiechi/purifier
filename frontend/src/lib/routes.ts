@@ -281,7 +281,7 @@ export const NOVEL_NAV_ITEMS = [
     match: (p: string) => p === routes.novel,
   },
   {
-    href: routes.browse + "?site=2&type=玄幻",
+    href: routes.browse + "?site=2&type=fantasy",
     label: "分类找书",
     match: (p: string) => p.includes("site=2") && p.includes("browse"),
   },

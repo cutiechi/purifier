@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
+import { useSite } from "@/hooks/use-site"
 import { api, DEFAULT_SITE, SITES, type SiteId } from "@/lib/routes"
 
 function normalize(raw: CategoryItem): CategoryItem {
@@ -66,19 +67,25 @@ function describeHeader(...sites: AsyncCategoryState[]): string {
   return "书屋栏目与题材"
 }
 
+/** 分类：单站渲染（遵循 ?site=），书库站返回题材标签入口 */
 export default function CategoriesPage() {
+  const site = useSite()
+  const isLibrary = site === "2"
   const forum = useAsyncList(
     `${api.categories}?site=${DEFAULT_SITE}`,
     pickLinks
   )
   const library = useAsyncList(`${api.categories}?site=2`, pickLinks)
+  const current = isLibrary ? library : forum
 
   return (
     <PageShell>
-      <PageHeader title="分类" description={describeHeader(forum, library)} />
+      <PageHeader
+        title="分类"
+        description={describeHeader(current)}
+      />
       <div className="flex flex-col gap-8">
-        <CategorySection siteId={DEFAULT_SITE} {...forum} />
-        <CategorySection siteId="2" {...library} />
+        <CategorySection siteId={site} {...current} />
       </div>
     </PageShell>
   )

@@ -13,9 +13,9 @@ interface ItemRecord {
   url: string
   site: string
   kind: string
-  lastVisitAt?: string
-  progress?: number
-  lastChapter?: string
+  last_visited_at?: number
+  read_progress?: number
+  last_chapter?: number
 }
 
 export default function MePage() {
@@ -25,35 +25,54 @@ export default function MePage() {
   // 小说书架数据
   const [books, setBooks] = useState<ItemRecord[]>([])
   const [loadingBooks, setLoadingBooks] = useState(true)
+  const [booksError, setBooksError] = useState("")
 
   // 论坛足迹数据
   const [posts, setPosts] = useState<ItemRecord[]>([])
   const [loadingPosts, setLoadingPosts] = useState(true)
+  const [postsError, setPostsError] = useState("")
 
   useEffect(() => {
-    // 抓取小说历史与书架（site=2）
-    fetch(`${api.meHistory}?site=2&kind=book&limit=20`)
+    // 抓取小说书架（site=2 的历史即书架）与论坛收藏（site=1）
+    let alive = true
+    setLoadingBooks(true)
+    setBooksError("")
+    fetch(`${api.meHistory}?site=2&kind=book`)
       .then(async (res) => {
-        if (!res.ok) return { items: [] }
+        if (!res.ok) throw new Error("书架加载失败")
         return (await res.json()) as { items: ItemRecord[] }
       })
       .then((data) => {
+        if (!alive) return
         setBooks(data.items || [])
         setLoadingBooks(false)
       })
-      .catch(() => setLoadingBooks(false))
+      .catch((e) => {
+        if (!alive) return
+        setBooksError(e instanceof Error ? e.message : "书架加载失败")
+        setLoadingBooks(false)
+      })
 
-    // 抓取论坛足迹与收藏（site=1）
-    fetch(`${api.meFavorites}?site=1&kind=post&limit=20`)
+    setLoadingPosts(true)
+    setPostsError("")
+    fetch(`${api.meFavorites}?site=1&kind=post`)
       .then(async (res) => {
-        if (!res.ok) return { items: [] }
+        if (!res.ok) throw new Error("收藏加载失败")
         return (await res.json()) as { items: ItemRecord[] }
       })
       .then((data) => {
+        if (!alive) return
         setPosts(data.items || [])
         setLoadingPosts(false)
       })
-      .catch(() => setLoadingPosts(false))
+      .catch((e) => {
+        if (!alive) return
+        setPostsError(e instanceof Error ? e.message : "收藏加载失败")
+        setLoadingPosts(false)
+      })
+    return () => {
+      alive = false
+    }
   }, [])
 
   return (
@@ -88,7 +107,7 @@ export default function MePage() {
               📊 阅读统计
             </Link>
             <Link
-              to={routes.archive}
+              to={routes.groups}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
               📁 作者分组
@@ -120,9 +139,10 @@ export default function MePage() {
           <TabsContent value="bookshelf" className="pt-4">
             <AsyncBody
               loading={loadingBooks}
-              error={null}
+              error={booksError}
               empty={books.length === 0}
               emptyText="暂无阅读中的小说，快去书库挑选吧"
+              onRetry={() => window.location.reload()}
             >
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                 {books.map((item) => (
@@ -139,9 +159,9 @@ export default function MePage() {
                         >
                           {item.title}
                         </Link>
-                        {item.lastChapter && (
+                        {item.last_chapter != null && (
                           <span className="line-clamp-1 text-xs text-muted-foreground">
-                            上次读至: 第 {item.lastChapter} 章
+                            上次读至: 第 {item.last_chapter} 章
                           </span>
                         )}
                       </div>
@@ -149,7 +169,7 @@ export default function MePage() {
                         <Link
                           to={bookPath(item.id, {
                             site: "2",
-                            chapter: item.lastChapter || "1",
+                            chapter: String(item.last_chapter ?? 1),
                           })}
                           className="text-xs font-medium text-primary hover:underline"
                         >
@@ -173,9 +193,10 @@ export default function MePage() {
           <TabsContent value="forum" className="pt-4">
             <AsyncBody
               loading={loadingPosts}
-              error={null}
+              error={postsError}
               empty={posts.length === 0}
               emptyText="暂无收藏的论坛帖子"
+              onRetry={() => window.location.reload()}
             >
               <div className="flex flex-col divide-y divide-border/40 rounded-2xl border border-border/60 bg-card/40">
                 {posts.map((post) => (

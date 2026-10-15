@@ -40,5 +40,5 @@ export function PageShell({
 }
 
 export { Spinner, ErrorBox, EmptyState, AsyncBody } from "@/components/ui-state"
-export { PageHeader } from "@/components/page-header"
+export { PageHeader, SectionLabel } from "@/components/page-header"
 export { Pager } from "@/components/pager"

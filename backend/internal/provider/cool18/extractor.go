@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"html"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -459,7 +460,9 @@ func ExtractGoldLinks(rawHTML string) ([]ChapterLink, error) {
 	return links, nil
 }
 
-// ExtractCategoryLinks 提取栏目分类
+// ExtractCategoryLinks 提取栏目分类。
+// 上游 href 是站点相对路径（index.php?...），必须转成前端 SPA 的 /browse 路由，
+// 否则 React Router 会把它当前页前缀后当成内部路由，落到 SPA fallback 的 404 页。
 func ExtractCategoryLinks(rawHTML string) ([]CategoryLink, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
 	if err != nil {
@@ -473,15 +476,40 @@ func ExtractCategoryLinks(rawHTML string) ([]CategoryLink, error) {
 			return
 		}
 		label := regexp.MustCompile(`[『』〖〗【】\[\]]`).ReplaceAllString(raw, "")
+
 		kind := "other"
-		if strings.Contains(href, "type=") {
-			kind = "type"
-		} else if strings.Contains(href, "keywords=") {
+		var spaURL string
+		switch {
+		case strings.Contains(href, "keywords="):
 			kind = "column"
+			q := upstreamQueryValue(href, "keywords")
+			if q == "" {
+				return
+			}
+			spaURL = "/browse?q=" + url.QueryEscape(q)
+		case strings.Contains(href, "type="):
+			kind = "type"
+			t := upstreamQueryValue(href, "type")
+			if t == "" {
+				return
+			}
+			spaURL = "/browse?type=" + url.QueryEscape(t)
+		default:
+			return // 其它外链不进入站内分类
 		}
-		links = append(links, CategoryLink{Label: label, URL: href, Kind: kind})
+
+		links = append(links, CategoryLink{Label: label, URL: spaURL, Kind: kind})
 	})
 	return links, nil
+}
+
+// upstreamQueryValue 解析上游相对 URL 的查询参数值（含 %xx 解码）。
+func upstreamQueryValue(rawURL, key string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Query().Get(key))
 }
 
 // ExtractRecommendSections 提取扫文推荐分组
