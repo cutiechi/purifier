@@ -36,7 +36,8 @@ func main() {
 	store := storage.NewStore(db)
 
 	// 2. 初始化 Upstream Client (连接池 + 代理 + Singleflight)
-	client := upstream.NewClient(cfg.ProxyURL, 15*time.Second)
+	// xbookcn 标签/搜索页实测抖动 5–40s；30s 覆盖正常抖动且不永久挂住请求
+	client := upstream.NewClient(cfg.ProxyURL, 30*time.Second)
 
 	// 3. 初始化领域服务与 Handler
 	cool18Svc := cool18.NewService(client, store, cfg.DataDir)

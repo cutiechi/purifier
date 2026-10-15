@@ -36,7 +36,9 @@ func NewClient(proxyURL string, timeout time.Duration) *Client {
 	}
 
 	if timeout <= 0 {
-		timeout = 15 * time.Second
+		// xbookcn 的标签/搜索页偶发 5–40s 抖动（实测 40s 仍未返回），
+		// 15s 会让整个书库分类浏览不可用；留 30s 覆盖正常抖动。
+		timeout = 30 * time.Second
 	}
 
 	return &Client{
