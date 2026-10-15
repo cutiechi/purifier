@@ -105,17 +105,41 @@ func ExtractChapter(rawHTML string, currentChapter int, cid string) (*ChapterDet
 		return nil, err
 	}
 
-	title := strings.TrimSpace(doc.Find("main h1").First().Text())
-	if title == "" {
-		return nil, fmt.Errorf("chapter not found: 404")
+	title := strings.TrimSpace(doc.Find("main h1, .read-page-chapter-title, h1").First().Text())
+	bookTitle := strings.TrimSpace(doc.Find(".book-header a.book-title").First().Text())
+
+	pageTitle := strings.TrimSpace(doc.Find("title").First().Text())
+	if pageTitle != "" {
+		raw := strings.Split(pageTitle, " - ")[0]
+		raw = strings.Split(raw, " | ")[0]
+		raw = strings.TrimSpace(raw)
+		parts := strings.Fields(raw)
+		if len(parts) >= 2 {
+			if bookTitle == "" {
+				bookTitle = parts[0]
+			}
+			if title == "" {
+				title = parts[1]
+			}
+		} else if len(parts) == 1 {
+			if title == "" {
+				title = parts[0]
+			}
+		}
 	}
 
-	bookTitle := strings.TrimSpace(doc.Find(".book-header a.book-title").First().Text())
+	if title == "" {
+		title = fmt.Sprintf("第 %d 章", currentChapter)
+	}
+
 	if bookTitle == "" {
 		doc.Find("nav a[href^='/novel/']").Each(func(_ int, s *goquery.Selection) {
 			href, _ := s.Attr("href")
 			if strings.Count(href, "/") == 2 && bookTitle == "" {
-				bookTitle = strings.TrimSpace(s.Text())
+				t := strings.TrimSpace(s.Text())
+				if t != "" && t != "返回书页" {
+					bookTitle = t
+				}
 			}
 		})
 	}

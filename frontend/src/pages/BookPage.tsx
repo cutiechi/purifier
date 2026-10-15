@@ -9,6 +9,16 @@ import { ItemActions, useItemState } from "@/components/item-actions"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
+import { BookCover } from "@/components/book-cover"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import {
   useCharacters,
   useCharacterHighlightEnabled,
@@ -128,11 +138,76 @@ export default function BookPage() {
   // 避免旧章响应后到覆盖新章、或 setLoadedKey 记成旧 key 导致 ready 卡死
   const seqRef = useRef(0)
 
+  const [tocOpen, setTocOpen] = useState(false)
+  const [allChapters, setAllChapters] = useState<ChapterLink[]>([])
+  const [loadingAllChapters, setLoadingAllChapters] = useState(false)
+
   // 三个显式分支（review I3）：第一刀按 site 切，绝不只用"有无 chapter"当第一刀，
   // 否则 cool18（site=1、无 chapter）会误进目录 UI。
   const isToc = site === "2" && !chapter // xbookcn 目录页
   const isChapterBody = site === "2" && !!chapter // xbookcn 章节正文
   const isCool18Book = site === "1" // cool18 整本一页（现有 ArticleView 路径）
+
+  // 章节阅读模式下呼出目录抽屉时，若尚无完整目录则请求一次
+  useEffect(() => {
+    if (tocOpen && allChapters.length === 0 && cid && isChapterBody) {
+      setLoadingAllChapters(true)
+      fetch(`${api.books}?cid=${encodeURIComponent(cid)}&site=${site}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.chapters) setAllChapters(d.chapters)
+          setLoadingAllChapters(false)
+        })
+        .catch(() => setLoadingAllChapters(false))
+    }
+  }, [tocOpen, allChapters.length, cid, site, isChapterBody])
+
+  // 键盘左右方向键快速翻章
+  useEffect(() => {
+    if (!isChapterBody) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return
+      if (e.key === "ArrowLeft" && book?.prevChapter !== undefined) {
+        navigate(bookPath(cid, { site, chapter: String(book.prevChapter) }))
+      } else if (e.key === "ArrowRight" && book?.nextChapter !== undefined) {
+        navigate(bookPath(cid, { site, chapter: String(book.nextChapter) }))
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [isChapterBody, book?.prevChapter, book?.nextChapter, cid, site, navigate])
+
+  // 移动端手势滑动翻章
+  useEffect(() => {
+    if (!isChapterBody) return
+    let touchStartX = 0
+    let touchStartY = 0
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartX = e.changedTouches[0].clientX
+      touchStartY = e.changedTouches[0].clientY
+    }
+    const onTouchEnd = (e: TouchEvent) => {
+      const diffX = e.changedTouches[0].clientX - touchStartX
+      const diffY = e.changedTouches[0].clientY - touchStartY
+      if (Math.abs(diffX) > 90 && Math.abs(diffY) < 50) {
+        if (diffX < 0 && book?.nextChapter !== undefined) {
+          navigate(bookPath(cid, { site, chapter: String(book.nextChapter) }))
+        } else if (diffX > 0 && book?.prevChapter !== undefined) {
+          navigate(bookPath(cid, { site, chapter: String(book.prevChapter) }))
+        }
+      }
+    }
+    window.addEventListener("touchstart", onTouchStart, { passive: true })
+    window.addEventListener("touchend", onTouchEnd, { passive: true })
+    return () => {
+      window.removeEventListener("touchstart", onTouchStart)
+      window.removeEventListener("touchend", onTouchEnd)
+    }
+  }, [isChapterBody, book?.prevChapter, book?.nextChapter, cid, site, navigate])
 
   // ready 按"书+章"（loadedKey）判定：换章时 content 尚未挂载前 ready=false，
   // 避免恢复决策/进度采样串到上一章；目录页恒不跟踪进度（review I4 配套）。
@@ -364,31 +439,64 @@ export default function BookPage() {
               </>
             )}
             {isToc && (
-              <div className="flex flex-col gap-6">
-                <header className="flex flex-col gap-1">
-                  <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                    {book.title}
-                  </h1>
-                  {book.meta?.author && (
-                    <span className="text-sm text-muted-foreground">
-                      作者：{book.meta.author}
-                    </span>
-                  )}
+              <div className="flex flex-col gap-8">
+                <header className="flex flex-col sm:flex-row gap-6 items-start">
+                  <div className="shrink-0 mx-auto sm:mx-0 shadow-lg rounded-xl overflow-hidden">
+                    <BookCover
+                      title={book.title}
+                      author={book.meta?.author}
+                      size="lg"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="border-primary/20 text-primary">
+                        网络小说
+                      </Badge>
+                      {book.chapters?.length ? (
+                        <Badge
+                          variant="secondary"
+                          className="font-normal text-muted-foreground"
+                        >
+                          共 {book.chapters.length} 章
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+                      {book.title}
+                    </h1>
+                    {book.meta?.author && (
+                      <p className="text-sm font-medium text-muted-foreground">
+                        作者：<span className="text-foreground">{book.meta.author}</span>
+                      </p>
+                    )}
+                    {book.intro && (
+                      <p className="text-sm leading-relaxed whitespace-pre-line text-muted-foreground/90 pt-1 line-clamp-4">
+                        {book.intro}
+                      </p>
+                    )}
+                    <div className="pt-2 flex items-center gap-3 flex-wrap">
+                      <Link
+                        to={bookPath(cid, { site, chapter: "1" })}
+                        className="inline-flex items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+                      >
+                        开始阅读
+                      </Link>
+                      {actions}
+                    </div>
+                  </div>
                 </header>
-                {book.intro && (
-                  <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/80">
-                    {book.intro}
-                  </p>
-                )}
-                {book.singleShot ? (
-                  <Link
-                    to={bookPath(cid, { site, chapter: "1" })}
-                    className="inline-flex items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent/80"
-                  >
-                    开始阅读
-                  </Link>
-                ) : (
-                  (book.chapters ?? []).length > 0 && (
+
+                {(book.chapters ?? []).length > 0 && (
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-base font-semibold tracking-tight text-foreground">
+                        章节列表
+                      </h2>
+                      <span className="text-xs text-muted-foreground">
+                        共 {book.chapters?.length} 章
+                      </span>
+                    </div>
                     <PostList>
                       {(book.chapters ?? []).map((ch) => (
                         <PostCard
@@ -406,7 +514,7 @@ export default function BookPage() {
                         />
                       ))}
                     </PostList>
-                  )
+                  </section>
                 )}
                 {book.related && book.related.length > 0 && (
                   <section>
@@ -444,45 +552,64 @@ export default function BookPage() {
                   onCharacterClick={(name, rect) =>
                     setMarkPopup({ name, rect })
                   }
-                  actions={actions}
+                  actions={
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setTocOpen(true)}
+                        className="h-8 gap-1 rounded-lg text-xs"
+                      >
+                        <span>📑</span> 目录
+                      </Button>
+                      {actions}
+                    </div>
+                  }
                   footer={
-                    (book.prevChapter !== undefined ||
-                      book.nextChapter !== undefined) && (
-                      <nav className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
-                        {book.prevChapter !== undefined ? (
-                          <Link
-                            to={bookPath(cid, {
-                              site,
-                              chapter: String(book.prevChapter),
-                            })}
-                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          >
-                            ←上一章
-                          </Link>
-                        ) : (
-                          <span />
-                        )}
+                    <nav className="mt-6 flex items-center justify-between gap-3 border-t border-border pt-4">
+                      {book.prevChapter !== undefined ? (
+                        <Link
+                          to={bookPath(cid, {
+                            site,
+                            chapter: String(book.prevChapter),
+                          })}
+                          className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          ← 上一章
+                        </Link>
+                      ) : (
+                        <span />
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setTocOpen(true)}
+                          className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          📑 目录
+                        </Button>
                         <Link
                           to={bookPath(cid, { site })}
-                          className="inline-flex items-center rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          className="inline-flex items-center rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                         >
-                          返回书页
+                          书页
                         </Link>
-                        {book.nextChapter !== undefined ? (
-                          <Link
-                            to={bookPath(cid, {
-                              site,
-                              chapter: String(book.nextChapter),
-                            })}
-                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          >
-                            下一章→
-                          </Link>
-                        ) : (
-                          <span />
-                        )}
-                      </nav>
-                    )
+                      </div>
+                      {book.nextChapter !== undefined ? (
+                        <Link
+                          to={bookPath(cid, {
+                            site,
+                            chapter: String(book.nextChapter),
+                          })}
+                          className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          下一章 →
+                        </Link>
+                      ) : (
+                        <span />
+                      )}
+                    </nav>
                   }
                 />
                 {bookmarksError && (
@@ -525,6 +652,62 @@ export default function BookPage() {
           onClose={() => setMarkPopup(null)}
         />
       )}
+
+      {/* 小说章节目录抽屉 (TOC Drawer) */}
+      <Sheet open={tocOpen} onOpenChange={setTocOpen}>
+        <SheetContent side="right" className="w-[320px] sm:w-[420px] p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b border-border">
+            <SheetTitle className="text-base font-semibold truncate">
+              {book?.bookTitle || book?.title || "章节目录"}
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="flex-1 p-3">
+            {loadingAllChapters ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                正在加载目录...
+              </div>
+            ) : allChapters.length === 0 ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                暂无目录章节
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {allChapters.map((ch) => {
+                  const isCurrent = String(ch.index) === String(chapter)
+                  return (
+                    <button
+                      key={ch.index}
+                      type="button"
+                      onClick={() => {
+                        setTocOpen(false)
+                        navigate(bookPath(cid, { site, chapter: String(ch.index) }))
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-2.5 ${
+                        isCurrent
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground/85 hover:bg-muted"
+                      }`}
+                    >
+                      <span className="text-[11px] tabular-nums text-muted-foreground min-w-[24px]">
+                        {ch.index}
+                      </span>
+                      <span className="truncate flex-1">{ch.title}</span>
+                      {isCurrent && (
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] h-4 px-1.5 py-0 bg-primary/20 text-primary shrink-0"
+                        >
+                          当前
+                        </Badge>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
     </PageShell>
   )
 }

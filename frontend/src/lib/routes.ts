@@ -31,6 +31,8 @@ export const SITES: Record<SiteId, { label: string }> = {
 
 export const routes = {
   home: "/",
+  novel: "/novel",
+  novelCategories: "/novel/categories",
   /** OIDC 登录页（不进 NAV_ITEMS） */
   login: "/login",
   discover: "/discover",
@@ -90,6 +92,7 @@ export const ALL_TABS: {
 export const api = {
   posts: "/api/posts",
   books: "/api/books",
+  booksHome: "/api/books/home",
   featured: "/api/featured",
   picks: "/api/picks",
   trending: "/api/trending",
@@ -220,17 +223,12 @@ export function parseQuery(
   return (searchParams.get("q") ?? "").trim()
 }
 
-/** 一级导航：站点切换改页内 Tab，顶栏只保留这些 */
-export const NAV_ITEMS = [
+/** 论坛专属导航菜单 */
+export const FORUM_NAV_ITEMS = [
   {
     href: routes.home,
     label: "首页",
     match: (p: string) => p === routes.home,
-  },
-  {
-    href: routes.archive,
-    label: "全部",
-    match: (p: string) => p === routes.archive || p === routes.groups,
   },
   {
     href: routes.categories,
@@ -240,13 +238,18 @@ export const NAV_ITEMS = [
   },
   {
     href: routes.discover,
-    label: "发现",
+    label: "榜单",
     match: (p: string) =>
       p === routes.discover ||
       p === routes.featured ||
       p === routes.picks ||
       p === routes.comments ||
       p === routes.trending,
+  },
+  {
+    href: routes.archive,
+    label: "全部",
+    match: (p: string) => p === routes.archive || p === routes.groups,
   },
   {
     href: routes.search,
@@ -268,9 +271,40 @@ export const NAV_ITEMS = [
     label: "统计",
     match: (p: string) => p === routes.stats,
   },
+] as const
+
+/** 小说书库专属导航菜单 */
+export const NOVEL_NAV_ITEMS = [
   {
-    href: routes.jobs,
-    label: "任务",
-    match: (p: string) => p === routes.jobs,
+    href: routes.novel,
+    label: "书库首页",
+    match: (p: string) => p === routes.novel,
+  },
+  {
+    href: routes.browse + "?site=2&type=玄幻",
+    label: "分类找书",
+    match: (p: string) => p.includes("site=2") && p.includes("browse"),
+  },
+  {
+    href: routes.trending + "?site=2",
+    label: "排行榜",
+    match: (p: string) => p.includes("trending") && p.includes("site=2"),
+  },
+  {
+    href: routes.search + "?site=2",
+    label: "搜书",
+    match: (p: string) => p === routes.search,
+  },
+  {
+    href: routes.me,
+    label: "我的书架",
+    match: (p: string) =>
+      p === routes.me ||
+      p === routes.history ||
+      p === routes.favorites ||
+      p === routes.bookmarks,
   },
 ] as const
+
+export const NAV_ITEMS = FORUM_NAV_ITEMS
+

@@ -169,3 +169,17 @@ func (s *Service) Browse(ctx context.Context, categoryType, keywords string, pag
 	}, nil
 }
 
+// GetHome 获取小说书库首页精选
+func (s *Service) GetHome(ctx context.Context) (*model.CategoryPage, error) {
+	rawHTML, err := s.client.Fetch(ctx, XChinaHomeURL)
+	if err != nil {
+		return nil, err
+	}
+
+	links := ParseNovelCards(rawHTML)
+	return &model.CategoryPage{
+		Category: "热门推荐",
+		Links:    links,
+	}, nil
+}
+

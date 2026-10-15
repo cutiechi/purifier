@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from "react-router-dom"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 const HomePage = lazy(() => import("@/pages/HomePage"))
+const NovelPage = lazy(() => import("@/pages/NovelPage"))
 const CategoriesPage = lazy(() => import("@/pages/CategoriesPage"))
 const DiscoverPage = lazy(() => import("@/pages/DiscoverPage"))
 const FeaturedPage = lazy(() => import("@/pages/FeaturedPage"))
@@ -53,6 +54,14 @@ export function App() {
             element={
               <RouteBoundary>
                 <HomePage />
+              </RouteBoundary>
+            }
+          />
+          <Route
+            path="/novel"
+            element={
+              <RouteBoundary>
+                <NovelPage />
               </RouteBoundary>
             }
           />

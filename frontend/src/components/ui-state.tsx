@@ -66,7 +66,7 @@ export function AsyncBody({
   children,
 }: {
   loading: boolean
-  error: string
+  error?: string | null
   empty: boolean
   onRetry?: () => void
   emptyText?: ReactNode

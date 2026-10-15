@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,6 +114,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
 		})
 
+		r.Get("/books/home", deps.XChinaHandler.HandleGetHome)
 		r.Get("/books", func(w http.ResponseWriter, r *http.Request) {
 			cid := r.URL.Query().Get("cid")
 			if cid == "" {
@@ -190,12 +193,9 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 }
 
 func strconvAtoi(s string) (int, error) {
-	var n int
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return 0, http.ErrNotSupported
-		}
-		n = n*10 + int(ch-'0')
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0, errors.New("invalid number")
 	}
 	return n, nil
 }

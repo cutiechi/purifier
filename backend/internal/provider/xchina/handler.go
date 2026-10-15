@@ -19,10 +19,20 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	r.Get("/home", h.HandleGetHome)
 	r.Get("/books/{cid}", h.HandleGetBook)
 	r.Get("/books/{cid}/chapters/{chapterId}", h.HandleGetChapter)
 
 	return r
+}
+
+func (h *Handler) HandleGetHome(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.GetHome(r.Context())
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
 }
 
 func (h *Handler) HandleGetBook(w http.ResponseWriter, r *http.Request) {
