@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
+	"purifier/internal/core/upstream"
 	"purifier/internal/model"
 )
 
@@ -18,11 +20,14 @@ type SessionInput struct {
 }
 
 type StatsSummary struct {
-	TotalSeconds  int `json:"totalSeconds"`
-	TotalItems    int `json:"totalItems"`
-	ActiveDays    int `json:"activeDays"`
-	CurrentStreak int `json:"currentStreak"`
-	LongestStreak int `json:"longestStreak"`
+	TotalDurationS int    `json:"totalDurationS"`
+	CurrentStreak  int    `json:"currentStreak"`
+	LongestStreak  int    `json:"longestStreak"`
+	ActiveDays     int    `json:"activeDays"`
+	ThisWeekS      int    `json:"thisWeekS"`
+	ThisMonthS     int    `json:"thisMonthS"`
+	TrackedSince   *int64 `json:"trackedSince"`
+	LastActiveAt   *int64 `json:"lastActiveAt"`
 }
 
 type CalendarDay struct {
@@ -37,22 +42,35 @@ type TopItem struct {
 	ID        string         `json:"id" db:"id"`
 	Title     string         `json:"title" db:"title"`
 	DurationS int            `json:"durationS" db:"duration_s"`
+	Sessions  int            `json:"sessions" db:"sessions"`
 }
 
 type Inventory struct {
-	Items     int `json:"items"`
-	Favorites int `json:"favorites"`
-	Tags      int `json:"tags"`
-	Bookmarks int `json:"bookmarks"`
+	History    int `json:"history"`
+	Favorites  int `json:"favorites"`
+	Tags       int `json:"tags"`
+	Groups     int `json:"groups"`
+	Characters int `json:"characters"`
+	Bookmarks  int `json:"bookmarks"`
 }
 
 type StatsResult struct {
-	Summary        StatsSummary     `json:"summary"`
-	Calendar       []CalendarDay    `json:"calendar"`
-	TimeOfDay      []int            `json:"timeOfDay"`
-	TopItems       []TopItem        `json:"topItems"`
-	RecentSessions []model.ReadingSession `json:"recentSessions"`
-	Inventory      Inventory        `json:"inventory"`
+	Summary        StatsSummary    `json:"summary"`
+	Calendar       []CalendarDay   `json:"calendar"`
+	TimeOfDay      []int           `json:"timeOfDay"`
+	TopItems       []TopItem       `json:"topItems"`
+	RecentSessions []RecentSession `json:"recentSessions"`
+	Inventory      Inventory       `json:"inventory"`
+}
+
+// RecentSession 最近阅读条目（与前端契约一致）
+type RecentSession struct {
+	StartedAt int64          `json:"startedAt" db:"started_at"`
+	DurationS int            `json:"durationS" db:"duration_s"`
+	Kind      model.ItemKind `json:"kind" db:"kind"`
+	Site      string         `json:"site" db:"site"`
+	ID        string         `json:"id" db:"id"`
+	Title     string         `json:"title" db:"title"`
 }
 
 // RecordSession 记录一段阅读时长
@@ -65,6 +83,18 @@ func (s *Store) RecordSession(ctx context.Context, input SessionInput) error {
 	}
 	if input.Site == "" {
 		input.Site = "1"
+	}
+	if err := upstream.AssertSafeID(input.Site); err != nil {
+		return ErrInvalidInput
+	}
+	if input.Kind != model.KindPost && input.Kind != model.KindBook {
+		return ErrInvalidInput
+	}
+	if err := upstream.AssertSafeID(input.ID); err != nil {
+		return ErrInvalidInput
+	}
+	if input.StartedAt <= 0 {
+		return ErrInvalidInput
 	}
 
 	query := `
@@ -87,24 +117,55 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 	// 1. Inventory 资产总数
 	var inv Inventory
 	if site != "" {
-		_ = s.db.GetContext(ctx, &inv.Items, "SELECT COUNT(*) FROM items WHERE site = ?", site)
+		_ = s.db.GetContext(ctx, &inv.History, "SELECT COUNT(*) FROM items WHERE site = ?", site)
 		_ = s.db.GetContext(ctx, &inv.Favorites, "SELECT COUNT(*) FROM favorites WHERE site = ?", site)
 		_ = s.db.GetContext(ctx, &inv.Tags, "SELECT COUNT(*) FROM tags WHERE site = ?", site)
 		_ = s.db.GetContext(ctx, &inv.Bookmarks, "SELECT COUNT(*) FROM bookmarks WHERE site = ?", site)
+		_ = s.db.GetContext(ctx, &inv.Groups, "SELECT COUNT(*) FROM groups")
+		_ = s.db.GetContext(ctx, &inv.Characters, "SELECT COUNT(*) FROM character_names")
 	} else {
-		_ = s.db.GetContext(ctx, &inv.Items, "SELECT COUNT(*) FROM items")
+		_ = s.db.GetContext(ctx, &inv.History, "SELECT COUNT(*) FROM items")
 		_ = s.db.GetContext(ctx, &inv.Favorites, "SELECT COUNT(*) FROM favorites")
 		_ = s.db.GetContext(ctx, &inv.Tags, "SELECT COUNT(*) FROM tags")
 		_ = s.db.GetContext(ctx, &inv.Bookmarks, "SELECT COUNT(*) FROM bookmarks")
+		_ = s.db.GetContext(ctx, &inv.Groups, "SELECT COUNT(*) FROM groups")
+		_ = s.db.GetContext(ctx, &inv.Characters, "SELECT COUNT(*) FROM character_names")
 	}
 
-	// 2. Summary
-	var totalSec, totalItems int
+	// 2. Summary：总时长 + 本周/本月 + 起止时间
+	var totalSec int
 	summaryQuery := fmt.Sprintf(`
-		SELECT COALESCE(SUM(duration_s), 0), COUNT(DISTINCT kind || ':' || item_id)
+		SELECT COALESCE(SUM(duration_s), 0)
 		FROM reading_sessions %s
 	`, siteCond)
-	_ = s.db.QueryRowContext(ctx, summaryQuery, args...).Scan(&totalSec, &totalItems)
+	_ = s.db.QueryRowContext(ctx, summaryQuery, args...).Scan(&totalSec)
+
+	nowLocal := time.Now()
+	weekStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, nowLocal.Location()).
+		AddDate(0, 0, -int(nowLocal.Weekday()+6)%7)
+	monthStart := time.Date(nowLocal.Year(), nowLocal.Month(), 1, 0, 0, 0, 0, nowLocal.Location())
+
+	weekCond := "WHERE started_at >= ?"
+	weekArgs := []any{weekStart.UnixMilli()}
+	monthCond := "WHERE started_at >= ?"
+	monthArgs := []any{monthStart.UnixMilli()}
+	rangeCond := ""
+	var rangeArgs []any
+	if site != "" {
+		weekCond = "WHERE site = ? AND started_at >= ?"
+		weekArgs = []any{site, weekStart.UnixMilli()}
+		monthCond = "WHERE site = ? AND started_at >= ?"
+		monthArgs = []any{site, monthStart.UnixMilli()}
+		rangeCond = "WHERE site = ?"
+		rangeArgs = []any{site}
+	}
+
+	var thisWeekS, thisMonthS int
+	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", weekCond), weekArgs...).Scan(&thisWeekS)
+	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", monthCond), monthArgs...).Scan(&thisMonthS)
+
+	var trackedSince, lastActiveAt sql.NullInt64
+	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT MIN(started_at), MAX(started_at) FROM reading_sessions %s", rangeCond), rangeArgs...).Scan(&trackedSince, &lastActiveAt)
 
 	// 3. Calendar (近 365 天)
 	sinceMs := time.Now().AddDate(0, 0, -364).UnixMilli()
@@ -187,7 +248,13 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 
 	// 5. TopItems
 	topQuery := fmt.Sprintf(`
-		SELECT site, kind, item_id AS id, title, COALESCE(SUM(duration_s), 0) AS duration_s
+		SELECT site, kind, item_id AS id,
+		       (SELECT r2.title FROM reading_sessions r2
+		        WHERE r2.site = reading_sessions.site AND r2.kind = reading_sessions.kind
+		          AND r2.item_id = reading_sessions.item_id
+		        ORDER BY r2.started_at DESC LIMIT 1) AS title,
+		       COALESCE(SUM(duration_s), 0) AS duration_s,
+		       COUNT(*) AS sessions
 		FROM reading_sessions
 		%s
 		GROUP BY site, kind, item_id
@@ -203,27 +270,38 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 
 	// 6. RecentSessions
 	recentQuery := fmt.Sprintf(`
-		SELECT id, site, kind, item_id, title, started_at, duration_s, estimated
+		SELECT started_at, COALESCE(duration_s, 0) AS duration_s, kind, site, item_id AS id, title
 		FROM reading_sessions
 		%s
 		ORDER BY started_at DESC
 		LIMIT 20
 	`, siteCond)
 
-	var recentSessions []model.ReadingSession
+	var recentSessions []RecentSession
 	_ = s.db.SelectContext(ctx, &recentSessions, recentQuery, args...)
 	if recentSessions == nil {
-		recentSessions = []model.ReadingSession{}
+		recentSessions = []RecentSession{}
+	}
+
+	summary := StatsSummary{
+		TotalDurationS: totalSec,
+		ActiveDays:     activeDays,
+		CurrentStreak:  currStreak,
+		LongestStreak:  longStreak,
+		ThisWeekS:      thisWeekS,
+		ThisMonthS:     thisMonthS,
+	}
+	if trackedSince.Valid {
+		v := trackedSince.Int64
+		summary.TrackedSince = &v
+	}
+	if lastActiveAt.Valid {
+		v := lastActiveAt.Int64
+		summary.LastActiveAt = &v
 	}
 
 	return &StatsResult{
-		Summary: StatsSummary{
-			TotalSeconds:  totalSec,
-			TotalItems:    totalItems,
-			ActiveDays:    activeDays,
-			CurrentStreak: currStreak,
-			LongestStreak: longStreak,
-		},
+		Summary:        summary,
 		Calendar:       calendar,
 		TimeOfDay:      timeOfDay,
 		TopItems:       topItems,

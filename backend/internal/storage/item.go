@@ -71,16 +71,21 @@ func (s *Store) SetProgress(ctx context.Context, site string, kind model.ItemKin
 
 // ItemState 表示单个条目的综合阅读与收藏状态
 type ItemState struct {
+	Site          string   `json:"site"`
+	Kind          string   `json:"kind"`
+	ID            string   `json:"id"`
 	Title         string   `json:"title"`
 	URL           string   `json:"url"`
 	FirstSeenAt   int64    `json:"first_seen_at"`
 	LastVisitedAt int64    `json:"last_visited_at"`
 	VisitCount    int      `json:"visit_count"`
 	ReadProgress  *float64 `json:"read_progress"`
-	LastChapter   *int     `json:"last_chapter"`
+	LastChapter   *int     `json:"lastChapter"`
 	Favorited     bool     `json:"favorited"`
 	FavoritedAt   *int64   `json:"favorited_at,omitempty"`
 	Tags          []string `json:"tags"`
+	GroupID       *int64   `json:"groupId,omitempty"`
+	GroupTitle    *string  `json:"groupTitle,omitempty"`
 }
 
 // GetState 获取条目访问、收藏和标签状态
@@ -109,6 +114,9 @@ func (s *Store) GetState(ctx context.Context, site string, kind model.ItemKind, 
 	}
 
 	state := &ItemState{
+		Site:          site,
+		Kind:          string(kind),
+		ID:            id,
 		Title:         item.Title,
 		URL:           item.URL,
 		FirstSeenAt:   item.FirstSeenAt,
@@ -123,5 +131,22 @@ func (s *Store) GetState(ctx context.Context, site string, kind model.ItemKind, 
 		val := favoritedAt.Int64
 		state.FavoritedAt = &val
 	}
+
+	// 帖子所属分组（仅 post 可能有；tid 同时只属一个分组）
+	if kind == model.KindPost {
+		var groupID int64
+		var groupTitle string
+		rowErr := s.db.QueryRowContext(ctx,
+			`SELECT g.id, g.title FROM groups g
+			 JOIN group_items gi ON gi.group_id = g.id
+			 WHERE gi.tid = ? ORDER BY g.id LIMIT 1`, id).Scan(&groupID, &groupTitle)
+		if rowErr == nil {
+			state.GroupID = &groupID
+			state.GroupTitle = &groupTitle
+		} else if !errors.Is(rowErr, sql.ErrNoRows) {
+			return nil, rowErr
+		}
+	}
+
 	return state, nil
 }

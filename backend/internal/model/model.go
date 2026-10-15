@@ -144,6 +144,31 @@ type CategoryPage struct {
 	NextPage *int          `json:"nextPage,omitempty"`
 }
 
+type HotPost struct {
+	Rank  int    `json:"rank"`
+	Title string `json:"title"`
+	Tid   string `json:"tid"`
+	Reads int    `json:"reads"`
+}
+
+type CmtRankPost struct {
+	Rank     int    `json:"rank"`
+	Title    string `json:"title"`
+	Tid      string `json:"tid"`
+	Comments int    `json:"comments"`
+}
+
+type CategoryLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+	Kind  string `json:"kind"`
+}
+
+type RecommendSection struct {
+	Title string        `json:"title"`
+	Links []ChapterLink `json:"links"`
+}
+
 type MergedSearchItem struct {
 	Site string      `json:"site"`
 	Kind ItemKind    `json:"kind"`
@@ -155,4 +180,3 @@ type MergedSearchPage struct {
 	NextPage *int               `json:"nextPage"`
 	Errors   map[string]string  `json:"errors,omitempty"`
 }
-

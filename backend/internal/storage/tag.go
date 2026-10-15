@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -123,23 +122,19 @@ func (s *Store) ListItemsByTag(ctx context.Context, tag string, q ListQuery) (*L
 		LIMIT ? OFFSET ?
 	`, whereClause)
 
-	args = append(args, limit, offset)
-
-	type rowType struct {
-		Site          string          `db:"site"`
-		Kind          string          `db:"kind"`
-		ID            string          `db:"id"`
-		Title         string          `db:"title"`
-		URL           string          `db:"url"`
-		LastVisitedAt sql.NullInt64   `db:"last_visited_at"`
-		FavoritedAt   sql.NullInt64   `db:"favorited_at"`
-		VisitCount    int             `db:"visit_count"`
-		Favorited     bool            `db:"favorited"`
-		ReadProgress  sql.NullFloat64 `db:"read_progress"`
-		LastChapter   sql.NullInt64   `db:"last_chapter"`
+	total, err := s.countList(ctx, fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM tags t
+		INNER JOIN items i ON i.site = t.site AND i.kind = t.kind AND i.id = t.id
+		%s
+	`, whereClause), args)
+	if err != nil {
+		return nil, err
 	}
 
-	var rows []rowType
+	args = append(args, limit, offset)
+
+	var rows []listRow
 	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
@@ -149,42 +144,7 @@ func (s *Store) ListItemsByTag(ctx context.Context, tag string, q ListQuery) (*L
 		rows = rows[:PageSize]
 	}
 
-	items := make([]ListItem, len(rows))
-	for idx, r := range rows {
-		item := ListItem{
-			Site:       r.Site,
-			Kind:       model.ItemKind(r.Kind),
-			ID:         r.ID,
-			Title:      r.Title,
-			URL:        r.URL,
-			VisitCount: r.VisitCount,
-			Favorited:  r.Favorited,
-			Tags:       []string{},
-		}
-		if r.LastVisitedAt.Valid {
-			item.LastVisitedAt = &r.LastVisitedAt.Int64
-		}
-		if r.FavoritedAt.Valid {
-			item.FavoritedAt = &r.FavoritedAt.Int64
-		}
-		if r.ReadProgress.Valid {
-			item.ReadProgress = &r.ReadProgress.Float64
-		}
-		if r.LastChapter.Valid {
-			val := int(r.LastChapter.Int64)
-			item.LastChapter = &val
-		}
-
-		var tags []string
-		_ = s.db.SelectContext(ctx, &tags, "SELECT tag FROM tags WHERE site = ? AND kind = ? AND id = ? ORDER BY created_at ASC", r.Site, r.Kind, r.ID)
-		if tags != nil {
-			item.Tags = tags
-		}
-
-		items[idx] = item
-	}
-
-	res := &ListResult{Items: items}
+	res := &ListResult{Items: s.buildListItems(ctx, rows), Total: total}
 	if hasNext {
 		next := page + 1
 		res.NextPage = &next

@@ -2,12 +2,15 @@ package xchina
 
 import (
 	"fmt"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"purifier/internal/core/sanitize"
+	"purifier/internal/core/upstream"
 	"purifier/internal/model"
 )
 
@@ -22,10 +25,12 @@ type BookMeta struct {
 }
 
 type BookDetail struct {
-	Title    string        `json:"title"`
-	Intro    string        `json:"intro"`
-	Meta     BookMeta      `json:"meta"`
-	Chapters []ChapterItem `json:"chapters"`
+	Title        string        `json:"title"`
+	Intro        string        `json:"intro"`
+	Meta         BookMeta      `json:"meta"`
+	Chapters     []ChapterItem `json:"chapters"`
+	Stale        bool          `json:"stale,omitempty"`
+	RefreshError string        `json:"refreshError,omitempty"`
 }
 
 type ChapterDetail struct {
@@ -36,6 +41,8 @@ type ChapterDetail struct {
 	PrevChapter  *int     `json:"prevChapter,omitempty"`
 	NextChapter  *int     `json:"nextChapter,omitempty"`
 	Meta         BookMeta `json:"meta"`
+	Stale        bool     `json:"stale,omitempty"`
+	RefreshError string   `json:"refreshError,omitempty"`
 }
 
 var authorRegex = regexp.MustCompile(`作者[：:]\s*([^·\n]+)`)
@@ -59,7 +66,7 @@ func ExtractToc(rawHTML string) (*BookDetail, error) {
 
 	title := strings.TrimSpace(doc.Find("main h1").First().Text())
 	if title == "" {
-		return nil, fmt.Errorf("book not found: 404")
+		return nil, upstream.NewExtractorError("book not found", http.StatusNotFound)
 	}
 
 	metaText := doc.Find("main .tk-meta").First().Text()
@@ -146,7 +153,7 @@ func ExtractChapter(rawHTML string, currentChapter int, cid string) (*ChapterDet
 
 	articleSel := doc.Find("#read-article")
 	if articleSel.Length() == 0 {
-		return nil, fmt.Errorf("article content not found: 404")
+		return nil, upstream.NewExtractorError("chapter content not found", http.StatusNotFound)
 	}
 
 	articleHTML, _ := articleSel.Html()
@@ -240,3 +247,125 @@ func HasNextPage(rawHTML string) bool {
 	return hasNext
 }
 
+// HasMoreLink 首页时间线「更多 → /novels」链接存在 → 有下一页
+func HasMoreLink(rawHTML, target string) bool {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
+	if err != nil {
+		return false
+	}
+	found := false
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
+		if found {
+			return
+		}
+		href, _ := s.Attr("href")
+		if href == target && strings.Contains(s.Text(), "更多") {
+			found = true
+		}
+	})
+	return found
+}
+
+var tagSlugRegex = regexp.MustCompile(`^/tag/([^/?#]+)$`)
+
+// ParseCategoryLinks 解析「主题浏览」题材入口 + 「有声小说」→ CategoryLink[]。
+// url 形如 /browse?type=<slug>&site=2，与 cool18 侧结构保持一致。
+func ParseCategoryLinks(rawHTML string) []model.CategoryLink {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
+	if err != nil {
+		return []model.CategoryLink{}
+	}
+	links := []model.CategoryLink{}
+	seen := make(map[string]bool)
+
+	doc.Find("h2").Each(func(_ int, h *goquery.Selection) {
+		heading := strings.TrimSpace(h.Text())
+		if !strings.Contains(heading, "主题浏览") {
+			return
+		}
+		h.Closest("section").Find("a[href^='/tag/']").Each(func(_ int, a *goquery.Selection) {
+			href, _ := a.Attr("href")
+			m := tagSlugRegex.FindStringSubmatch(href)
+			if len(m) < 2 {
+				return
+			}
+			slug := m[1]
+			label := strings.TrimSpace(a.Text())
+			if slug == "" || label == "" || seen[slug] {
+				return
+			}
+			seen[slug] = true
+			links = append(links, model.CategoryLink{
+				Label: label,
+				URL:   "/browse?type=" + url.QueryEscape(slug) + "&site=" + XChinaSiteID,
+				Kind:  "type",
+			})
+		})
+	})
+
+	// 有声小说区块「更多 → /tag/999」归一为 audio
+	audio := false
+	doc.Find("h2").Each(func(_ int, h *goquery.Selection) {
+		if audio || !strings.Contains(strings.TrimSpace(h.Text()), "有声小说") {
+			return
+		}
+		href, _ := h.Closest("section").Find("a[href^='/tag/']").First().Attr("href")
+		if href == "" {
+			return
+		}
+		audio = true
+		if seen["audio"] {
+			return
+		}
+		seen["audio"] = true
+		links = append(links, model.CategoryLink{
+			Label: "有声",
+			URL:   "/browse?type=audio&site=" + XChinaSiteID,
+			Kind:  "type",
+		})
+	})
+
+	return links
+}
+
+// ParseHotPosts 解析首页 #hot-ranking 今日热读榜（xbookcn 无阅读数，reads=0）
+func ParseHotPosts(rawHTML string) []model.HotPost {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
+	if err != nil {
+		return []model.HotPost{}
+	}
+	posts := []model.HotPost{}
+	doc.Find("#hot-ranking ol li a").Each(func(_ int, a *goquery.Selection) {
+		href, _ := a.Attr("href")
+		cid := cidFromHref(href)
+		rankText := strings.TrimSpace(a.Find("span").First().Text())
+		titleText := strings.TrimSpace(a.Find("span").Eq(1).Text())
+		if titleText == "" {
+			titleText = strings.TrimSpace(a.Text())
+		}
+		if cid == "" || titleText == "" {
+			return
+		}
+		rank := len(posts) + 1
+		if n, err := strconv.Atoi(rankText); err == nil {
+			rank = n
+		}
+		posts = append(posts, model.HotPost{
+			Rank:  rank,
+			Title: titleText,
+			Tid:   cid,
+			Reads: 0,
+		})
+	})
+	return posts
+}
+
+func cidFromHref(href string) string {
+	m := novelCidRegex.FindStringSubmatch(href)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+var novelCidRegex = regexp.MustCompile(`/novel/([^/?#]+)`)

@@ -17,13 +17,13 @@ type BookmarkDetail struct {
 	ID             int64          `json:"id" db:"id"`
 	Site           string         `json:"site" db:"site"`
 	Kind           model.ItemKind `json:"kind" db:"kind"`
-	ItemID         string         `json:"item_id" db:"item_id"`
+	ItemID         string         `json:"itemId" db:"item_id"`
 	Title          string         `json:"title" db:"title"`
 	Chapter        *int           `json:"chapter,omitempty" db:"chapter"`
 	Quote          string         `json:"quote" db:"quote"`
 	Note           string         `json:"note" db:"note"`
-	ScrollProgress float64        `json:"scroll_progress" db:"scroll_progress"`
-	CreatedAt      int64          `json:"created_at" db:"created_at"`
+	ScrollProgress float64        `json:"scrollProgress" db:"scroll_progress"`
+	CreatedAt      int64          `json:"createdAt" db:"created_at"`
 }
 
 type BookmarkListResult struct {

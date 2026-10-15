@@ -30,13 +30,14 @@ type ListItem struct {
 	VisitCount    int            `json:"visit_count"`
 	Favorited     bool           `json:"favorited"`
 	ReadProgress  *float64       `json:"read_progress,omitempty"`
-	LastChapter   *int           `json:"last_chapter,omitempty"`
+	LastChapter   *int           `json:"lastChapter,omitempty"`
 	Tags          []string       `json:"tags"`
 }
 
 type ListResult struct {
 	Items    []ListItem `json:"items"`
 	NextPage *int       `json:"nextPage,omitempty"`
+	Total    int        `json:"total"`
 }
 
 // ListHistory 查询浏览历史
@@ -83,23 +84,14 @@ func (s *Store) ListHistory(ctx context.Context, q ListQuery) (*ListResult, erro
 		LIMIT ? OFFSET ?
 	`, whereClause)
 
-	args = append(args, limit, offset)
-
-	type rowType struct {
-		Site          string          `db:"site"`
-		Kind          string          `db:"kind"`
-		ID            string          `db:"id"`
-		Title         string          `db:"title"`
-		URL           string          `db:"url"`
-		LastVisitedAt sql.NullInt64   `db:"last_visited_at"`
-		FavoritedAt   sql.NullInt64   `db:"favorited_at"`
-		VisitCount    int             `db:"visit_count"`
-		Favorited     bool            `db:"favorited"`
-		ReadProgress  sql.NullFloat64 `db:"read_progress"`
-		LastChapter   sql.NullInt64   `db:"last_chapter"`
+	total, err := s.countList(ctx, fmt.Sprintf("SELECT COUNT(*) FROM items i %s", whereClause), args)
+	if err != nil {
+		return nil, err
 	}
 
-	var rows []rowType
+	args = append(args, limit, offset)
+
+	var rows []listRow
 	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
@@ -109,7 +101,73 @@ func (s *Store) ListHistory(ctx context.Context, q ListQuery) (*ListResult, erro
 		rows = rows[:PageSize]
 	}
 
+	items := s.buildListItems(ctx, rows)
+	res := &ListResult{Items: items, Total: total}
+	if hasNext {
+		next := page + 1
+		res.NextPage = &next
+	}
+	return res, nil
+}
+
+// countList 执行列表总数统计
+func (s *Store) countList(ctx context.Context, query string, args []any) (int, error) {
+	var total int
+	if err := s.db.GetContext(ctx, &total, query, args...); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// tagsFor 一次性取回多个条目的标签，避免逐行 N+1
+func (s *Store) tagsFor(ctx context.Context, rows []listRow) map[string][]string {
+	out := make(map[string][]string, len(rows))
+	if len(rows) == 0 {
+		return out
+	}
+	conds := make([]string, 0, len(rows))
+	args := make([]any, 0, len(rows)*3)
+	for _, r := range rows {
+		conds = append(conds, "(site = ? AND kind = ? AND id = ?)")
+		args = append(args, r.Site, r.Kind, r.ID)
+	}
+	query := "SELECT site, kind, id, tag FROM tags WHERE " + strings.Join(conds, " OR ") + " ORDER BY created_at ASC"
+	type tagRow struct {
+		Site string `db:"site"`
+		Kind string `db:"kind"`
+		ID   string `db:"id"`
+		Tag  string `db:"tag"`
+	}
+	var tagRows []tagRow
+	if err := s.db.SelectContext(ctx, &tagRows, query, args...); err != nil {
+		return out
+	}
+	for _, t := range tagRows {
+		k := t.Site + "\x00" + t.Kind + "\x00" + t.ID
+		out[k] = append(out[k], t.Tag)
+	}
+	return out
+}
+
+// listRow 列表查询的公共行结构（历史/收藏/标签筛选共用）
+type listRow struct {
+	Site          string          `db:"site"`
+	Kind          string          `db:"kind"`
+	ID            string          `db:"id"`
+	Title         string          `db:"title"`
+	URL           string          `db:"url"`
+	LastVisitedAt sql.NullInt64   `db:"last_visited_at"`
+	FavoritedAt   sql.NullInt64   `db:"favorited_at"`
+	VisitCount    int             `db:"visit_count"`
+	Favorited     bool            `db:"favorited"`
+	ReadProgress  sql.NullFloat64 `db:"read_progress"`
+	LastChapter   sql.NullInt64   `db:"last_chapter"`
+}
+
+// buildListItems 行 → ListItem，并批量填充标签
+func (s *Store) buildListItems(ctx context.Context, rows []listRow) []ListItem {
 	items := make([]ListItem, len(rows))
+	tagMap := s.tagsFor(ctx, rows)
 	for idx, r := range rows {
 		item := ListItem{
 			Site:       r.Site,
@@ -134,23 +192,12 @@ func (s *Store) ListHistory(ctx context.Context, q ListQuery) (*ListResult, erro
 			val := int(r.LastChapter.Int64)
 			item.LastChapter = &val
 		}
-
-		// 填充标签
-		var tags []string
-		_ = s.db.SelectContext(ctx, &tags, "SELECT tag FROM tags WHERE site = ? AND kind = ? AND id = ? ORDER BY created_at ASC", r.Site, r.Kind, r.ID)
-		if tags != nil {
+		if tags := tagMap[r.Site+"\x00"+r.Kind+"\x00"+r.ID]; tags != nil {
 			item.Tags = tags
 		}
-
 		items[idx] = item
 	}
-
-	res := &ListResult{Items: items}
-	if hasNext {
-		next := page + 1
-		res.NextPage = &next
-	}
-	return res, nil
+	return items
 }
 
 // AddFavorite 收藏条目
@@ -226,21 +273,14 @@ func (s *Store) ListFavorites(ctx context.Context, q ListQuery) (*ListResult, er
 
 	args = append(args, limit, offset)
 
-	type rowType struct {
-		Site          string          `db:"site"`
-		Kind          string          `db:"kind"`
-		ID            string          `db:"id"`
-		Title         string          `db:"title"`
-		URL           string          `db:"url"`
-		LastVisitedAt sql.NullInt64   `db:"last_visited_at"`
-		FavoritedAt   sql.NullInt64   `db:"favorited_at"`
-		VisitCount    int             `db:"visit_count"`
-		Favorited     bool            `db:"favorited"`
-		ReadProgress  sql.NullFloat64 `db:"read_progress"`
-		LastChapter   sql.NullInt64   `db:"last_chapter"`
+	total, err := s.countList(ctx, fmt.Sprintf("SELECT COUNT(*) FROM favorites f INNER JOIN items i ON i.site = f.site AND i.kind = f.kind AND i.id = f.id %s", whereClause), args)
+	if err != nil {
+		return nil, err
 	}
 
-	var rows []rowType
+	args = append(args, limit, offset)
+
+	var rows []listRow
 	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
@@ -250,42 +290,7 @@ func (s *Store) ListFavorites(ctx context.Context, q ListQuery) (*ListResult, er
 		rows = rows[:PageSize]
 	}
 
-	items := make([]ListItem, len(rows))
-	for idx, r := range rows {
-		item := ListItem{
-			Site:       r.Site,
-			Kind:       model.ItemKind(r.Kind),
-			ID:         r.ID,
-			Title:      r.Title,
-			URL:        r.URL,
-			VisitCount: r.VisitCount,
-			Favorited:  true,
-			Tags:       []string{},
-		}
-		if r.LastVisitedAt.Valid {
-			item.LastVisitedAt = &r.LastVisitedAt.Int64
-		}
-		if r.FavoritedAt.Valid {
-			item.FavoritedAt = &r.FavoritedAt.Int64
-		}
-		if r.ReadProgress.Valid {
-			item.ReadProgress = &r.ReadProgress.Float64
-		}
-		if r.LastChapter.Valid {
-			val := int(r.LastChapter.Int64)
-			item.LastChapter = &val
-		}
-
-		var tags []string
-		_ = s.db.SelectContext(ctx, &tags, "SELECT tag FROM tags WHERE site = ? AND kind = ? AND id = ? ORDER BY created_at ASC", r.Site, r.Kind, r.ID)
-		if tags != nil {
-			item.Tags = tags
-		}
-
-		items[idx] = item
-	}
-
-	res := &ListResult{Items: items}
+	res := &ListResult{Items: s.buildListItems(ctx, rows), Total: total}
 	if hasNext {
 		next := page + 1
 		res.NextPage = &next
@@ -307,12 +312,17 @@ func (s *Store) PurgeItem(ctx context.Context, site string, kind model.ItemKind,
 	}
 	defer tx.Rollback()
 
-	_, _ = tx.ExecContext(ctx, "DELETE FROM bookmarks WHERE site = ? AND kind = ? AND item_id = ?", site, string(kind), id)
-	_, _ = tx.ExecContext(ctx, "DELETE FROM tags WHERE site = ? AND kind = ? AND id = ?", site, string(kind), id)
-	_, _ = tx.ExecContext(ctx, "DELETE FROM favorites WHERE site = ? AND kind = ? AND id = ?", site, string(kind), id)
-	_, err = tx.ExecContext(ctx, "DELETE FROM items WHERE site = ? AND kind = ? AND id = ?", site, string(kind), id)
-	if err != nil {
-		return err
+	deletes := []string{
+		"DELETE FROM bookmarks WHERE site = ? AND kind = ? AND item_id = ?",
+		"DELETE FROM reading_sessions WHERE site = ? AND kind = ? AND item_id = ?",
+		"DELETE FROM tags WHERE site = ? AND kind = ? AND id = ?",
+		"DELETE FROM favorites WHERE site = ? AND kind = ? AND id = ?",
+		"DELETE FROM items WHERE site = ? AND kind = ? AND id = ?",
+	}
+	for _, q := range deletes {
+		if _, err := tx.ExecContext(ctx, q, site, string(kind), id); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -326,23 +336,41 @@ func (s *Store) ClearHistory(ctx context.Context, site string) (int64, error) {
 	defer tx.Rollback()
 
 	var total int64
+	var queries []string
 	if site != "" {
-		_ = tx.GetContext(ctx, &total, "SELECT COUNT(*) FROM items WHERE site = ?", site)
-		_, _ = tx.ExecContext(ctx, "DELETE FROM bookmarks WHERE site = ?", site)
-		_, _ = tx.ExecContext(ctx, "DELETE FROM tags WHERE site = ?", site)
-		_, _ = tx.ExecContext(ctx, "DELETE FROM favorites WHERE site = ?", site)
-		_, err = tx.ExecContext(ctx, "DELETE FROM items WHERE site = ?", site)
+		if err := tx.GetContext(ctx, &total, "SELECT COUNT(*) FROM items WHERE site = ?", site); err != nil {
+			return 0, err
+		}
+		queries = []string{
+			"DELETE FROM bookmarks WHERE site = ?",
+			"DELETE FROM reading_sessions WHERE site = ?",
+			"DELETE FROM tags WHERE site = ?",
+			"DELETE FROM favorites WHERE site = ?",
+			"DELETE FROM items WHERE site = ?",
+		}
+		for _, q := range queries {
+			if _, err := tx.ExecContext(ctx, q, site); err != nil {
+				return 0, err
+			}
+		}
 	} else {
-		_ = tx.GetContext(ctx, &total, "SELECT COUNT(*) FROM items")
-		_, _ = tx.ExecContext(ctx, "DELETE FROM bookmarks")
-		_, _ = tx.ExecContext(ctx, "DELETE FROM tags")
-		_, _ = tx.ExecContext(ctx, "DELETE FROM favorites")
-		_, err = tx.ExecContext(ctx, "DELETE FROM items")
+		if err := tx.GetContext(ctx, &total, "SELECT COUNT(*) FROM items"); err != nil {
+			return 0, err
+		}
+		queries = []string{
+			"DELETE FROM bookmarks",
+			"DELETE FROM reading_sessions",
+			"DELETE FROM tags",
+			"DELETE FROM favorites",
+			"DELETE FROM items",
+		}
+		for _, q := range queries {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return 0, err
+			}
+		}
 	}
 
-	if err != nil {
-		return 0, err
-	}
 	return total, tx.Commit()
 }
 

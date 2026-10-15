@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 
 	"purifier/internal/core/upstream"
@@ -37,6 +38,7 @@ type PostResponse struct {
 	URL          string        `json:"url"`
 	Stale        bool          `json:"stale,omitempty"`
 	RefreshError string        `json:"refreshError,omitempty"`
+	RepliesError string        `json:"repliesError,omitempty"`
 }
 
 type HomeResponse struct {
@@ -47,7 +49,7 @@ type HomeResponse struct {
 // GetPost 获取帖子正文与跟帖（带二级磁盘缓存与防击穿）
 func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostResponse, error) {
 	if err := upstream.AssertSafeID(tid); err != nil {
-		return nil, fmt.Errorf("invalid tid: 400")
+		return nil, upstream.NewExtractorError("invalid tid", http.StatusBadRequest)
 	}
 
 	pageURL := fmt.Sprintf("%s?app=forum&act=threadview&tid=%s", Cool18HomeURL, tid)
@@ -102,8 +104,12 @@ func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostR
 		_ = upstream.WriteContentCache(s.dataDir, Cool18SiteID, model.KindPost, tid, rawHTML, nil)
 	}
 
-	// 4. 获取跟帖列表
-	replies, _ := s.getReplies(ctx, tid, refresh)
+	// 4. 获取跟帖列表（失败不阻断正文，但通过 repliesError 明确告知客户端）
+	replies, repliesErr := s.getReplies(ctx, tid, refresh)
+	repliesErrMsg := ""
+	if repliesErr != nil {
+		repliesErrMsg = repliesErr.Error()
+	}
 
 	// 如果有跟帖，更新评论数
 	if len(replies) > 0 {
@@ -125,6 +131,7 @@ func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostR
 		resp.Stale = true
 		resp.RefreshError = refreshErr
 	}
+	resp.RepliesError = repliesErrMsg
 
 	return resp, nil
 }
@@ -141,8 +148,13 @@ func (s *Service) getReplies(ctx context.Context, tid string, refresh bool) ([]R
 	}
 
 	if rawJSON == "" {
-		res, err := s.client.Fetch(ctx, repliesURL)
-		if err == nil && res != "" {
+		res, err := s.client.FetchSingleflight(ctx, fmt.Sprintf("%s:replies:%s", Cool18SiteID, tid), func() (string, error) {
+			return s.client.Fetch(ctx, repliesURL)
+		})
+		if err != nil {
+			return []ReplyNode{}, err
+		}
+		if res != "" {
 			rawJSON = res
 			_ = upstream.WriteRepliesCache(s.dataDir, Cool18SiteID, tid, json.RawMessage(res))
 		}
@@ -171,7 +183,7 @@ func countReplies(nodes []ReplyNode) int {
 func (s *Service) GetHomePosts(ctx context.Context, mtid string) (*HomeResponse, error) {
 	if mtid != "" {
 		if err := upstream.AssertSafeID(mtid); err != nil {
-			return nil, fmt.Errorf("invalid mtid: 400")
+			return nil, upstream.NewExtractorError("invalid mtid", http.StatusBadRequest)
 		}
 	}
 
@@ -226,6 +238,78 @@ func (s *Service) fetchHomeHTML(ctx context.Context) (string, error) {
 	})
 }
 
+// 榜单/精华页 URL（首页 HTML 不含 rank-table，需独立抓取）
+const (
+	cool18HotURL = Cool18HomeURL + "?app=forum&act=hot"
+	cool18CmtURL = Cool18HomeURL + "?act=cmtrank&y=1"
+)
+
+func (s *Service) fetchHTML(ctx context.Context, key, targetURL string) (string, error) {
+	return s.client.FetchSingleflight(ctx, key, func() (string, error) {
+		return s.client.Fetch(ctx, targetURL)
+	})
+}
+
+// GetBook 获取 Cool18 书库藏文（bookview 整本一页，带缓存与刷新回退）
+func (s *Service) GetBook(ctx context.Context, cid string, refresh bool) (*ExtractedBook, error) {
+	if err := upstream.AssertSafeID(cid); err != nil {
+		return nil, upstream.NewExtractorError("invalid cid", http.StatusBadRequest)
+	}
+
+	pageURL := fmt.Sprintf("%s?app=book&act=bookview&cid=%s", Cool18HomeURL, cid)
+	cacheKey := fmt.Sprintf("%s:book:%s", Cool18SiteID, cid)
+
+	var rawHTML string
+	var fromCache bool
+	var stale bool
+	var refreshErr string
+
+	if !refresh {
+		cached, err := upstream.ReadContentCache(s.dataDir, Cool18SiteID, model.KindBook, cid, nil)
+		if err == nil && cached != nil {
+			rawHTML = cached.Data
+			fromCache = true
+		}
+	}
+
+	if rawHTML == "" {
+		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func() (string, error) {
+			return s.client.Fetch(ctx, pageURL)
+		})
+		if err != nil {
+			if refresh {
+				cached, cErr := upstream.ReadContentCache(s.dataDir, Cool18SiteID, model.KindBook, cid, nil)
+				if cErr == nil && cached != nil {
+					rawHTML = cached.Data
+					stale = true
+					refreshErr = err.Error()
+				} else {
+					return nil, err
+				}
+			} else {
+				return nil, err
+			}
+		} else {
+			rawHTML = fetched
+		}
+	}
+
+	extracted, err := ExtractBook(rawHTML, pageURL)
+	if err != nil {
+		return nil, err
+	}
+	extracted.Stale = stale
+	extracted.RefreshError = refreshErr
+
+	if !fromCache && !stale {
+		_ = upstream.WriteContentCache(s.dataDir, Cool18SiteID, model.KindBook, cid, rawHTML, nil)
+	}
+
+	_ = s.store.RecordVisit(ctx, Cool18SiteID, model.KindBook, cid, extracted.Title, pageURL)
+
+	return extracted, nil
+}
+
 func (s *Service) GetCategories(ctx context.Context) ([]CategoryLink, error) {
 	html, err := s.fetchHomeHTML(ctx)
 	if err != nil {
@@ -251,7 +335,7 @@ func (s *Service) GetPicks(ctx context.Context) ([]RecommendSection, error) {
 }
 
 func (s *Service) GetComments(ctx context.Context) ([]CmtRankPost, error) {
-	html, err := s.fetchHomeHTML(ctx)
+	html, err := s.fetchHTML(ctx, "cool18:cmtrank:html", cool18CmtURL)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +343,7 @@ func (s *Service) GetComments(ctx context.Context) ([]CmtRankPost, error) {
 }
 
 func (s *Service) GetTrending(ctx context.Context) ([]HotPost, error) {
-	html, err := s.fetchHomeHTML(ctx)
+	html, err := s.fetchHTML(ctx, "cool18:hot:html", cool18HotURL)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +366,7 @@ func (s *Service) Browse(ctx context.Context, categoryType, keywords string, pag
 		targetURL = fmt.Sprintf("%s?act=threadsearch&app=forum&keywords=%s&submit=%s",
 			Cool18HomeURL, url.QueryEscape(keywords), url.QueryEscape("栏目搜索"))
 	} else {
-		return nil, fmt.Errorf("missing type or keywords")
+		return nil, upstream.NewExtractorError("missing type or keywords", http.StatusBadRequest)
 	}
 
 	if page > 1 {

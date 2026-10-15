@@ -43,3 +43,65 @@ func TestExtractPost(t *testing.T) {
 		t.Fatalf("expected 1 external chapter link, got: %+v", post.Links)
 	}
 }
+
+// 回归：父帖先于子帖出现时，子回复不得丢失（原实现按值拷贝建树会丢）
+func TestBuildReplyTreeParentBeforeChild(t *testing.T) {
+	raw := `[
+	  {"tid":"10","uptid":"1","rootid":"1","uid":"u1","username":"父","subject":"父帖","dateline":"d1"},
+	  {"tid":"11","uptid":"10","rootid":"1","uid":"u2","username":"子A","subject":"子A","dateline":"d2"},
+	  {"tid":"12","uptid":"10","rootid":"1","uid":"u3","username":"子B","subject":"子B","dateline":"d3"},
+	  {"tid":"13","uptid":"12","rootid":"1","uid":"u4","username":"孙","subject":"孙","dateline":"d4"}
+	]`
+
+	roots, err := BuildReplyTree(raw, "1")
+	if err != nil {
+		t.Fatalf("BuildReplyTree failed: %v", err)
+	}
+	if len(roots) != 1 {
+		t.Fatalf("want 1 root, got %d", len(roots))
+	}
+	if len(roots[0].Children) != 2 {
+		t.Fatalf("want 2 children on parent, got %d", len(roots[0].Children))
+	}
+	var childB *ReplyNode
+	for i := range roots[0].Children {
+		if roots[0].Children[i].Tid == "12" {
+			childB = &roots[0].Children[i]
+		}
+	}
+	if childB == nil {
+		t.Fatal("child 12 missing")
+	}
+	if len(childB.Children) != 1 || childB.Children[0].Tid != "13" {
+		t.Fatalf("want grandchild 13 under 12, got %+v", childB.Children)
+	}
+}
+
+// 回归：子帖先于父帖出现时同样不得丢失
+func TestBuildReplyTreeChildBeforeParent(t *testing.T) {
+	raw := `[
+	  {"tid":"21","uptid":"20","rootid":"1","username":"子","subject":"子"},
+	  {"tid":"20","uptid":"1","rootid":"1","username":"父","subject":"父"}
+	]`
+	roots, err := BuildReplyTree(raw, "1")
+	if err != nil {
+		t.Fatalf("BuildReplyTree failed: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Tid != "20" {
+		t.Fatalf("want single root 20, got %+v", roots)
+	}
+	if len(roots[0].Children) != 1 || roots[0].Children[0].Tid != "21" {
+		t.Fatalf("want child 21, got %+v", roots[0].Children)
+	}
+}
+
+// 回归：互引 uptid（环）不得导致无限递归
+func TestBuildReplyTreeCycleTerminates(t *testing.T) {
+	raw := `[
+	  {"tid":"30","uptid":"31","rootid":"1","subject":"a"},
+	  {"tid":"31","uptid":"30","rootid":"1","subject":"b"}
+	]`
+	if _, err := BuildReplyTree(raw, "1"); err != nil {
+		t.Fatalf("BuildReplyTree on cycle failed: %v", err)
+	}
+}

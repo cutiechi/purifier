@@ -36,7 +36,7 @@ func (h *Handler) HandlePosts(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.GetHomePosts(r.Context(), mtid)
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (h *Handler) HandleGetPost(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.GetPost(r.Context(), tid, refresh)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *Handler) HandleGetPost(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCategories(w http.ResponseWriter, r *http.Request) {
 	links, err := h.svc.GetCategories(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"links": links}, httputil.ListCacheHeaders)
@@ -72,7 +72,7 @@ func (h *Handler) HandleCategories(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleFeatured(w http.ResponseWriter, r *http.Request) {
 	links, err := h.svc.GetFeatured(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"links": links}, httputil.ListCacheHeaders)
@@ -81,7 +81,7 @@ func (h *Handler) HandleFeatured(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandlePicks(w http.ResponseWriter, r *http.Request) {
 	sections, err := h.svc.GetPicks(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"sections": sections}, httputil.ListCacheHeaders)
@@ -90,7 +90,7 @@ func (h *Handler) HandlePicks(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleComments(w http.ResponseWriter, r *http.Request) {
 	posts, err := h.svc.GetComments(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"posts": posts}, httputil.ListCacheHeaders)
@@ -99,7 +99,7 @@ func (h *Handler) HandleComments(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleTrending(w http.ResponseWriter, r *http.Request) {
 	posts, err := h.svc.GetTrending(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"posts": posts}, httputil.ListCacheHeaders)
@@ -115,7 +115,7 @@ func (h *Handler) HandleBrowse(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.Browse(r.Context(), categoryType, keywords, page)
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)

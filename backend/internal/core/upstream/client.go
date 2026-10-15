@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -58,12 +59,19 @@ func (c *Client) Fetch(ctx context.Context, targetURL string) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", &UpstreamTimeoutError{Message: "upstream timeout"}
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return "", &UpstreamTimeoutError{Message: "upstream timeout"}
+		}
 		return "", fmt.Errorf("upstream request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("upstream error: %d", resp.StatusCode)
+		return "", UpstreamStatusError(resp.StatusCode)
 	}
 
 	rawBytes, err := io.ReadAll(resp.Body)

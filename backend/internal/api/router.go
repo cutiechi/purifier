@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,14 +22,14 @@ import (
 )
 
 type RouterDependencies struct {
-	Store          *storage.Store
-	Cool18Handler  *cool18.Handler
-	Cool18Service  *cool18.Service
-	XChinaHandler  *xchina.Handler
-	XChinaService  *xchina.Service
-	MeHandler      http.Handler
-	AuthHandler    *auth.Handler
-	WebDist        string
+	Store         *storage.Store
+	Cool18Handler *cool18.Handler
+	Cool18Service *cool18.Service
+	XChinaHandler *xchina.Handler
+	XChinaService *xchina.Service
+	MeHandler     http.Handler
+	AuthHandler   *auth.Handler
+	WebDist       string
 }
 
 func SetupRouter(deps RouterDependencies) *chi.Mux {
@@ -87,13 +88,21 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 		})
 
 		r.Get("/posts", func(w http.ResponseWriter, r *http.Request) {
+			site := r.URL.Query().Get("site")
 			tid := r.URL.Query().Get("tid")
+
+			// 书库站无帖子模型（能力位判定，与 /api/books 的 site 语义对称）
+			if site == xchina.XChinaSiteID {
+				httputil.JSONError(w, http.StatusNotFound, "site 2 does not support posts")
+				return
+			}
+
 			if tid != "" {
 				// 获取单帖
 				refresh := r.URL.Query().Get("refresh") == "1"
 				res, err := deps.Cool18Service.GetPost(r.Context(), tid, refresh)
 				if err != nil {
-					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+					httputil.Error(w, err)
 					return
 				}
 				headers := httputil.ContentCacheHeaders
@@ -108,7 +117,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			mtid := r.URL.Query().Get("mtid")
 			res, err := deps.Cool18Service.GetHomePosts(r.Context(), mtid)
 			if err != nil {
-				httputil.JSONError(w, http.StatusBadGateway, err.Error())
+				httputil.Error(w, err)
 				return
 			}
 			httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
@@ -123,6 +132,29 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			}
 			chapterStr := r.URL.Query().Get("chapter")
 			refresh := r.URL.Query().Get("refresh") == "1"
+			site := r.URL.Query().Get("site")
+			if site == "" {
+				site = cool18.Cool18SiteID // 文档约定：site 默认 1
+			}
+
+			// site=1：Cool18 书库藏文（bookview 整本一页，无章节模型）
+			if site != xchina.XChinaSiteID {
+				if chapterStr != "" {
+					httputil.JSONError(w, http.StatusNotFound, "site 1 book has no chapters")
+					return
+				}
+				res, err := deps.Cool18Service.GetBook(r.Context(), cid, refresh)
+				if err != nil {
+					httputil.Error(w, err)
+					return
+				}
+				headers := httputil.ContentCacheHeaders
+				if refresh || res.Stale {
+					headers = httputil.NoStoreHeaders
+				}
+				httputil.JSON(w, http.StatusOK, res, headers)
+				return
+			}
 
 			if chapterStr != "" {
 				ch, err := strconvAtoi(chapterStr)
@@ -132,11 +164,11 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				}
 				res, err := deps.XChinaService.GetChapter(r.Context(), cid, ch, refresh)
 				if err != nil {
-					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+					httputil.Error(w, err)
 					return
 				}
 				headers := httputil.ContentCacheHeaders
-				if refresh {
+				if refresh || res.Stale {
 					headers = httputil.NoStoreHeaders
 				}
 				httputil.JSON(w, http.StatusOK, res, headers)
@@ -145,24 +177,64 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 
 			res, err := deps.XChinaService.GetBook(r.Context(), cid, refresh)
 			if err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				httputil.Error(w, err)
 				return
 			}
 			headers := httputil.ContentCacheHeaders
-			if refresh {
+			if refresh || res.Stale {
 				headers = httputil.NoStoreHeaders
 			}
 			httputil.JSON(w, http.StatusOK, res, headers)
 		})
 
-		r.Get("/categories", deps.Cool18Handler.HandleCategories)
-		r.Get("/featured", deps.Cool18Handler.HandleFeatured)
-		r.Get("/picks", deps.Cool18Handler.HandlePicks)
-		r.Get("/comments", deps.Cool18Handler.HandleComments)
-		r.Get("/trending", deps.Cool18Handler.HandleTrending)
+		r.Get("/categories", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+				links, err := deps.XChinaService.GetCategories(r.Context())
+				if err != nil {
+					httputil.Error(w, err)
+					return
+				}
+				httputil.JSON(w, http.StatusOK, map[string]any{"links": links}, httputil.ListCacheHeaders)
+				return
+			}
+			deps.Cool18Handler.HandleCategories(w, r)
+		})
+		// 书库站无这些板块（能力位判定，与 legacy extractor 的 notSupported 404 对齐）
+		unsupportedOnLibrary := func(name string) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+					httputil.JSONError(w, http.StatusNotFound,
+						fmt.Sprintf("site 2 does not support %s", name))
+					return
+				}
+				switch name {
+				case "featured":
+					deps.Cool18Handler.HandleFeatured(w, r)
+				case "picks":
+					deps.Cool18Handler.HandlePicks(w, r)
+				default:
+					deps.Cool18Handler.HandleComments(w, r)
+				}
+			}
+		}
+		r.Get("/featured", unsupportedOnLibrary("featured"))
+		r.Get("/picks", unsupportedOnLibrary("picks"))
+		r.Get("/comments", unsupportedOnLibrary("comments"))
+		r.Get("/trending", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("site") == xchina.XChinaSiteID {
+				posts, err := deps.XChinaService.GetTrending(r.Context())
+				if err != nil {
+					httputil.Error(w, err)
+					return
+				}
+				httputil.JSON(w, http.StatusOK, map[string]any{"posts": posts}, httputil.ListCacheHeaders)
+				return
+			}
+			deps.Cool18Handler.HandleTrending(w, r)
+		})
 		r.Get("/browse", func(w http.ResponseWriter, r *http.Request) {
 			site := r.URL.Query().Get("site")
-			if site == "2" {
+			if site == xchina.XChinaSiteID {
 				categoryType := r.URL.Query().Get("type")
 				keywords := r.URL.Query().Get("q")
 				page := 1
@@ -171,7 +243,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				}
 				res, err := deps.XChinaService.Browse(r.Context(), categoryType, keywords, page)
 				if err != nil {
-					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+					httputil.Error(w, err)
 					return
 				}
 				httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
@@ -231,4 +303,3 @@ func fileServer(r chi.Router, path string, root http.FileSystem) {
 		fs.ServeHTTP(w, req)
 	})
 }
-

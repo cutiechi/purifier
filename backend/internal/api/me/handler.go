@@ -2,13 +2,13 @@ package me
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"purifier/internal/core/upstream"
 	"purifier/internal/jobs"
 	"purifier/internal/model"
 	"purifier/internal/pkg/httputil"
@@ -61,6 +61,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/stats", h.HandleGetStats)
 
 	r.Get("/groups", h.HandleListGroups)
+	r.Get("/groups/{id}", h.HandleGetGroup)
 	r.Put("/groups", h.HandleUpsertGroup)
 	r.Delete("/groups/{id}", h.HandleDeleteGroup)
 	r.Delete("/groups/{id}/items", h.HandleDeleteGroupItems)
@@ -290,11 +291,11 @@ func (h *Handler) HandleGetState(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleSetProgress(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Site     string   `json:"site"`
-		Kind     string   `json:"kind"`
-		ID       string   `json:"id"`
-		Progress float64  `json:"progress"`
-		Chapter  *int     `json:"chapter"`
+		Site     string  `json:"site"`
+		Kind     string  `json:"kind"`
+		ID       string  `json:"id"`
+		Progress float64 `json:"progress"`
+		Chapter  *int    `json:"chapter"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid body")
@@ -358,13 +359,13 @@ func (h *Handler) HandleListBookmarks(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleAddBookmark(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Site           string   `json:"site"`
-		Kind           string   `json:"kind"`
-		ID             string   `json:"id"`
-		Chapter        *int     `json:"chapter"`
-		Quote          string   `json:"quote"`
-		Note           string   `json:"note"`
-		ScrollProgress float64  `json:"scrollProgress"`
+		Site           string  `json:"site"`
+		Kind           string  `json:"kind"`
+		ID             string  `json:"id"`
+		Chapter        *int    `json:"chapter"`
+		Quote          string  `json:"quote"`
+		Note           string  `json:"note"`
+		ScrollProgress float64 `json:"scrollProgress"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid body")
@@ -479,16 +480,12 @@ func (h *Handler) HandleListArchive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleClearCache(w http.ResponseWriter, r *http.Request) {
-	cacheDir := filepath.Join(h.dataDir, "cache")
-	cleared := 0
-	_ = filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			if rmErr := os.Remove(path); rmErr == nil {
-				cleared++
-			}
-		}
-		return nil
-	})
+	// 必须走 upstream.ClearContentCache：它同时失效内存 L1，否则清盘后仍命中旧内存
+	cleared, err := upstream.ClearContentCache(h.dataDir)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httputil.JSON(w, http.StatusOK, map[string]int{"cleared": cleared}, httputil.NoStoreHeaders)
 }
 
@@ -505,6 +502,10 @@ func (h *Handler) HandleRecordSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.RecordSession(r.Context(), input); err != nil {
+		if errors.Is(err, storage.ErrInvalidInput) {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid session payload")
+			return
+		}
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -550,8 +551,8 @@ func (h *Handler) HandleListGroups(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleUpsertGroup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Key    string `json:"key"`
-		Title  string `json:"title"`
+		Key    string  `json:"key"`
+		Title  string  `json:"title"`
 		Author *string `json:"author"`
 		Genre  *string `json:"genre"`
 		Items  []struct {
@@ -583,6 +584,27 @@ func (h *Handler) HandleUpsertGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.JSON(w, http.StatusOK, map[string]any{"ok": true, "group": group}, httputil.NoStoreHeaders)
+}
+
+// HandleGetGroup 查询单个分组（含成员），供补充分组面板读取既有 key/items
+func (h *Handler) HandleGetGroup(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	group, err := h.store.GetGroup(r.Context(), id)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if group == nil {
+		httputil.JSONError(w, http.StatusNotFound, "group not found")
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]any{"group": group}, httputil.NoStoreHeaders)
 }
 
 func (h *Handler) HandleDeleteGroup(w http.ResponseWriter, r *http.Request) {
@@ -677,5 +699,3 @@ func (h *Handler) HandleUnfavoriteGroup(w http.ResponseWriter, r *http.Request) 
 	}
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": true}, httputil.NoStoreHeaders)
 }
-
-

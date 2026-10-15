@@ -3,6 +3,8 @@ package httputil
 import (
 	"encoding/json"
 	"net/http"
+
+	"purifier/internal/core/upstream"
 )
 
 var (
@@ -30,4 +32,13 @@ func JSON(w http.ResponseWriter, status int, data any, headers map[string]string
 
 func JSONError(w http.ResponseWriter, status int, msg string) {
 	JSON(w, status, map[string]string{"error": msg}, NoStoreHeaders)
+}
+
+// Error 按领域错误类型映射状态码（ExtractorError/UpstreamTimeoutError 等）。
+func Error(w http.ResponseWriter, err error) {
+	status, msg := upstream.ErrorStatus(err)
+	if msg == "" {
+		msg = http.StatusText(status)
+	}
+	JSONError(w, status, msg)
 }

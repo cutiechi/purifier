@@ -2,8 +2,8 @@ package cool18
 
 import (
 	"encoding/json"
-	"fmt"
 	"html"
+	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"purifier/internal/core/sanitize"
+	"purifier/internal/core/upstream"
 	"purifier/internal/model"
 )
 
@@ -35,7 +36,6 @@ type ParentPost struct {
 
 type ChapterLink = model.ChapterLink
 
-
 type ReplyNode struct {
 	Tid      string      `json:"tid"`
 	Uptid    string      `json:"uptid"`
@@ -55,6 +55,9 @@ type ExtractedPost struct {
 }
 
 var stripTagRegex = regexp.MustCompile(`<[^>]+>`)
+
+// maxReplyDepth 跟帖树最大递归深度（线性深链防护）
+const maxReplyDepth = 64
 
 func StripTags(s string) string {
 	return html.UnescapeString(stripTagRegex.ReplaceAllString(s, ""))
@@ -96,7 +99,7 @@ func ExtractPost(rawHTML string) (*ExtractedPost, error) {
 	}
 
 	if preHTML == "" {
-		return nil, fmt.Errorf("content not found: 404")
+		return nil, upstream.NewExtractorError("content not found", http.StatusNotFound)
 	}
 
 	// 安全清洗正文
@@ -157,6 +160,91 @@ func ExtractPost(rawHTML string) (*ExtractedPost, error) {
 	}, nil
 }
 
+// ExtractedBook Cool18 书库藏文（bookview 整本一页）
+type ExtractedBook struct {
+	Title        string  `json:"title"`
+	Content      string  `json:"content"`
+	Author       *string `json:"author,omitempty"`
+	URL          string  `json:"url"`
+	Stale        bool    `json:"stale,omitempty"`
+	RefreshError string  `json:"refreshError,omitempty"`
+}
+
+var (
+	cool18BookSenderRegex = regexp.MustCompile(`送交者\s*[:：]\s*(\S+)`)
+	cool18PreRegex        = regexp.MustCompile(`(?is)<pre\b[^>]*>(.*?)</pre>`)
+)
+
+// ExtractBook 解析 Cool18 bookview 页（整本一页，无章节模型）
+func ExtractBook(rawHTML, pageURL string) (*ExtractedBook, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
+	if err != nil {
+		return nil, err
+	}
+
+	title := strings.TrimSpace(doc.Find(".show_content center font b, .show_content center b").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find("center font[size='6'] b, center font[size=\"6\"] b").First().Text())
+	}
+	if title == "" {
+		t := strings.TrimSpace(doc.Find("title").First().Text())
+		title = strings.TrimSpace(strings.Split(t, "-")[0])
+	}
+	if title == "" {
+		title = "无标题"
+	}
+
+	var author *string
+	if m := cool18BookSenderRegex.FindStringSubmatch(doc.Find(".show_content").First().Text()); len(m) > 1 {
+		a := strings.TrimSpace(m[1])
+		if a != "" {
+			author = &a
+		}
+	}
+
+	// 正文取 <!--bodybegin--> 之后的第一个 <pre>；回退到最长的 <pre>
+	preHTML := ""
+	if marker := strings.Index(rawHTML, "<!--bodybegin-->"); marker >= 0 {
+		if m := cool18PreRegex.FindStringSubmatch(rawHTML[marker:]); len(m) > 1 {
+			preHTML = m[1]
+		}
+	}
+	if preHTML == "" {
+		best := ""
+		doc.Find("pre").Each(func(_ int, s *goquery.Selection) {
+			h, _ := s.Html()
+			if len(h) > len(best) {
+				best = h
+			}
+		})
+		preHTML = best
+	}
+
+	if strings.TrimSpace(StripTags(preHTML)) == "" {
+		return nil, upstream.NewExtractorError("book content not found", http.StatusNotFound)
+	}
+
+	content, err := sanitize.SanitizeContentHTML(preHTML, func(href, label string) (string, string, bool) {
+		if tid := sanitize.ExtractTid(href); tid != "" {
+			if label == "" {
+				label = tid
+			}
+			return "/read/" + tid, label, true
+		}
+		return "", "", false
+	}, sanitize.Options{PBreakClosing: false})
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExtractedBook{
+		Title:   title,
+		Content: content,
+		Author:  author,
+		URL:     pageURL,
+	}, nil
+}
+
 var dateRegex = regexp.MustCompile(`于\s*(\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})`)
 var readsRegex = regexp.MustCompile(`已读\s*([\d,]+)\s*次`)
 
@@ -204,14 +292,24 @@ func BuildReplyTree(rawJSON string, rootTid string) ([]ReplyNode, error) {
 		return nil, err
 	}
 
-	nodeMap := make(map[string]*ReplyNode)
-	var rootNodes []ReplyNode
+	// 用指针建树：子节点追加到父指针，最后统一解引用为值树。
+	// 若边建边拷贝值，父帖先于子帖出现时子回复会写进已被丢弃的副本里。
+	type ptrNode struct {
+		node     *ReplyNode
+		children []*ptrNode
+	}
+
+	index := make(map[string]*ptrNode, len(items))
+	order := make([]*ptrNode, 0, len(items))
 
 	for _, item := range items {
 		if item.Tid == "" {
 			continue
 		}
-		node := &ReplyNode{
+		if _, exists := index[item.Tid]; exists {
+			continue
+		}
+		p := &ptrNode{node: &ReplyNode{
 			Tid:      item.Tid,
 			Uptid:    item.Uptid,
 			Rootid:   item.Rootid,
@@ -220,55 +318,59 @@ func BuildReplyTree(rawJSON string, rootTid string) ([]ReplyNode, error) {
 			Subject:  StripTags(item.Subject),
 			Dateline: item.Dateline,
 			Children: []ReplyNode{},
-		}
-		nodeMap[item.Tid] = node
+		}}
+		index[item.Tid] = p
+		order = append(order, p)
 	}
 
-	for _, item := range items {
-		node, ok := nodeMap[item.Tid]
-		if !ok {
+	var rootPtrs []*ptrNode
+	for _, p := range order {
+		parentID := p.node.Uptid
+		if parentID == "" || parentID == rootTid || parentID == p.node.Tid {
+			rootPtrs = append(rootPtrs, p)
 			continue
 		}
-		if item.Uptid == "" || item.Uptid == rootTid || item.Uptid == item.Tid {
-			rootNodes = append(rootNodes, *node)
-		} else {
-			parent, pOk := nodeMap[item.Uptid]
-			if pOk {
-				parent.Children = append(parent.Children, *node)
-			} else {
-				rootNodes = append(rootNodes, *node)
-			}
+		parent, ok := index[parentID]
+		if !ok {
+			rootPtrs = append(rootPtrs, p)
+			continue
 		}
+		parent.children = append(parent.children, p)
 	}
 
+	// 递归转值树：带路径环检测与深度上限（防互引 uptid / 线性深链爆栈）
+	visiting := make(map[*ptrNode]bool)
+	var build func(p *ptrNode, depth int) ReplyNode
+	build = func(p *ptrNode, depth int) ReplyNode {
+		node := *p.node
+		node.Children = []ReplyNode{}
+		if depth >= maxReplyDepth {
+			return node
+		}
+		for _, c := range p.children {
+			if visiting[c] {
+				continue
+			}
+			visiting[c] = true
+			node.Children = append(node.Children, build(c, depth+1))
+			delete(visiting, c)
+		}
+		return node
+	}
+
+	rootNodes := make([]ReplyNode, 0, len(rootPtrs))
+	for _, rp := range rootPtrs {
+		visiting[rp] = true
+		rootNodes = append(rootNodes, build(rp, 0))
+		delete(visiting, rp)
+	}
 	return rootNodes, nil
 }
 
-type HotPost struct {
-	Rank  int    `json:"rank"`
-	Title string `json:"title"`
-	Tid   string `json:"tid"`
-	Reads int    `json:"reads"`
-}
-
-type CmtRankPost struct {
-	Rank     int    `json:"rank"`
-	Title    string `json:"title"`
-	Tid      string `json:"tid"`
-	Comments int    `json:"comments"`
-}
-
-type CategoryLink struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
-	Kind  string `json:"kind"`
-}
-
-type RecommendSection struct {
-	Title string        `json:"title"`
-	Links []ChapterLink `json:"links"`
-}
-
+type HotPost = model.HotPost
+type CmtRankPost = model.CmtRankPost
+type CategoryLink = model.CategoryLink
+type RecommendSection = model.RecommendSection
 type CategoryPage = model.CategoryPage
 
 // ExtractHotPosts 提取人气榜

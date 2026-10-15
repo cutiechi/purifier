@@ -29,7 +29,7 @@ func (h *Handler) Routes() chi.Router {
 func (h *Handler) HandleGetHome(w http.ResponseWriter, r *http.Request) {
 	res, err := h.svc.GetHome(r.Context())
 	if err != nil {
-		httputil.JSONError(w, http.StatusBadGateway, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
@@ -41,7 +41,7 @@ func (h *Handler) HandleGetBook(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.GetBook(r.Context(), cid, refresh)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *Handler) HandleGetChapter(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.GetChapter(r.Context(), cid, chapter, refresh)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Error(w, err)
 		return
 	}
 
