@@ -150,28 +150,6 @@ export interface GroupItem {
   added_at: number
 }
 
-export type JobStatus = "pending" | "running" | "paused" | "finished" | "error"
-
-export interface Job {
-  id: number
-  type: string
-  status: JobStatus
-  payload?: string
-  result?: string
-  error?: string
-  started_at?: number
-  finished_at?: number
-  created_at: number
-}
-
-export interface JobLog {
-  id: number
-  job_id: number
-  level: string
-  message: string
-  created_at: number
-}
-
 export interface ReadingSession {
   id: number
   site: SiteId

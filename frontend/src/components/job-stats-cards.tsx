@@ -4,8 +4,9 @@ import { routes, SITES, type SiteId } from "@/lib/routes"
 
 function lastSummary(job: Job | undefined): string {
   if (!job) return "还没跑过"
-  if (job.status === "succeeded")
+  if (job.status === "finished")
     return `上次：${formatJobProgress(job.result) || "成功"}`
+  if (job.status === "error") return "上次失败"
   return "上次未完成"
 }
 

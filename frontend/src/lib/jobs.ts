@@ -1,20 +1,13 @@
 import { api } from "@/lib/routes"
 
-export type JobStatus =
-  | "pending"
-  | "running"
-  | "paused"
-  | "succeeded"
-  | "failed"
-  | "interrupted"
-  | "aborted"
+/**
+ * 后端 model.JobStatus 的实际取值（见 backend/internal/model/model.go）。
+ * 聚合值 `active` = running|paused|pending、`finished` = finished|error 由
+ * /api/me/jobs 的 status 参数识别，不要与下面的单个状态混用。
+ */
+export type JobStatus = "pending" | "running" | "paused" | "finished" | "error"
 
-export const TERMINAL_JOB_STATUSES: JobStatus[] = [
-  "succeeded",
-  "failed",
-  "interrupted",
-  "aborted",
-]
+export const TERMINAL_JOB_STATUSES: JobStatus[] = ["finished", "error"]
 
 export function isTerminalJob(j: Job): boolean {
   return TERMINAL_JOB_STATUSES.includes(j.status)
@@ -24,12 +17,29 @@ export interface Job {
   id: number
   type: string
   status: JobStatus
-  payload: Record<string, unknown> | null
-  result: Record<string, unknown> | null
+  /** 后端以 JSON 字符串存储（model.Job.Payload *string），用 parseJobField 解析 */
+  payload: string | null
+  /** 同上；用 parseJobField 解析后再交给 formatJobProgress */
+  result: string | null
   error: string | null
   started_at: number | null
   finished_at: number | null
   created_at: number
+}
+
+/** 解析后端以字符串承载的 JSON 字段（payload/result）；非法或空返回 null */
+export function parseJobField(
+  raw: string | null | undefined
+): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
 }
 
 export interface JobLog {
@@ -62,10 +72,8 @@ export const STATUS_LABEL: Record<JobStatus, string> = {
   pending: "等待",
   running: "运行中",
   paused: "已暂停",
-  succeeded: "成功",
-  failed: "失败",
-  interrupted: "中断",
-  aborted: "已停止",
+  finished: "已完成",
+  error: "失败",
 }
 
 export interface ArchiveStatus {
@@ -75,33 +83,35 @@ export interface ArchiveStatus {
     site: string
     next_mtid: string | null
     mode: string
-    status: "idle" | "running" | "interrupted" | "done"
+    /** 后端 SetArchiveCursor 实际写入：running|aborted|error|done（idle 为初始） */
+    status: "idle" | "running" | "aborted" | "error" | "done"
     pages: number
     updated_at: number
   } | null
 }
 
-/** 从 result 拼可读进度/结果摘要 */
+/** 从 result 拼可读进度/结果摘要（接受后端原始 JSON 字符串或已解析对象） */
 export function formatJobProgress(
-  result: Record<string, unknown> | null | undefined
+  result: string | Record<string, unknown> | null | undefined
 ): string {
-  if (!result) return ""
+  const parsed = typeof result === "string" ? parseJobField(result) : result
+  if (!parsed) return ""
   const parts: string[] = []
-  const mode = result.mode
+  const mode = parsed.mode
   if (mode === "full" || mode === "resume" || mode === "incremental") {
     parts.push(ARCHIVE_MODE_LABEL[mode])
   }
-  if (typeof result.pages === "number") parts.push(`${result.pages} 页`)
-  if (typeof result.inserted === "number") parts.push(`${result.inserted} 新增`)
-  if (typeof result.updated === "number") parts.push(`${result.updated} 更新`)
-  if (typeof result.groupsUpserted === "number") {
-    parts.push(`${result.groupsUpserted} 组`)
+  if (typeof parsed.pages === "number") parts.push(`${parsed.pages} 页`)
+  if (typeof parsed.inserted === "number") parts.push(`${parsed.inserted} 新增`)
+  if (typeof parsed.updated === "number") parts.push(`${parsed.updated} 更新`)
+  if (typeof parsed.groupsUpserted === "number") {
+    parts.push(`${parsed.groupsUpserted} 组`)
   }
-  if (typeof result.membersLinked === "number") {
-    parts.push(`${result.membersLinked} 成员`)
+  if (typeof parsed.membersLinked === "number") {
+    parts.push(`${parsed.membersLinked} 成员`)
   }
-  if (typeof result.scanned === "number" && result.groupsUpserted != null) {
-    parts.push(`扫 ${result.scanned}`)
+  if (typeof parsed.scanned === "number" && parsed.groupsUpserted != null) {
+    parts.push(`扫 ${parsed.scanned}`)
   }
   return parts.join(" · ")
 }

@@ -167,13 +167,11 @@ export default function JobsPage() {
                 job.status !== "pending"
               ) {
                 const title =
-                  job.status === "succeeded"
+                  job.status === "finished"
                     ? "任务已完成"
-                    : job.status === "aborted"
-                      ? "任务已停止"
-                      : job.status === "failed"
-                        ? "任务失败"
-                        : "任务已结束"
+                    : job.status === "error"
+                      ? "任务失败"
+                      : "任务已结束"
                 const detail = formatJobProgress(job.result) || job.error || ""
                 setToast(detail ? `${title}：${detail}` : title)
                 if (
@@ -362,10 +360,8 @@ export default function JobsPage() {
           <option value="">全部状态</option>
           <option value="running">运行中</option>
           <option value="paused">已暂停</option>
-          <option value="succeeded">成功</option>
-          <option value="failed">失败</option>
-          <option value="interrupted">中断</option>
-          <option value="aborted">已停止</option>
+          <option value="finished">已完成</option>
+          <option value="error">失败</option>
         </select>
       </div>
 

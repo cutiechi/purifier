@@ -10,6 +10,7 @@ import {
   formatJobProgress,
   isTerminalJob,
   jobTypeLabel,
+  parseJobField,
   STATUS_LABEL,
   type Job,
   type JobSortKey,
@@ -23,20 +24,19 @@ const STATUS_BADGE: Record<Job["status"], string> = {
   pending: "bg-muted text-muted-foreground",
   running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
   paused: "bg-blue-500/15 text-blue-500 dark:text-blue-300",
-  succeeded: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  failed: "bg-destructive/15 text-destructive",
-  interrupted: "bg-muted text-muted-foreground",
-  aborted: "bg-muted text-muted-foreground",
+  finished: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  error: "bg-destructive/15 text-destructive",
 }
 
 function archiveSite(job: Job): string {
-  if (typeof job.payload?.site === "string") return job.payload.site
+  const payload = parseJobField(job.payload)
+  if (typeof payload?.site === "string") return payload.site
   return job.type === "archive_books" ? "2" : "1"
 }
 
 function paramSummary(job: Job): string {
   const site = archiveSite(job) === "2" ? "书库" : "论坛"
-  const mode = job.payload?.mode
+  const mode = parseJobField(job.payload)?.mode
   const modeLabel =
     mode === "full"
       ? "全量"
