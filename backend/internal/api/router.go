@@ -89,11 +89,25 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 
 		r.Get("/posts", func(w http.ResponseWriter, r *http.Request) {
 			site := r.URL.Query().Get("site")
+			if site == "" {
+				site = cool18.Cool18SiteID
+			}
 			tid := r.URL.Query().Get("tid")
+			mtid := r.URL.Query().Get("mtid")
 
-			// 书库站无帖子模型（能力位判定，与 /api/books 的 site 语义对称）
+			// site=2：书库站无帖子模型，但首页更新流走同一入口
+			// （legacy 语义：带 tid 才拒；不带 tid 返回该书库的更新列表）
 			if site == xchina.XChinaSiteID {
-				httputil.JSONError(w, http.StatusNotFound, "site 2 does not support posts")
+				if tid != "" {
+					httputil.JSONError(w, http.StatusNotFound, "site 2 does not support posts")
+					return
+				}
+				res, err := deps.XChinaService.HomeFeed(r.Context(), mtid)
+				if err != nil {
+					httputil.Error(w, err)
+					return
+				}
+				httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
 				return
 			}
 
@@ -114,7 +128,6 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			}
 
 			// 获取首页列表
-			mtid := r.URL.Query().Get("mtid")
 			res, err := deps.Cool18Service.GetHomePosts(r.Context(), mtid)
 			if err != nil {
 				httputil.Error(w, err)
