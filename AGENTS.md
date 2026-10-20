@@ -4,7 +4,7 @@
 
 Purifier 是一个纯净小说与论坛阅读应用，采用现代化前后端分离架构：
 
-- `backend/`：**Go 1.22+** 原生 HTTP 服务（基于轻量优雅的 **Chi (`go-chi/chi/v5`)** 路由），内置上游爬虫、流式字符集嗅探与安全清洗、Singleflight 防击穿与二级磁盘缓存、SQLite 持久化（未来一键切换 PG）。生产环境支持直接托管前端 SPA。
+- `backend/`：**Go 1.22+** 原生 HTTP 服务（基于轻量优雅的 **Chi (`go-chi/chi/v5`)** 路由），内置上游爬虫（先 ReadAll 再按 charset 转码）、DOM 白名单安全清洗、Singleflight 防击穿与二级磁盘缓存、SQLite 持久化（未来切换 PG）。生产环境支持直接托管前端 SPA。
 - `frontend/`：**Vite + React 19** SPA，基于 **shadcn UI (React 19)**、**Tailwind CSS 4** 与 **React Router 7**。
 
 ### 架构核心准则（2026 规范）
@@ -15,9 +15,9 @@ Purifier 是一个纯净小说与论坛阅读应用，采用现代化前后端�
 2. **个人资产域下沉统合**：
    - 用户的阅读历史、收藏、书签、标签、阅读会话统一归口于 `/api/v1/me/*`，底层通过 `(site, kind, id)` 联合主键无缝支持跨站聚合。
 3. **数据库无缝平迁 PG 策略**：
-   - 当前采用零外部依赖的纯 Go 驱动 `modernc.org/sqlite`（WAL 模式）。
-   - 全部 SQL 严格遵循标准 ANSI SQL，完全封装在 `internal/storage` 领域 DAO 内。
-   - 待迁移至 PostgreSQL 时，直接替换为 `jackc/pgx/v5` 并切断本地文件数据库依赖，**彻底清除所有 SQLite 痕迹**。
+   - 当前采用零外部依赖的纯 Go 驱动 `modernc.org/sqlite`（WAL 模式，`SetMaxOpenConns(8)`）。
+   - SQL 统一封装在 `internal/storage` 领域 DAO 内。当前实现使用 SQLite 专有语法（`AUTOINCREMENT`、`COLLATE NOCASE`、`INSERT OR IGNORE`、`strftime`、`rowid`、`LastInsertId`、`?` 占位符），迁移 PG 时需逐处改写。
+   - schema 变更只能通过 `storage/db.go` 的 `migrations` 顺序追加（版本号存 `PRAGMA user_version`），不得再直接改 DDL 常量。
 
 ## 常用命令
 
@@ -46,7 +46,7 @@ backend/
 │   │   ├── upstream/                # 连接池、代理、Singleflight 协程防击穿、原子磁盘缓存
 │   │   └── sanitize/                # HTML DOM 遍历白名单安全清洗管道
 │   ├── storage/                     # 持久化存储 DAO (SQLite / 预备平迁 PG)
-│   │   ├── db.go                    # 数据库初始化、DDL 与连接池
+│   │   ├── db.go                    # 数据库初始化、顺序迁移（user_version）与连接池
 │   │   ├── item.go                  # 浏览记录与阅读状态
 │   │   ├── history.go               # 历史记录与收藏
 │   │   ├── tag.go                   # 标签管理与分类筛选
@@ -56,6 +56,7 @@ backend/
 │   │   └── xchina/                  # XChina 书库 (书籍目录、章节正文、上下文导航)
 │   └── api/
 │       ├── router.go                # Chi 总路由 (v1 切片、兼容层与 SPA 托管)
+│       ├── listcache.go             # 列表响应进程内短 TTL 缓存中间件
 │       └── me/handler.go            # /api/v1/me/* 个人中心控制器
 frontend/                            # Vite + React 19 + shadcn UI
 ├── src/
@@ -68,7 +69,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 
 - **前端**：**凡是可以使用 shadcn/ui 组件的地方，绝对不要手写原生 HTML 或重复造轮子**。必须优先通过 `bunx --bun shadcn@latest add <component>` 添加标准 shadcn/ui 组件（如 `button`, `dialog`, `dropdown-menu`, `input`, `select`, `badge`, `tooltip`, `tabs`, `card`, `sheet`, `popover`, `scroll-area`, `separator` 等）并在页面中复用，保持设计语言、无障碍访问（a11y）与统一暗黑主题。
 - **后端**：Go 1.22+，使用 Chi 作为轻量路由，坚持标准 `net/http` 语义，错误返回统一结构 `{"error": "..."}`。
-- **存储**：业务逻辑严禁耦合 SQLite 专属特性，所有 DAO 保持 ANSI 兼容，确保未来一键切入 PostgreSQL。
+- **存储**：SQL 统一封装在 `internal/storage` 领域 DAO 内。当前实现使用 SQLite 语法（`AUTOINCREMENT`、`COLLATE NOCASE`、`INSERT OR IGNORE`、`strftime`、`rowid`、`LastInsertId`、`?` 占位符），迁移 PostgreSQL 时需逐处改写，不承诺零改动切换。
 - **正文清洗**：所有外部 HTML 抓取内容必须经 `sanitize.SanitizeContentHTML` 管道清洗，剥除外链追踪与恶意脚本，只放行 `/read/:tid` 与 `/book/:cid` 站内安全链接。
 
 ## 前端路由
@@ -120,7 +121,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 | `GET /api/me/state`                      | `kind`、`id`、`site`（默认 `1`）                                                                                                                                                                                   | `{ site, kind, id, title, url, visit_count, favorited, tags, read_progress, lastChapter, groupId?, groupTitle? }`；无记录返回 200 空状态      |
 | `PUT /api/me/progress`                   | body `{ kind, id, progress, site?, chapter? }`                                                                                                                                                                     | 保存阅读进度 `{ ok }`；`chapter` 可选，记录 `last_chapter`；对象不存在 404                                                                    |
 | `DELETE /api/me/cache`                   | 无                                                                                                                                                                                                                 | 清空内容缓存（磁盘 + 内存 L1）`{ cleared: n }`                                                                                                |
-| `GET /api/me/groups`                     | `q`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters`                                                                                                                                             | 无 page/limit 时 `{ groups }` 全量；有 page 或 limit 时 `{ items, nextPage?, total }` 分页；v1 仅论坛                                         |
+| `GET /api/me/groups`                     | `q`、`key`；可选 `page`/`limit`/`favorited=1`/`sort=updated\|title\|chapters`                                                                                                                                       | 始终分页 `{ items, nextPage?, total }`（limit 默认 20 上限 100）；成员一条 IN 查询批量填充；v1 仅论坛                                          |
 | `GET /api/me/groups/:id`                 | 无                                                                                                                                                                                                                 | `{ group }`（含 items）；不存在 404                                                                                                           |
 | `PUT /api/me/groups`                     | body `{ key, title, items:[{tid,title}], author?, genre? }`                                                                                                                                                        | 按 key upsert 并入成员 `{ ok, group }`；`items` 非空；tid 已在其它组 409                                                                      |
 | `DELETE /api/me/groups/:id`              | 无                                                                                                                                                                                                                 | 删分组（级联成员）`{ ok }`                                                                                                                    |
@@ -134,7 +135,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 | `POST /api/me/bookmarks`                 | body `{ kind, id, quote, site?, chapter?, note?, scrollProgress }`                                                                                                                                                 | `{ ok, bookmark }`；无 item 404、满 50 条 409                                                                                                 |
 | `PATCH /api/me/bookmarks/:id`            | body `{ note }`                                                                                                                                                                                                    | 改备注                                                                                                                                        |
 | `DELETE /api/me/bookmarks/:id`           | 无                                                                                                                                                                                                                 | `{ ok, removed }`                                                                                                                             |
-| `GET /api/me/jobs`                       | `type`、`status`（含聚合 `active`=running\|paused\|pending、`finished`=终态）、`sort`（created_at\|type\|status\|duration 默认 created_at）、`order`（asc\|desc 默认 desc）、`limit`（默认 20 上限 100）、`offset` | `{ items, nextPage?, total }` 任务列表                                                                                                        |
+| `GET /api/me/jobs`                       | `type`、`status`（含聚合 `active`=running\|paused\|pending、`finished`=终态 finished\|error\|cancelled）、`sort`（created_at\|type\|status\|duration 默认 created_at）、`order`（asc\|desc 默认 desc）、`limit`（默认 20 上限 100）、`offset` | `{ items, nextPage?, total }` 任务列表                                                                                                        |
 | `POST /api/me/jobs`                      | body `{ type, payload? }`                                                                                                                                                                                          | 启动任务 `{ job }`；未知 type 400、同 type 已运行 409                                                                                         |
 | `DELETE /api/me/jobs`                    | body `{ ids: number[] }`                                                                                                                                                                                           | 批量删除已结束任务 `{ ok, removed }`；含活动任务整批 409                                                                                      |
 | `GET /api/me/jobs/:id`                   | 无                                                                                                                                                                                                                 | `{ job }`；不存在 404                                                                                                                         |
@@ -157,13 +158,19 @@ frontend/                            # Vite + React 19 + shadcn UI
 - 其余未知错误返回 `500`。
 - 错误体统一为 `{ "error": "..." }`。
 - `AuthError` 使用其 `statusCode` 与 `error` 字符串。
-- 400：`oidc disabled`、`url mismatch`、`invalid state`、`invalid iss`、`invalid_grant`。
+- 400：`oidc disabled`、`url mismatch`、`invalid state`、`invalid_grant`。
 - 401：`unauthorized`（会话或 ID Token）。
-- 502：`oidc upstream`。
+- 429：`too many requests`（仅 `/api/search`，带 `Retry-After`）。
+- 502：`oidc upstream`。ID Token 的 `iss`/`aud`/`exp`/`nonce` 校验失败同样映射 502（`invalid id token: ...`、`id token issuer mismatch`、`id token audience mismatch`、`id token nonce mismatch`）。
 
 列表响应使用 `LIST_CACHE_HEADERS`（`s-maxage=60`），正文响应使用 `CONTENT_CACHE_HEADERS`（`s-maxage=300`）。
 
-`GET /api/posts` / `GET /api/books` 带 `refresh=1` 时跳过缓存强制抓上游：成功覆盖缓存，失败回退旧缓存并附 `stale`/`refreshError`，无旧缓存则抛错。缓存命中、刷新与全部 `/api/me/*` 响应使用 `NO_STORE_HEADERS`（`no-store`）。
+`GET /api/posts` / `GET /api/books` 带 `refresh=1` 时跳过缓存强制抓上游：成功覆盖缓存，失败回退旧缓存并附 `stale`/`refreshError`，无旧缓存则抛错。正文缓存命中是 `public, max-age=300`；只有 `refresh=1` 或 `stale` 才 `no-store`（统一走 `httputil.ContentHeaders`）。全部 `/api/me/*` 响应使用 `NO_STORE_HEADERS`。
+
+请求防护（`internal/api/limits.go`）：
+
+- 所有 `/api/*` 请求体上限 1 MiB（`http.MaxBytesReader`），超限由 handler 返回 400。
+- `/api/search` 按客户端 IP 限流 20 次/分钟，超限返回 429 + `Retry-After: 60`。该端点一个请求会并发打两个上游。
 
 ## 环境变量
 
@@ -174,21 +181,23 @@ frontend/                            # Vite + React 19 + shadcn UI
 | `WEB_DIST`                   | `frontend/dist`         | SPA 静态目录；存在时才托管                                                                     |
 | `DATA_DIR`                   | `./data`                | SQLite 库与内容缓存目录；Docker 内为 `/data`                                                   |
 | `HTTPS_PROXY` / `HTTP_PROXY` | 无                      | 上游请求代理                                                                                   |
-| `TZ`                         | `Asia/Shanghai`         | 容器本地时区；阅读统计按本地日分桶，须与用户一致（镜像需含 tzdata，见 Dockerfile runner 阶段） |
+| `TZ`                         | `Asia/Shanghai`         | 进程本地时区；启动时 `time.LoadLocation` 并写入 `time.Local`，日志打印解析结果。时区数据由二进制内嵌 `time/tzdata` 提供，镜像不含 zoneinfo |
 | `API_PROXY`                  | `http://127.0.0.1:3001` | Vite dev 代理目标                                                                              |
 | `OIDC_ISSUER`                | 无                      | OIDC 发行方（Pocket ID）URL；与其它 4 项任一缺失则关闭 OIDC 并启动告警                         |
 | `OIDC_CLIENT_ID`             | 无                      | OIDC 客户端 ID                                                                                 |
 | `OIDC_CLIENT_SECRET`         | 无                      | OIDC 客户端密钥                                                                                |
 | `OIDC_REDIRECT_URI`          | 无                      | OIDC 回调地址；须与 Pocket ID Client 注册一致                                                  |
-| `AUTH_SECRET`                | 无                      | 会话签名密钥（HMAC，≥32 字符，过短启动退出）；轮换会使全部会话失效                             |
+| `AUTH_SECRET`                | 无                      | 会话签名密钥（HMAC，≥32 字符）。过短不会退出，只会让 OIDC 保持关闭、`/api/me/*` 对匿名开放     |
 | `OIDC_BUTTON_TEXT`           | `使用 Pocket ID 登录`   | 登录按钮文案（可选）                                                                           |
+| `ALLOWED_ORIGINS`            | 无                      | 逗号分隔的跨源白名单；为空时不挂 CORS（同源部署无需跨域）                                      |
+| `TRUST_PROXY`                | 无                      | 设为 `1` 时才信任 `X-Forwarded-For`/`X-Real-IP`（`middleware.RealIP`）。反向代理后必须设，否则按 IP 的限流可被伪造头绕过 |
 
 ## 常见改动路径
 
 - 新增前端页面：在 `frontend/src/App.tsx` 注册路由，必要时在 `frontend/src/lib/routes.ts` 添加导航项和 API 常量，页面放到 `frontend/src/pages/`（必须复用 `shadcn/ui` 组件）。
 - 新增 API：在 `backend/internal/api/router.go` 注册路由，控制器在对应领域包（如 `provider/cool18`、`provider/xchina` 或 `api/me`）。
-- 改动历史/收藏/标签或内容缓存：数据层在 `backend/internal/storage/`，API 层在 `backend/internal/api/me/`；保持标准 ANSI SQL 语法。
-- 改动任务（jobs）系统：执行器在 `backend/internal/jobs/`，数据持久化在 `backend/internal/storage/jobs.go`。
+- 改动历史/收藏/标签或内容缓存：数据层在 `backend/internal/storage/`，API 层在 `backend/internal/api/me/`；加列/加索引走 `db.go` 的顺序迁移。
+- 改动任务（jobs）系统：执行器在 `backend/internal/jobs/`（`archive_posts` / `archive_books` / `archive_auto_group`），数据持久化在 `backend/internal/storage/job.go`。
 - 新增内容源切片：在 `backend/internal/provider/<site>/` 建立独立领域切片，实现专属的 extractor 与 service，在 `backend/internal/api/router.go` 挂载路由。
 - 调整正文清洗：统一在 `backend/internal/core/sanitize/sanitize.go` 管道中维护。
 - 鉴权逻辑：核心在 `backend/internal/auth/` 与 API 控制器 `backend/internal/api/auth/`。
