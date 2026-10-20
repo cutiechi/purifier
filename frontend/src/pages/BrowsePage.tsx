@@ -30,12 +30,7 @@ import {
   parseQuery,
   readPath,
 } from "@/lib/routes"
-
-interface ChapterLink {
-  index: number
-  title: string
-  tid: string
-}
+import type { ChapterLink } from "@/lib/types"
 
 interface BrowseResponse {
   links: ChapterLink[]

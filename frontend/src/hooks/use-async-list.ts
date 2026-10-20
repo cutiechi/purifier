@@ -16,19 +16,29 @@ export async function fetchJsonList<T>(
 
 /**
  * 按 url 拉取列表。pick 用 ref 保存，避免闭包过期。
+ * enabled=false 时不发请求（用于先重定向、再渲染的页面，避免白打一次上游）。
  */
 export function useAsyncList<T>(
   url: string,
-  pick: (json: Record<string, unknown>) => T[]
+  pick: (json: Record<string, unknown>) => T[],
+  opts?: { enabled?: boolean }
 ) {
+  const enabled = opts?.enabled ?? true
   const [items, setItems] = useState<T[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(enabled)
   const [error, setError] = useState("")
   const pickRef = useRef(pick)
   pickRef.current = pick
   const seqRef = useRef(0)
 
   const reload = useCallback(async () => {
+    if (!enabled) {
+      seqRef.current++
+      setItems([])
+      setError("")
+      setLoading(false)
+      return
+    }
     const seq = ++seqRef.current
     setLoading(true)
     setError("")
@@ -43,7 +53,7 @@ export function useAsyncList<T>(
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [url])
+  }, [url, enabled])
 
   useEffect(() => {
     void reload()

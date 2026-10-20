@@ -26,6 +26,7 @@ const STATUS_BADGE: Record<Job["status"], string> = {
   paused: "bg-blue-500/15 text-blue-500 dark:text-blue-300",
   finished: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   error: "bg-destructive/15 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
 }
 
 function archiveSite(job: Job): string {

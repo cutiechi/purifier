@@ -5,9 +5,19 @@ import { api } from "@/lib/routes"
  * 聚合值 `active` = running|paused|pending、`finished` = finished|error 由
  * /api/me/jobs 的 status 参数识别，不要与下面的单个状态混用。
  */
-export type JobStatus = "pending" | "running" | "paused" | "finished" | "error"
+export type JobStatus =
+  | "pending"
+  | "running"
+  | "paused"
+  | "finished"
+  | "error"
+  | "cancelled"
 
-export const TERMINAL_JOB_STATUSES: JobStatus[] = ["finished", "error"]
+export const TERMINAL_JOB_STATUSES: JobStatus[] = [
+  "finished",
+  "error",
+  "cancelled",
+]
 
 export function isTerminalJob(j: Job): boolean {
   return TERMINAL_JOB_STATUSES.includes(j.status)
@@ -74,6 +84,7 @@ export const STATUS_LABEL: Record<JobStatus, string> = {
   paused: "已暂停",
   finished: "已完成",
   error: "失败",
+  cancelled: "已停止",
 }
 
 export interface ArchiveStatus {
@@ -189,6 +200,7 @@ export async function listJobs(opts?: {
   const params = new URLSearchParams()
   const page = Math.max(1, opts?.page ?? 1)
   const limit = opts?.limit ?? 20
+  // 后端用 limit+offset 分页（无 page 参数）；nextPage 已由后端按 offset 换算
   params.set("limit", String(limit))
   params.set("offset", String((page - 1) * limit))
   if (opts?.type) params.set("type", opts.type)

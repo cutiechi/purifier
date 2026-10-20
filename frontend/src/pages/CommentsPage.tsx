@@ -28,9 +28,12 @@ interface CommentRankPost {
 export default function CommentsPage() {
   const site = useSite()
   const sectionTabs = useDiscoverTabs(routes.comments)
+  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
+  const isForum = site === "1"
   const { items, loading, error, reload } = useAsyncList(
     api.comments,
-    (json) => (json.posts as CommentRankPost[]) ?? []
+    (json) => (json.posts as CommentRankPost[]) ?? [],
+    { enabled: isForum }
   )
 
   const { isExpanded, toggle } = useExpandedBooks("comments")

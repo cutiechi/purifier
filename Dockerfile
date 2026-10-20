@@ -16,9 +16,10 @@
 #                --build-arg RUNTIME_IMAGE=docker.m.daocloud.io/alpine:3.21 .
 # ========================================================
 
-ARG BUN_IMAGE=oven/bun:1.4
-ARG GOLANG_IMAGE=golang:1.24-alpine
-ARG RUNTIME_IMAGE=alpine:3.21
+# 基础镜像固定到具体版本，保证构建可复现
+ARG BUN_IMAGE=oven/bun:1.4.3-alpine
+ARG GOLANG_IMAGE=golang:1.24.13-alpine3.23
+ARG RUNTIME_IMAGE=alpine:3.21.8
 
 # ---------- Stage 1: Build Frontend SPA ----------
 FROM ${BUN_IMAGE} AS frontend-builder
@@ -54,11 +55,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM ${RUNTIME_IMAGE} AS runner
 WORKDIR /app
 
-# 安装 CA 根证书用于外部爬虫 TLS，提取必要时区后清除 tzdata 包缩减体积
-RUN apk add --no-cache ca-certificates tzdata && \
-    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" > /etc/timezone && \
-    apk del tzdata && \
+# 安装 CA 根证书用于外部爬虫 TLS。时区由二进制内嵌的 time/tzdata 提供，
+# 不依赖镜像里的 zoneinfo（Go 在 TZ 为时区名时不读 /etc/localtime）。
+RUN apk add --no-cache ca-certificates && \
     addgroup -g 10001 -S appgroup && \
     adduser -u 10001 -S appuser -G appgroup && \
     mkdir -p /data && \

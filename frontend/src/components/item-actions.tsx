@@ -104,13 +104,10 @@ export function ItemActions({
     setActionError("")
     try {
       const method = state?.favorited ? "DELETE" : "PUT"
+      // site 必须走 query：后端只读 query（缺省回落 "1"），书库收藏放 body 会被丢成论坛
       const res = await fetch(
-        `${api.meFavorites}?kind=${kind}&id=${encodeURIComponent(id)}`,
-        {
-          method,
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ site }),
-        }
+        `${api.meFavorites}?kind=${kind}&id=${encodeURIComponent(id)}&site=${encodeURIComponent(site)}`,
+        { method }
       )
       if (res.ok) {
         await reload()

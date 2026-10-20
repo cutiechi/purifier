@@ -75,14 +75,6 @@ export function IconExternal({ className, size }: IconProps) {
   )
 }
 
-export function IconHome({ className, size }: IconProps) {
-  return (
-    <svg {...base(size)} className={className}>
-      <path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z" />
-    </svg>
-  )
-}
-
 export function IconSun({ className, size }: IconProps) {
   return (
     <svg {...base(size)} className={className}>

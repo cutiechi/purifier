@@ -62,7 +62,7 @@ function GroupCard({
   const [localError, setLocalError] = useState("")
 
   const members = useMemo(
-    () => [...group.items].sort((a, b) => compareTid(a.tid, b.tid)),
+    () => [...(group.items ?? [])].sort((a, b) => compareTid(a.tid, b.tid)),
     [group.items]
   )
 
@@ -163,7 +163,7 @@ function GroupCard({
               {group.genre && <GenrePill genre={group.genre} />}
             </span>
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-              <span>{group.items.length} 章</span>
+              <span>{(group.items ?? []).length} 章</span>
               {group.author && <span>· {group.author}</span>}
               {meta && <span className="opacity-80">· {meta}</span>}
             </span>
@@ -258,7 +258,7 @@ function GroupCard({
               <SimilarSearchPanel
                 title={group.title}
                 groupKey={group.key}
-                seedItems={group.items}
+                seedItems={group.items ?? []}
                 onChanged={onChanged}
               />
             </div>

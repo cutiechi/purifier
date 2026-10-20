@@ -62,8 +62,9 @@ export function GroupSupplementPanel({
     await Promise.all(
       uniqueReplySources.map(async (src) => {
         try {
+          // meta=1：只要标题，不抓跟帖也不写阅读历史
           const res = await fetch(
-            `${api.posts}?tid=${encodeURIComponent(src.tid)}&site=${site}`
+            `${api.posts}?tid=${encodeURIComponent(src.tid)}&site=${site}&meta=1`
           )
           if (res.ok) {
             const json = (await res.json()) as { title: string }

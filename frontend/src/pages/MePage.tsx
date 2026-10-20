@@ -6,6 +6,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 import { api, bookPath, readPath, routes } from "@/lib/routes"
 import { BookCover } from "@/components/book-cover"
+import { useDocumentTitle } from "@/components/page-header"
 
 interface ItemRecord {
   id: string
@@ -21,6 +22,7 @@ interface ItemRecord {
 export default function MePage() {
   const { user } = useAuth()
   const [tab, setTab] = useState<string>("bookshelf")
+  useDocumentTitle("我的")
   
   // 小说书架数据
   const [books, setBooks] = useState<ItemRecord[]>([])

@@ -201,10 +201,6 @@ export function parseListTitle(raw: string): ParsedTitle {
   }
 }
 
-export function parseFeaturedTitle(raw: string): ParsedTitle {
-  return parseListTitle(raw)
-}
-
 export function formatTitleMeta(p: ParsedTitle): string {
   const parts: string[] = []
   if (p.chapters) parts.push(p.chapters)

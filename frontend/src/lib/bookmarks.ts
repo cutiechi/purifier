@@ -1,6 +1,5 @@
 export const BOOKMARK_QUOTE_MAX = 200
 export const BOOKMARK_NOTE_MAX = 80
-export const BOOKMARKS_PER_SCOPE_CAP = 50
 
 function collapseWs(raw: string): string {
   return raw.trim().replace(/[\s\u00a0]+/g, " ")

@@ -5,6 +5,7 @@ dist
 **/dist
 backend/bin
 backend/data
+data
 .turbo
 **/.turbo
 

@@ -10,7 +10,11 @@ export function useScrollTop(
   opts?: { behavior?: ScrollBehavior }
 ) {
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: opts?.behavior ?? "smooth" })
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    window.scrollTo({
+      top: 0,
+      behavior: reduce ? "auto" : (opts?.behavior ?? "smooth"),
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
 }
@@ -118,35 +122,6 @@ export function FilterTabs<T extends string>({
         )
       })}
     </div>
-  )
-}
-
-export function SoftButton({
-  children,
-  onClick,
-  disabled,
-  destructive,
-  className,
-  type = "button",
-}: {
-  children: ReactNode
-  onClick?: () => void
-  disabled?: boolean
-  destructive?: boolean
-  className?: string
-  type?: "button" | "submit"
-}) {
-  return (
-    <Button
-      type={type}
-      variant={destructive ? "destructive" : "outline"}
-      size="sm"
-      onClick={onClick}
-      disabled={disabled}
-      className={className}
-    >
-      {children}
-    </Button>
   )
 }
 

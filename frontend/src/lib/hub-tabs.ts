@@ -1,5 +1,4 @@
 import { useMemo } from "react"
-import { useLocation } from "react-router-dom"
 import { useSite } from "@/hooks/use-site"
 import {
   ALL_TABS,
@@ -55,14 +54,4 @@ export function useAllTabs(activePath: string): SectionTab[] {
 /** 发现默认落地：论坛→精华，书库→人气 */
 export function discoverDefaultPath(site: SiteId): string {
   return site === "2" ? "/trending" : "/featured"
-}
-
-export function meDefaultPath(site: SiteId): string {
-  void site
-  return "/history"
-}
-
-export function usePreservedSearch(): string {
-  const { search } = useLocation()
-  return search
 }

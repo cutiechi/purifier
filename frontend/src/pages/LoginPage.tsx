@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorBox } from "@/components/ui-state"
+import { useDocumentTitle } from "@/components/page-header"
 import { safeFrom, useAuth } from "@/lib/auth"
 import { routes } from "@/lib/routes"
 
@@ -38,6 +39,7 @@ export default function LoginPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [pending, setPending] = useState(false)
+  useDocumentTitle("登录")
   const [error, setError] = useState<string | null>(null)
   const didCallback = useRef(false)
 

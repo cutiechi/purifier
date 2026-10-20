@@ -7,6 +7,7 @@ function lastSummary(job: Job | undefined): string {
   if (job.status === "finished")
     return `上次：${formatJobProgress(job.result) || "成功"}`
   if (job.status === "error") return "上次失败"
+  if (job.status === "cancelled") return "上次已停止"
   return "上次未完成"
 }
 

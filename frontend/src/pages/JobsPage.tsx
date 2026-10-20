@@ -240,14 +240,28 @@ export default function JobsPage() {
   // active 存在时 1.5s 轮询（绑实例级 active，不绑当前页表格）；
   // 首次 active 拉取成功前（sideLoaded=false）也轮询，失败的首拉不会永久停掉轮询
   const hasActive = active.length > 0
+  // 后台标签页不轮询：8 个请求 / 1.5s 只在页面可见时才有意义。
+  // 切回前台立刻补一拍，避免看到过期状态。
+  const [visible, setVisible] = useState(
+    () => typeof document === "undefined" || !document.hidden
+  )
   useEffect(() => {
+    const onVisibility = () => setVisible(!document.hidden)
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => document.removeEventListener("visibilitychange", onVisibility)
+  }, [])
+
+  useEffect(() => {
+    if (!visible) return
     if (!hasActive && sideLoaded) return
+    void loadTable(true)
+    void loadSide()
     const t = setInterval(() => {
       void loadTable(true)
       void loadSide()
     }, POLL_MS)
     return () => clearInterval(t)
-  }, [hasActive, sideLoaded, loadTable, loadSide])
+  }, [hasActive, sideLoaded, visible, loadTable, loadSide])
 
   useEffect(() => {
     if (!toast) return

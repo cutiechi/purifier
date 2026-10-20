@@ -13,13 +13,17 @@ import { api, routes, DISCOVER_TABS } from "@/lib/routes"
 export default function PicksPage() {
   const site = useSite()
   const sectionTabs = useDiscoverTabs(routes.picks)
+  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
+  const isForum = site === "1"
   const {
     items: sections,
     loading,
     error,
     reload,
-  } = useAsyncList(api.picks, (json) =>
-    ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length)
+  } = useAsyncList(
+    api.picks,
+    (json) => ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length),
+    { enabled: isForum }
   )
 
   const total = sections.reduce((n, s) => n + s.links.length, 0)

@@ -32,13 +32,12 @@ export default function TrendingPage() {
   const site = useSite()
   const sectionTabs = useDiscoverTabs(routes.trending)
   const isLibrary = site === "2"
-  const forum = useAsyncList(`${api.trending}?site=1`, pickPosts)
-  const library = useAsyncList(`${api.trending}?site=2`, pickPosts)
-
-  const items = isLibrary ? library.items : forum.items
-  const loading = isLibrary ? library.loading : forum.loading
-  const error = isLibrary ? library.error : forum.error
-  const reload = isLibrary ? library.reload : forum.reload
+  // 只拉当前站：另一站的榜单请求永远用不到
+  const current = useAsyncList(
+    `${api.trending}?site=${isLibrary ? "2" : "1"}`,
+    pickPosts
+  )
+  const { items, loading, error, reload } = current
 
   const { isExpanded, toggle } = useExpandedBooks("trending")
   const libraryGrouped = useMemo(

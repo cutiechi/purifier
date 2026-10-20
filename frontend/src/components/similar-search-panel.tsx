@@ -11,6 +11,21 @@ import { api, readPath } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@/lib/utils"
 
+/** 按 tid 合并成员，保留先出现的 title，避免重复 tid 造成整体替换时的键冲突 */
+function mergeMembers(
+  base: GroupMember[],
+  extra: GroupMember[]
+): GroupMember[] {
+  const seen = new Set<string>()
+  const out: GroupMember[] = []
+  for (const m of [...base, ...extra]) {
+    if (!m.tid || seen.has(m.tid)) continue
+    seen.add(m.tid)
+    out.push(m)
+  }
+  return out
+}
+
 interface SearchHit {
   index: number
   title: string
@@ -46,6 +61,8 @@ export function SimilarSearchPanel({
   const [known, setKnown] = useState<Set<string>>(
     () => new Set(seedItems.map((s) => s.tid))
   )
+  // 服务端该组的完整成员（含 title）：PUT 是整体替换，必须原样带回去
+  const [groupItems, setGroupItems] = useState<GroupMember[]>(seedItems)
   const [busyTid, setBusyTid] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -65,17 +82,26 @@ export function SimilarSearchPanel({
     try {
       // 「已加入」以服务端为准：每次展开都拉（个人组量小，不做跨页缓存）。
       // 分组状态拉取失败时中止，避免用「仅 seed」的过期 known 渲染已加入项并重复 PUT。
-      const gRes = await fetch(api.meGroups)
-      const gJson = (await gRes.json()) as { groups?: Group[]; error?: string }
+      // 按 key 精确取本组，不再拉全量分组列表（历史库上万组）
+      const gRes = await fetch(
+        `${api.meGroups}?key=${encodeURIComponent(groupKey)}&limit=1`
+      )
+      const gJson = (await gRes.json()) as {
+        items?: Group[]
+        groups?: Group[]
+        error?: string
+      }
       if (!gRes.ok) {
         setError(gJson.error || "获取分组状态失败")
         return
       }
-      const serverTids = new Set(
-        (gJson.groups ?? [])
-          .find((g) => g.key === groupKey)
-          ?.items.map((i) => i.tid) ?? []
-      )
+      const serverGroup = (gJson.items ?? gJson.groups ?? [])[0]
+      const serverItems: GroupMember[] = (serverGroup?.items ?? []).map((i) => ({
+        tid: i.tid,
+        title: i.title,
+      }))
+      const serverTids = new Set(serverItems.map((i) => i.tid))
+      setGroupItems(serverItems.length > 0 ? serverItems : seedRef.current)
       const res = await fetch(
         `${api.browse}?q=${encodeURIComponent(title)}&site=1`
       )
@@ -137,12 +163,12 @@ export function SimilarSearchPanel({
   async function addToGroup(hit: SearchHit) {
     setBusyTid(hit.tid)
     try {
-      const meta = pickGroupMeta([
-        ...seedRef.current,
+      const items = mergeMembers(groupItems, [
         { tid: hit.tid, title: hit.title },
       ])
-      // 依赖服务端 PUT 的 merge 语义（INSERT OR IGNORE 合并，非全量替换）：
-      // 只带 seed + 本次点击项即可，未传的已存在 tid 不会被删。
+      const meta = pickGroupMeta(items)
+      // 服务端 PUT 是整体替换：必须带上该组现有全部成员 + 本次新增，
+      // 否则未列出的成员会被移除。
       const res = await fetch(api.meGroups, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -151,7 +177,7 @@ export function SimilarSearchPanel({
           title,
           author: meta.author,
           genre: meta.genre,
-          items: [...seedRef.current, { tid: hit.tid, title: hit.title }],
+          items,
         }),
       })
       if (!res.ok) {
@@ -159,6 +185,7 @@ export function SimilarSearchPanel({
         setError(json.error || "加入失败")
         return
       }
+      setGroupItems(items)
       setKnown((prev) => new Set(prev).add(hit.tid))
       setSelected((prev) => {
         const next = new Set(prev)
@@ -178,10 +205,10 @@ export function SimilarSearchPanel({
     if (hits.length === 0) return
     setBatchBusy(true)
     try {
-      const items = [
-        ...seedRef.current,
-        ...hits.map((h) => ({ tid: h.tid, title: h.title })),
-      ]
+      const items = mergeMembers(
+        groupItems,
+        hits.map((h) => ({ tid: h.tid, title: h.title }))
+      )
       const meta = pickGroupMeta(items)
       const res = await fetch(api.meGroups, {
         method: "PUT",
@@ -199,6 +226,7 @@ export function SimilarSearchPanel({
         setError(json.error || "加入失败")
         return
       }
+      setGroupItems(items)
       setKnown((prev) => {
         const next = new Set(prev)
         for (const h of hits) next.add(h.tid)

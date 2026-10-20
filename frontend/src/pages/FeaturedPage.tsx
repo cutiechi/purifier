@@ -16,19 +16,17 @@ import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
 import { api, readPath, routes, DISCOVER_TABS } from "@/lib/routes"
-
-interface ChapterLink {
-  index: number
-  title: string
-  tid: string
-}
+import type { ChapterLink } from "@/lib/types"
 
 export default function FeaturedPage() {
   const site = useSite()
   const sectionTabs = useDiscoverTabs(routes.featured)
+  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
+  const isForum = site === "1"
   const { items, loading, error, reload } = useAsyncList(
     api.featured,
-    (json) => (json.links as ChapterLink[]) ?? []
+    (json) => (json.links as ChapterLink[]) ?? [],
+    { enabled: isForum }
   )
 
   const { isExpanded, toggle } = useExpandedBooks("featured")

@@ -6,6 +6,7 @@ import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
+import { useDocumentTitle } from "@/components/page-header"
 import { AsyncBody, PageShell, SectionLabel } from "@/components/page-shell"
 import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
@@ -29,12 +30,7 @@ import { useReadingSession } from "@/hooks/use-reading-session"
 import { useSite } from "@/hooks/use-site"
 import { scrollToProgress, scrollToQuote } from "@/lib/bookmark-locate"
 import { api, bookPath } from "@/lib/routes"
-
-interface ChapterLink {
-  index: number
-  title: string
-  tid: string
-}
+import type { ChapterLink } from "@/lib/types"
 
 interface BookData {
   title: string
@@ -257,6 +253,15 @@ export default function BookPage() {
     title: isToc ? "" : (book?.bookTitle ?? book?.title ?? ""),
     enabled: (isChapterBody || isCool18Book) && loadedKey === currentKey,
   })
+
+  const pageTitle = book?.bookTitle ?? book?.title ?? ""
+  useDocumentTitle(
+    pageTitle
+      ? isToc
+        ? `${pageTitle} · 目录`
+        : `${pageTitle}${chapter ? ` · 第 ${chapter} 章` : ""}`
+      : "书库"
+  )
 
   const fetchBook = useCallback(
     async (opts?: { refresh?: boolean; signal?: AbortSignal }) => {

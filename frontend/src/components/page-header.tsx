@@ -1,5 +1,15 @@
-import { type ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
+
+const SITE_TITLE = "Purifier"
+
+/** 页面级标题：每页写入 document.title，便于历史记录与多标签辨识 */
+export function useDocumentTitle(title: ReactNode) {
+  useEffect(() => {
+    const text = typeof title === "string" ? title : ""
+    document.title = text ? `${text} · ${SITE_TITLE}` : SITE_TITLE
+  }, [title])
+}
 
 export function PageHeader({
   title,
@@ -12,6 +22,7 @@ export function PageHeader({
   action?: ReactNode
   className?: string
 }) {
+  useDocumentTitle(title)
   return (
     <header
       className={cn(

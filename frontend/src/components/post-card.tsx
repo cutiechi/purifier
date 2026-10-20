@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom"
 import { type ReactNode } from "react"
 import { IconChevronRight } from "@/components/icons"
-import { avatarStyle, initials } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const RANK_STYLE: Record<number, string> = {
@@ -19,17 +18,6 @@ export function RankBadge({ rank }: { rank: number }) {
       )}
     >
       {rank}
-    </span>
-  )
-}
-
-export function AvatarBadge({ seed, label }: { seed: string; label: string }) {
-  return (
-    <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white shadow-inner"
-      style={avatarStyle(seed)}
-    >
-      {initials(label)}
     </span>
   )
 }

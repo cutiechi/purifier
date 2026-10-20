@@ -11,12 +11,7 @@ import { SourceBadge } from "@/components/source-badge"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { api, bookPath, readPath } from "@/lib/routes"
 import { groupBooks, type GroupedItem } from "@/lib/book-groups"
-
-interface ChapterLink {
-  index: number
-  title: string
-  tid: string
-}
+import type { ChapterLink } from "@/lib/types"
 
 interface HomeResponse {
   links: ChapterLink[]
@@ -33,6 +28,10 @@ const EMPTY_STREAM: StreamState = { links: [], nextMtid: null }
 type StreamKey = "forum" | "library"
 
 const SITE_OF: Record<StreamKey, string> = { forum: "1", library: "2" }
+
+function msgOf(e: unknown): string {
+  return e instanceof Error ? e.message : "未知错误"
+}
 
 /** 边界解析：网络 JSON → StreamState；错误体取 error 字段 */
 function parseHomeResponse(res: Response): Promise<StreamState> {
@@ -56,12 +55,42 @@ function parseHomeResponse(res: Response): Promise<StreamState> {
 }
 
 /** 首页：论坛 + 书库更新流同页合并（带来源徽标），无限滚动两站同步推进 */
+function StreamError({
+  label,
+  message,
+  onRetry,
+}: {
+  label: string
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div
+      role="alert"
+      className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm"
+    >
+      <span className="text-destructive">
+        {label}加载失败：{message}
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-foreground hover:bg-accent"
+      >
+        重试
+      </button>
+    </div>
+  )
+}
+
 export default function HomePage() {
   const [forum, setForum] = useState<StreamState>(EMPTY_STREAM)
   const [library, setLibrary] = useState<StreamState>(EMPTY_STREAM)
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState("")
+  // 两站错误分开保存：一站超时不应把另一站的列表一起打成错误页
+  const [forumError, setForumError] = useState("")
+  const [libraryError, setLibraryError] = useState("")
   const [loadMoreError, setLoadMoreError] = useState("")
 
   const { isExpanded, toggle } = useExpandedBooks("home")
@@ -98,6 +127,8 @@ export default function HomePage() {
       await fetch(`${api.posts}?mtid=${mtid}&site=${SITE_OF[key]}`)
     )
     const setter = key === "forum" ? setForum : setLibrary
+    const clearError = key === "forum" ? setForumError : setLibraryError
+    clearError("")
     setter((prev) => {
       const seen = new Set(prev.links.map((l) => l.tid))
       return {
@@ -119,8 +150,14 @@ export default function HomePage() {
       const tasks: Promise<void>[] = []
       if (next.forum !== null) tasks.push(loadStream("forum", next.forum))
       if (next.library !== null) tasks.push(loadStream("library", next.library))
-      await Promise.all(tasks)
+      // 分站隔离：一站翻页失败不该让另一站的成功结果被丢掉，
+      // 也不该把整块列表打成错误态。
+      const settled = await Promise.allSettled(tasks)
       if (seq !== seqRef.current) return
+      const rejected = settled.find((r) => r.status === "rejected")
+      if (rejected && settled.every((r) => r.status === "rejected")) {
+        throw rejected.reason
+      }
     } catch (e) {
       if (seq === seqRef.current) {
         setLoadMoreError(e instanceof Error ? e.message : "未知错误")
@@ -132,23 +169,28 @@ export default function HomePage() {
   }, [hasMore, loadStream])
 
   const fetchFirstPage = useCallback(async () => {
-    seqRef.current++ // 使在途 loadMore 响应失效
+    const seq = ++seqRef.current // 使在途 loadMore 响应失效
     setInitialLoading(true)
-    setError("")
+    setForumError("")
+    setLibraryError("")
     setLoadMoreError("")
     setForum(EMPTY_STREAM)
     setLibrary(EMPTY_STREAM)
     try {
-      const [forumRes, libraryRes] = await Promise.all([
-        parseHomeResponse(await fetch(`${api.posts}?site=1`)),
-        parseHomeResponse(await fetch(`${api.posts}?site=2`)),
+      // promise 直接交给 allSettled：先 await 的话，fetch 自身 reject
+      // （DNS/断网/连接被拒）会跳过下面的 setInitialLoading(false)，
+      // 页面永久停在 Spinner。同时两站并发，不再串行。
+      const [forumRes, libraryRes] = await Promise.allSettled([
+        fetch(`${api.posts}?site=1`).then(parseHomeResponse),
+        fetch(`${api.posts}?site=2`).then(parseHomeResponse),
       ])
-      setForum(forumRes)
-      setLibrary(libraryRes)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误")
+      if (seq !== seqRef.current) return
+      if (forumRes.status === "fulfilled") setForum(forumRes.value)
+      else setForumError(msgOf(forumRes.reason))
+      if (libraryRes.status === "fulfilled") setLibrary(libraryRes.value)
+      else setLibraryError(msgOf(libraryRes.reason))
     } finally {
-      setInitialLoading(false)
+      if (seq === seqRef.current) setInitialLoading(false)
     }
   }, [])
 
@@ -179,7 +221,24 @@ export default function HomePage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
   const total = forum.links.length + library.links.length
+  // 只有两站都失败才把整页打成错误；单站失败用行内提示，另一站照常展示
+  const bothFailed = forumError !== "" && libraryError !== ""
+  const error = bothFailed ? forumError : ""
   const noMore = !initialLoading && !error && !hasMore && total > 0
+
+  const retryStream = useCallback(
+    async (key: StreamKey) => {
+      const setter = key === "forum" ? setForum : setLibrary
+      const setErr = key === "forum" ? setForumError : setLibraryError
+      setErr("")
+      try {
+        setter(await parseHomeResponse(await fetch(`${api.posts}?site=${SITE_OF[key]}`)))
+      } catch (e) {
+        setErr(msgOf(e))
+      }
+    },
+    []
+  )
 
   function renderGrouped(g: GroupedItem<ChapterLink>, site: string) {
     const isBook = site === "2"
@@ -259,6 +318,21 @@ export default function HomePage() {
         onRetry={fetchFirstPage}
         emptyText="暂无内容"
       >
+        {forumError && !bothFailed && (
+          <StreamError
+            label="论坛更新"
+            message={forumError}
+            onRetry={() => void retryStream("forum")}
+          />
+        )}
+        {libraryError && !bothFailed && (
+          <StreamError
+            label="书库更新"
+            message={libraryError}
+            onRetry={() => void retryStream("library")}
+          />
+        )}
+
         <PostList>
           {forumGrouped.map((g) => renderGrouped(g, "1"))}
           {libraryGrouped.map((g) => renderGrouped(g, "2"))}

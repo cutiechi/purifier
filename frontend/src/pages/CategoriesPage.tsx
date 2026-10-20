@@ -28,7 +28,7 @@ type AsyncCategoryState = {
   reload: () => void
 }
 
-/** 两站分类区块：站点小标题 + 异步三态 + 网格 */
+/** 单站分类区块：站点小标题 + 异步三态 + 网格 */
 function CategorySection({
   siteId,
   items,
@@ -71,12 +71,11 @@ function describeHeader(...sites: AsyncCategoryState[]): string {
 export default function CategoriesPage() {
   const site = useSite()
   const isLibrary = site === "2"
-  const forum = useAsyncList(
-    `${api.categories}?site=${DEFAULT_SITE}`,
+  // 只拉当前站：另一站的请求永远用不到
+  const current = useAsyncList(
+    `${api.categories}?site=${isLibrary ? "2" : DEFAULT_SITE}`,
     pickLinks
   )
-  const library = useAsyncList(`${api.categories}?site=2`, pickLinks)
-  const current = isLibrary ? library : forum
 
   return (
     <PageShell>

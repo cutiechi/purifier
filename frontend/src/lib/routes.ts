@@ -32,7 +32,6 @@ export const SITES: Record<SiteId, { label: string }> = {
 export const routes = {
   home: "/",
   novel: "/novel",
-  novelCategories: "/novel/categories",
   /** OIDC 登录页（不进 NAV_ITEMS） */
   login: "/login",
   discover: "/discover",
@@ -223,7 +222,11 @@ export function parseQuery(
   return (searchParams.get("q") ?? "").trim()
 }
 
-/** 论坛专属导航菜单 */
+/**
+ * 导航高亮匹配。第二个参数是 location.search：
+ * 书库的「分类找书 / 排行榜」只在查询串里带 site=2 时才属于该栏目，
+ * 只看 pathname 会让这两项永远不亮。
+ */
 export const FORUM_NAV_ITEMS = [
   {
     href: routes.home,
@@ -233,8 +236,7 @@ export const FORUM_NAV_ITEMS = [
   {
     href: routes.categories,
     label: "分类",
-    match: (p: string) =>
-      p === routes.categories || p === routes.browse || p.startsWith("/browse"),
+    match: (p: string) => p === routes.categories || p === routes.browse,
   },
   {
     href: routes.discover,
@@ -281,17 +283,19 @@ export const NOVEL_NAV_ITEMS = [
     match: (p: string) => p === routes.novel,
   },
   {
-    href: routes.browse + "?site=2&type=fantasy",
+    href: `${routes.browse}?site=2&type=fantasy`,
     label: "分类找书",
-    match: (p: string) => p.includes("site=2") && p.includes("browse"),
+    match: (p: string, search: string) =>
+      p === routes.browse && search.includes("site=2"),
   },
   {
-    href: routes.trending + "?site=2",
+    href: `${routes.trending}?site=2`,
     label: "排行榜",
-    match: (p: string) => p.includes("trending") && p.includes("site=2"),
+    match: (p: string, search: string) =>
+      p === routes.trending && search.includes("site=2"),
   },
   {
-    href: routes.search + "?site=2",
+    href: `${routes.search}?site=2`,
     label: "搜书",
     match: (p: string) => p === routes.search,
   },
@@ -305,6 +309,3 @@ export const NOVEL_NAV_ITEMS = [
       p === routes.bookmarks,
   },
 ] as const
-
-export const NAV_ITEMS = FORUM_NAV_ITEMS
-

@@ -1,11 +1,6 @@
 import { type ReactNode } from "react"
 import { PostCard, RankBadge } from "@/components/post-card"
-import {
-  formatTitleMeta,
-  parseListTitle,
-  type ParsedTitle,
-} from "@/lib/title-parse"
-import { cn } from "@/lib/utils"
+import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 
 export function IndexBadge({ n }: { n: number }) {
   return (
@@ -98,10 +93,6 @@ export function ListPostCard({
   )
 }
 
-export function useParsedTitle(raw: string): ParsedTitle {
-  return parseListTitle(raw)
-}
-
 export function pageCountLabel(
   count: number,
   unit: string,
@@ -109,8 +100,4 @@ export function pageCountLabel(
 ): string {
   const base = `共 ${count} ${unit}`
   return extra ? `${base} · ${extra}` : base
-}
-
-export function listMetaClassName() {
-  return cn("mb-3 text-xs text-muted-foreground")
 }

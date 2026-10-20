@@ -7,6 +7,7 @@ import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
+import { useDocumentTitle } from "@/components/page-header"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import {
   pageWidthClass,
@@ -112,6 +113,7 @@ export default function ReadPage() {
   }
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
+  useDocumentTitle(content?.title ?? "")
   const [loadedTid, setLoadedTid] = useState("")
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)

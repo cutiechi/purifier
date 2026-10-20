@@ -124,7 +124,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
         {/* 频道专属导航项（桌面端） */}
         <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:flex">
           {items.map((item) => {
-            const active = item.match(pathname)
+            const active = item.match(pathname, search)
             return (
               <Link
                 key={item.href}
@@ -189,7 +189,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
         >
           <div className="grid grid-cols-2 gap-1.5 pb-1 sm:grid-cols-4">
             {items.map((item) => {
-              const active = item.match(pathname)
+              const active = item.match(pathname, search)
               return (
                 <Link
                   key={item.href}

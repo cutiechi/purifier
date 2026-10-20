@@ -22,7 +22,7 @@ function DeleteHistoryButton({
         onClick={async () => {
           const ok = await confirm({
             title: "删除历史记录？",
-            description: `从浏览历史删除「${item.title}」。`,
+            description: `将从历史删除「${item.title}」，并一并移除该条的收藏、标签、书签与阅读统计。`,
             confirmLabel: "删除",
             destructive: true,
           })
@@ -72,7 +72,8 @@ function HistoryToolbar({
     if (items.length === 0) return
     const ok = await confirm({
       title: `清空本页 ${items.length} 条？`,
-      description: "相关收藏、标签与书签也会一并移除。",
+      description:
+        "这些条目的收藏、标签、书签与阅读统计也会一并移除，且不可恢复。",
       confirmLabel: "清空本页",
       destructive: true,
     })
@@ -103,7 +104,8 @@ function HistoryToolbar({
   const clearAll = async () => {
     const ok = await confirm({
       title: "清空全部浏览历史？",
-      description: "所有历史、收藏与标签都会被移除，且不可恢复。",
+      description:
+        "所有历史、收藏、标签、书签与阅读统计都会被移除，且不可恢复。",
       confirmLabel: "全部清空",
       destructive: true,
     })
