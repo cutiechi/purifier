@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
+import { SearchForm, useScrollTop } from "@/components/form-controls"
 import { type Bookmark } from "@/hooks/use-bookmarks"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
@@ -9,11 +9,7 @@ import { PostList } from "@/components/post-card"
 import { SectionTabs } from "@/components/section-tabs"
 import { formatDateTime } from "@/lib/format"
 import { useMeTabs } from "@/lib/hub-tabs"
-import {
-  formatListPagination,
-  ME_PAGE_SIZE,
-  totalPages as calcTotalPages,
-} from "@/lib/list-meta"
+import { ME_PAGE_SIZE, totalPages as calcTotalPages } from "@/lib/list-meta"
 import {
   api,
   bookPath,
@@ -93,7 +89,7 @@ function BookmarkCard({
   reload: () => void
 }) {
   return (
-    <div className="group flex flex-col rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
+    <div className="group flex flex-col rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
       <div className="flex items-start gap-2 sm:gap-3">
         <Link
           to={bookmarkHref(item)}
@@ -221,18 +217,6 @@ export default function BookmarksPage() {
         placeholder="搜索摘录、备注或标题…"
         onSubmit={(next) => update({ q: next, page: 1 })}
       />
-
-      {!loading && !error && items.length > 0 && (
-        <ListMeta>
-          {formatListPagination({
-            page,
-            pageCount: items.length,
-            pageSize: ME_PAGE_SIZE,
-            total,
-            hasNext: nextPage !== undefined,
-          })}
-        </ListMeta>
-      )}
 
       <AsyncBody
         loading={loading}

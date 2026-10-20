@@ -1,14 +1,13 @@
 import { Navigate } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { PicksSections, type PickSection } from "@/components/picks-sections"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, routes, DISCOVER_TABS } from "@/lib/routes"
+import { api, routes } from "@/lib/routes"
 
 export default function PicksPage() {
   const site = useSite()
@@ -22,7 +21,8 @@ export default function PicksPage() {
     reload,
   } = useAsyncList(
     api.picks,
-    (json) => ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length),
+    (json) =>
+      ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length),
     { enabled: isForum }
   )
 
@@ -35,16 +35,12 @@ export default function PicksPage() {
   return (
     <PageShell>
       <PageHeader
-        title="发现"
+        title="扫文"
         description={
           sections.length
             ? `扫文 · 共 ${total} 条 · ${sections.length} 组`
             : "在线榜单与栏目"
         }
-      />
-      <PageSiteTabs
-        sites={DISCOVER_TABS.find((t) => t.href === routes.picks)!.sites}
-        hideWhenSingle
       />
       <SectionTabs items={sectionTabs} />
 

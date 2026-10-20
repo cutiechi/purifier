@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { PageShell, AsyncBody } from "@/components/page-shell"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Bookmark, BarChart3, Folder } from "lucide-react"
+import {
+  PageHeader,
+  PageShell,
+  AsyncBody,
+  SectionLabel,
+} from "@/components/page-shell"
+import { SectionTabs } from "@/components/section-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 import { api, bookPath, readPath, routes } from "@/lib/routes"
 import { BookCover } from "@/components/book-cover"
-import { useDocumentTitle } from "@/components/page-header"
+import { useMeTabs } from "@/lib/hub-tabs"
 
 interface ItemRecord {
   id: string
@@ -21,9 +27,8 @@ interface ItemRecord {
 
 export default function MePage() {
   const { user } = useAuth()
-  const [tab, setTab] = useState<string>("bookshelf")
-  useDocumentTitle("我的")
-  
+  const meTabs = useMeTabs(routes.me)
+
   // 小说书架数据
   const [books, setBooks] = useState<ItemRecord[]>([])
   const [loadingBooks, setLoadingBooks] = useState(true)
@@ -79,6 +84,12 @@ export default function MePage() {
 
   return (
     <PageShell>
+      <PageHeader
+        title="我的"
+        description="跨站无缝统一管理小说书架、论坛收藏、进度与书签"
+      />
+      <SectionTabs items={meTabs} />
+
       <div className="flex flex-col gap-6 pb-12">
         {/* 用户概览与快捷操作栏 */}
         <section className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/60 p-5 backdrop-blur-xs sm:flex-row sm:items-center sm:justify-between">
@@ -88,7 +99,9 @@ export default function MePage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-foreground">
-                {user ? user.name || user.email || "已登录用户" : "纯净阅读资产中心"}
+                {user
+                  ? user.name || user.email || "已登录用户"
+                  : "纯净阅读资产中心"}
               </h1>
               <p className="text-xs text-muted-foreground">
                 跨站无缝统一管理小说书架、论坛收藏、进度与书签
@@ -100,135 +113,137 @@ export default function MePage() {
               to={routes.bookmarks}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
-              🔖 书签管理
+              <Bookmark className="size-4" />
+              书签管理
             </Link>
             <Link
               to={routes.stats}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
-              📊 阅读统计
+              <BarChart3 className="size-4" />
+              阅读统计
             </Link>
             <Link
               to={routes.groups}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
-              📁 作者分组
+              <Folder className="size-4" />
+              作者分组
             </Link>
           </div>
         </section>
 
-        {/* 核心分栏：我的小说书架 vs 论坛帖子足迹 */}
-        <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <div className="flex items-center justify-between border-b border-border/50 pb-1">
-            <TabsList className="bg-muted/70">
-              <TabsTrigger value="bookshelf" className="text-xs sm:text-sm font-medium">
-                📚 我的小说书架
-              </TabsTrigger>
-              <TabsTrigger value="forum" className="text-xs sm:text-sm font-medium">
-                💬 论坛收藏足迹
-              </TabsTrigger>
-            </TabsList>
-
+        {/* 我的小说书架 */}
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-border/50 pb-2">
+            <SectionLabel>我的小说书架</SectionLabel>
             <Link
-              to={tab === "bookshelf" ? `${routes.history}?site=2` : `${routes.favorites}?site=1`}
+              to={`${routes.history}?site=2`}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
               查看全部记录 &rarr;
             </Link>
           </div>
 
-          {/* 小说书架分栏 */}
-          <TabsContent value="bookshelf" className="pt-4">
-            <AsyncBody
-              loading={loadingBooks}
-              error={booksError}
-              empty={books.length === 0}
-              emptyText="暂无阅读中的小说，快去书库挑选吧"
-              onRetry={() => window.location.reload()}
-            >
-              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-                {books.map((item) => (
-                  <div
-                    key={item.id}
-                    className="group relative flex gap-3.5 rounded-2xl border border-border/60 bg-card/50 p-3.5 transition-all hover:border-border hover:bg-card"
-                  >
-                    <BookCover title={item.title} size="md" />
-                    <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
-                      <div className="flex flex-col gap-1">
-                        <Link
-                          to={bookPath(item.id, { site: "2" })}
-                          className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary transition-colors"
-                        >
-                          {item.title}
-                        </Link>
-                        {item.last_chapter != null && (
-                          <span className="line-clamp-1 text-xs text-muted-foreground">
-                            上次读至: 第 {item.last_chapter} 章
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between pt-2">
-                        <Link
-                          to={bookPath(item.id, {
-                            site: "2",
-                            chapter: String(item.last_chapter ?? 1),
-                          })}
-                          className="text-xs font-medium text-primary hover:underline"
-                        >
-                          继续阅读 &rarr;
-                        </Link>
-                        <Link
-                          to={bookPath(item.id, { site: "2" })}
-                          className="text-[11px] text-muted-foreground hover:text-foreground"
-                        >
-                          目录
-                        </Link>
-                      </div>
+          <AsyncBody
+            loading={loadingBooks}
+            error={booksError}
+            empty={books.length === 0}
+            emptyText="暂无阅读中的小说，快去书库挑选吧"
+            onRetry={() => window.location.reload()}
+          >
+            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+              {books.map((item) => (
+                <div
+                  key={item.id}
+                  className="group relative flex gap-3.5 rounded-2xl border border-border/60 bg-card/50 p-3.5 transition-all hover:border-border hover:bg-card"
+                >
+                  <BookCover title={item.title} size="md" />
+                  <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
+                    <div className="flex flex-col gap-1">
+                      <Link
+                        to={bookPath(item.id, { site: "2" })}
+                        className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-primary"
+                      >
+                        {item.title}
+                      </Link>
+                      {item.last_chapter != null && (
+                        <span className="line-clamp-1 text-xs text-muted-foreground">
+                          上次读至: 第 {item.last_chapter} 章
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between pt-2">
+                      <Link
+                        to={bookPath(item.id, {
+                          site: "2",
+                          chapter: String(item.last_chapter ?? 1),
+                        })}
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        继续阅读 &rarr;
+                      </Link>
+                      <Link
+                        to={bookPath(item.id, { site: "2" })}
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        目录
+                      </Link>
                     </div>
                   </div>
-                ))}
-              </div>
-            </AsyncBody>
-          </TabsContent>
+                </div>
+              ))}
+            </div>
+          </AsyncBody>
+        </section>
 
-          {/* 论坛足迹分栏 */}
-          <TabsContent value="forum" className="pt-4">
-            <AsyncBody
-              loading={loadingPosts}
-              error={postsError}
-              empty={posts.length === 0}
-              emptyText="暂无收藏的论坛帖子"
-              onRetry={() => window.location.reload()}
+        {/* 论坛帖子足迹 */}
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-border/50 pb-2">
+            <SectionLabel>论坛收藏足迹</SectionLabel>
+            <Link
+              to={`${routes.favorites}?site=1`}
+              className="text-xs text-muted-foreground hover:text-foreground"
             >
-              <div className="flex flex-col divide-y divide-border/40 rounded-2xl border border-border/60 bg-card/40">
-                {posts.map((post) => (
-                  <div
-                    key={post.id}
-                    className="flex items-center justify-between gap-3 p-3.5 transition-colors hover:bg-accent/40"
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <Link
-                        to={readPath(post.id, "1")}
-                        className="truncate text-sm font-medium text-foreground hover:text-primary transition-colors"
-                      >
-                        {post.title}
-                      </Link>
-                      <span className="text-xs text-muted-foreground">
-                        帖子 #{post.id}
-                      </span>
-                    </div>
+              查看全部记录 &rarr;
+            </Link>
+          </div>
+
+          <AsyncBody
+            loading={loadingPosts}
+            error={postsError}
+            empty={posts.length === 0}
+            emptyText="暂无收藏的论坛帖子"
+            onRetry={() => window.location.reload()}
+          >
+            <div className="flex flex-col divide-y divide-border/40 rounded-2xl border border-border/60 bg-card/40">
+              {posts.map((post) => (
+                <div
+                  key={post.id}
+                  className="flex items-center justify-between gap-3 p-3.5 transition-colors hover:bg-accent/40"
+                >
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <Link
                       to={readPath(post.id, "1")}
-                      className="shrink-0 rounded-lg border border-border/60 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                      className="truncate text-sm font-medium text-foreground transition-colors hover:text-primary"
                     >
-                      阅读帖子
+                      {post.title}
                     </Link>
+                    <span className="text-xs text-muted-foreground">
+                      帖子 #{post.id}
+                    </span>
                   </div>
-                ))}
-              </div>
-            </AsyncBody>
-          </TabsContent>
-        </Tabs>
+                  <Link
+                    to={readPath(post.id, "1")}
+                    className="shrink-0 rounded-lg border border-border/60 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                  >
+                    阅读帖子
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </AsyncBody>
+        </section>
       </div>
     </PageShell>
   )

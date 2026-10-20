@@ -4,7 +4,6 @@ import { ChevronDown, Star, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import {
   FilterTabs,
-  ListMeta,
   SearchForm,
   useScrollTop,
 } from "@/components/form-controls"
@@ -12,7 +11,6 @@ import { IconBookOpen } from "@/components/icons"
 import { GenrePill } from "@/components/list-post-card"
 import { PageHeader } from "@/components/page-header"
 import { PageShell, Pager } from "@/components/page-shell"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
@@ -22,11 +20,7 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
 import { useAllTabs } from "@/lib/hub-tabs"
 import { compareTid, type Group } from "@/lib/groups"
-import {
-  formatListPagination,
-  ME_PAGE_SIZE,
-  totalPages as calcTotalPages,
-} from "@/lib/list-meta"
+import { ME_PAGE_SIZE, totalPages as calcTotalPages } from "@/lib/list-meta"
 import { api, parsePage, parseQuery, readPath, routes } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@/lib/utils"
@@ -425,7 +419,6 @@ export default function GroupPage() {
           </Link>
         }
       />
-      <PageSiteTabs sites={["1"]} hideWhenSingle />
       <SectionTabs items={sectionTabs} />
 
       <SearchForm
@@ -450,18 +443,6 @@ export default function GroupPage() {
           className="mb-0"
         />
       </div>
-
-      {!loading && !error && total > 0 && (
-        <ListMeta>
-          {formatListPagination({
-            page,
-            pageCount: groups.length,
-            pageSize: ME_PAGE_SIZE,
-            total,
-            hasNext: nextPage !== undefined,
-          })}
-        </ListMeta>
-      )}
 
       <AsyncBody
         loading={loading}

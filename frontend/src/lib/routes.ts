@@ -72,10 +72,13 @@ export const ME_TABS: {
   label: string
   sites: readonly SiteId[]
 }[] = [
+  { href: routes.me, label: "概览", sites: ["1", "2"] },
   { href: routes.history, label: "历史", sites: ["1", "2"] },
   { href: routes.favorites, label: "收藏", sites: ["1", "2"] },
   { href: routes.tags, label: "标签", sites: ["1", "2"] },
   { href: routes.bookmarks, label: "书签", sites: ["1", "2"] },
+  { href: routes.stats, label: "统计", sites: ["1", "2"] },
+  { href: routes.jobs, label: "任务", sites: ["1", "2"] },
 ]
 
 /** 目录页栏目（归档整理视图；书库站无分组） */
@@ -266,12 +269,9 @@ export const FORUM_NAV_ITEMS = [
       p === routes.history ||
       p === routes.favorites ||
       p === routes.tags ||
-      p === routes.bookmarks,
-  },
-  {
-    href: routes.stats,
-    label: "统计",
-    match: (p: string) => p === routes.stats,
+      p === routes.bookmarks ||
+      p === routes.stats ||
+      p === routes.jobs,
   },
 ] as const
 
@@ -306,6 +306,9 @@ export const NOVEL_NAV_ITEMS = [
       p === routes.me ||
       p === routes.history ||
       p === routes.favorites ||
-      p === routes.bookmarks,
+      p === routes.tags ||
+      p === routes.bookmarks ||
+      p === routes.stats ||
+      p === routes.jobs,
   },
 ] as const

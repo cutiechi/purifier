@@ -46,12 +46,16 @@ export function PageHeader({
 export function SectionLabel({
   children,
   action,
+  className,
 }: {
   children: ReactNode
   action?: ReactNode
+  className?: string
 }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3">
+    <div
+      className={cn("mb-3 flex items-center justify-between gap-3", className)}
+    >
       <h2 className="text-sm font-semibold tracking-tight text-foreground sm:text-[15px]">
         {children}
       </h2>

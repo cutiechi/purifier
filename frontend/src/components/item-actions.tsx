@@ -155,6 +155,7 @@ export function ItemActions({
   const favorited = state?.favorited ?? false
   const hasTags = (state?.tags?.length ?? 0) > 0
 
+  // 留白配合 ChapterNavBar (pr-12) 与 ReadPage 正文 pb，修改高度或底边距时三处需一起调整
   return (
     <div
       className="fixed right-4 z-50"
@@ -181,7 +182,11 @@ export function ItemActions({
             <Tag className="absolute right-1 bottom-1 size-2.5" aria-hidden />
           )}
         </PopoverTrigger>
-        <PopoverContent side="top" align="end" className="w-80 p-2 sm:w-96">
+        <PopoverContent
+          side="top"
+          align="end"
+          className="max-h-[min(70vh,32rem)] w-80 overflow-y-auto overscroll-contain p-2 sm:w-96"
+        >
           <div className="flex w-80 flex-col gap-1 sm:w-96">
             {actionError && (
               <p

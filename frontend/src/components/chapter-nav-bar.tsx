@@ -25,6 +25,7 @@ export function ChapterNavBar({
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/85 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
+      {/* pr-12/pr-14 配合 ItemActions (按钮 size-11/size-10 + right-4) 留白，修改高度或边距时需与 ItemActions、ReadPage 一起调整 */}
       <div
         className={`mx-auto flex h-12 ${widthClass} items-center justify-between gap-2 pr-12 pl-3 sm:pr-14 sm:pl-5`}
       >

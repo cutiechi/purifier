@@ -128,7 +128,7 @@ function TagListView() {
                 disabled={removing === t.tag}
                 onClick={() => void deleteTag(t.tag)}
                 aria-label={`删除标签 ${t.tag}`}
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50 sm:size-7"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive disabled:opacity-50"
               >
                 <IconClose size={12} />
               </button>

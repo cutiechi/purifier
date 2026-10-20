@@ -29,7 +29,7 @@ export function SectionTabs({
   return (
     <div
       className={cn(
-        "mb-4 inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
+        "mb-4 inline-flex h-9 max-w-full items-center justify-center overflow-x-auto rounded-lg bg-muted p-1 text-muted-foreground",
         className
       )}
       role="tablist"

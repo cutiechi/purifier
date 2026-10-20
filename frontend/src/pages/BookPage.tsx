@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { List } from "lucide-react"
 import { ArticleView } from "@/components/article-view"
 import { BookmarkList } from "@/components/bookmark-list"
 import { CharacterMarkPopover } from "@/components/character-mark-popover"
@@ -398,8 +399,9 @@ export default function BookPage() {
     />
   )
 
+  // D4: 目录态固定使用 xwide(max-w-5xl) 宽屏章节列表布局，正文与藏书页遵循阅读偏好设置
   return (
-    <PageShell showBack maxWidth={settings.maxWidth}>
+    <PageShell showBack maxWidth={isToc ? "xwide" : settings.maxWidth}>
       <AsyncBody
         loading={loading}
         error={error}
@@ -447,7 +449,7 @@ export default function BookPage() {
               <div className="flex flex-col gap-8">
                 <header className="mb-6 flex flex-col gap-2 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
                   <div className="flex min-w-0 items-start gap-5">
-                    <div className="shrink-0 shadow-lg rounded-xl overflow-hidden">
+                    <div className="shrink-0 overflow-hidden rounded-xl shadow-lg">
                       <BookCover
                         title={book.title}
                         author={book.meta?.author}
@@ -574,9 +576,9 @@ export default function BookPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => setTocOpen(true)}
-                        className="h-8 gap-1 rounded-lg text-xs"
+                        className="h-8 gap-1.5 rounded-lg text-xs"
                       >
-                        <span>📑</span> 目录
+                        <List className="size-4" /> 目录
                       </Button>
                       {actions}
                     </div>
@@ -601,9 +603,9 @@ export default function BookPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setTocOpen(true)}
-                          className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
                         >
-                          📑 目录
+                          <List className="size-4" /> 目录
                         </Button>
                         <Link
                           to={bookPath(cid, { site })}
@@ -671,22 +673,22 @@ export default function BookPage() {
 
       {/* 小说章节目录抽屉 (TOC Drawer) */}
       <Sheet open={tocOpen} onOpenChange={setTocOpen}>
-        <SheetContent side="right" className="w-[320px] sm:w-[420px] p-0 flex flex-col">
-          <SheetHeader className="p-4 border-b border-border">
-            <SheetTitle className="text-base font-semibold truncate">
+        <SheetContent
+          side="right"
+          className="flex w-[320px] flex-col p-0 sm:w-[420px]"
+        >
+          <SheetHeader className="border-b border-border p-4">
+            <SheetTitle className="truncate text-base font-semibold">
               {book?.bookTitle || book?.title || "章节目录"}
             </SheetTitle>
           </SheetHeader>
           <ScrollArea className="flex-1 p-3">
-            {loadingAllChapters ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                正在加载目录...
-              </div>
-            ) : allChapters.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                暂无目录章节
-              </div>
-            ) : (
+            <AsyncBody
+              compact
+              loading={loadingAllChapters}
+              empty={allChapters.length === 0}
+              emptyText="暂无目录章节"
+            >
               <div className="space-y-0.5">
                 {allChapters.map((ch) => {
                   const isCurrent = String(ch.index) === String(chapter)
@@ -696,22 +698,24 @@ export default function BookPage() {
                       type="button"
                       onClick={() => {
                         setTocOpen(false)
-                        navigate(bookPath(cid, { site, chapter: String(ch.index) }))
+                        navigate(
+                          bookPath(cid, { site, chapter: String(ch.index) })
+                        )
                       }}
-                      className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-2.5 ${
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                         isCurrent
-                          ? "bg-primary/10 text-primary font-medium"
+                          ? "bg-primary/10 font-medium text-primary"
                           : "text-foreground/85 hover:bg-muted"
                       }`}
                     >
-                      <span className="text-[11px] tabular-nums text-muted-foreground min-w-[24px]">
+                      <span className="min-w-[24px] text-[11px] text-muted-foreground tabular-nums">
                         {ch.index}
                       </span>
-                      <span className="truncate flex-1">{ch.title}</span>
+                      <span className="flex-1 truncate">{ch.title}</span>
                       {isCurrent && (
                         <Badge
                           variant="secondary"
-                          className="text-[10px] h-4 px-1.5 py-0 bg-primary/20 text-primary shrink-0"
+                          className="h-4 shrink-0 bg-primary/20 px-1.5 py-0 text-[10px] text-primary"
                         >
                           当前
                         </Badge>
@@ -720,7 +724,7 @@ export default function BookPage() {
                   )
                 })}
               </div>
-            )}
+            </AsyncBody>
           </ScrollArea>
         </SheetContent>
       </Sheet>

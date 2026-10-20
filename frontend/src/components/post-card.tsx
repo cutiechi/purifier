@@ -41,7 +41,7 @@ export function PostCard({
     <Link
       to={href}
       className={cn(
-        "group flex items-center gap-3 rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border hover:bg-accent/50 active:scale-[0.99] sm:gap-3.5 sm:px-4 sm:py-4",
+        "group flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border hover:bg-accent/50 active:scale-[0.99] sm:gap-3.5 sm:px-4 sm:py-4",
         className
       )}
     >

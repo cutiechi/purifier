@@ -7,7 +7,7 @@ import {
   useState,
 } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AsyncBody, Spinner } from "@/components/ui-state"
+import { AsyncBody, EmptyState, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
@@ -144,14 +144,7 @@ function SearchContent() {
       )}
 
       {!q && !loading ? (
-        <AsyncBody
-          loading={false}
-          error=""
-          empty
-          emptyText="输入关键词开始搜索"
-        >
-          {null}
-        </AsyncBody>
+        <EmptyState>输入关键词开始搜索</EmptyState>
       ) : (
         <AsyncBody
           loading={loading}

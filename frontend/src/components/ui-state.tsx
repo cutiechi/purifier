@@ -28,7 +28,7 @@ export function ErrorBox({
         <button
           type="button"
           onClick={onRetry}
-          className="mt-3 inline-flex min-h-10 items-center rounded-xl bg-destructive/12 px-3.5 py-2 text-sm font-medium transition-colors hover:bg-destructive/20"
+          className="mt-3 inline-flex min-h-11 items-center rounded-xl bg-destructive/12 px-3.5 py-2 text-sm font-medium transition-colors hover:bg-destructive/20"
         >
           重试
         </button>
@@ -64,6 +64,7 @@ export function AsyncBody({
   onRetry,
   emptyText = "暂无内容",
   children,
+  compact,
 }: {
   loading: boolean
   error?: string | null
@@ -71,9 +72,16 @@ export function AsyncBody({
   onRetry?: () => void
   emptyText?: ReactNode
   children: ReactNode
+  compact?: boolean
 }) {
-  if (loading) return <Spinner />
+  if (loading) return <Spinner className={compact ? "py-8" : undefined} />
   if (error) return <ErrorBox message={error} onRetry={onRetry} />
-  if (empty) return <EmptyState>{emptyText}</EmptyState>
+  if (empty) {
+    return (
+      <EmptyState className={compact ? "px-4 py-8" : undefined}>
+        {emptyText}
+      </EmptyState>
+    )
+  }
   return <>{children}</>
 }

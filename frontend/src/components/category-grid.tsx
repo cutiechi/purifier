@@ -56,8 +56,8 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
                 to={item.url}
                 className={cn(
                   "border-border/70 bg-card/90 hover:border-border hover:bg-accent/50",
-                  "flex h-11 items-center justify-center rounded-xl border px-2 text-center",
-                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
+                  "flex min-h-11 items-center justify-center rounded-xl border px-2 text-center",
+                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:min-h-12 sm:text-sm"
                 )}
               >
                 {item.label}
@@ -79,8 +79,8 @@ export function CategoryGrid({ items }: { items: CategoryItem[] }) {
                 to={item.url}
                 className={cn(
                   "border-border/70 bg-card/90 hover:border-border hover:bg-accent/50",
-                  "flex h-11 items-center justify-center rounded-xl border px-2 text-center",
-                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:h-12 sm:text-sm"
+                  "flex min-h-11 items-center justify-center rounded-xl border px-2 text-center",
+                  "text-[13px] font-medium text-foreground transition-all active:scale-[0.98] sm:min-h-12 sm:text-sm"
                 )}
               >
                 {item.label}

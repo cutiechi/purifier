@@ -68,7 +68,7 @@ function ChipLink({
       title={hint}
       className={cn(
         "border-border/80 bg-card hover:border-border hover:bg-accent/50",
-        "inline-flex min-h-10 items-center justify-center rounded-xl border px-3.5 py-2",
+        "inline-flex min-h-11 items-center justify-center rounded-xl border px-3.5 py-2",
         "text-sm font-medium text-foreground transition-all active:scale-[0.98]",
         "shadow-sm"
       )}

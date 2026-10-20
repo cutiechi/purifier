@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { ListMeta, SearchForm, useScrollTop } from "@/components/form-controls"
+import { SearchForm, useScrollTop } from "@/components/form-controls"
 import { GenrePill } from "@/components/list-post-card"
 import { MeItemCard, type MeListItem } from "@/components/me-item-card"
 import { SimilarMeItemCard } from "@/components/similar-me-item-card"
@@ -14,11 +14,7 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { groupMeListItems } from "@/lib/book-groups"
 import { useMeTabs } from "@/lib/hub-tabs"
 import { useLocation } from "react-router-dom"
-import {
-  formatListPagination,
-  ME_PAGE_SIZE,
-  totalPages as calcTotalPages,
-} from "@/lib/list-meta"
+import { ME_PAGE_SIZE, totalPages as calcTotalPages } from "@/lib/list-meta"
 import { parsePage, parseQuery } from "@/lib/routes"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 
@@ -155,18 +151,6 @@ export function MeListPage({
       />
 
       {toolbar?.({ items, reload, loading })}
-
-      {!loading && !error && items.length > 0 && (
-        <ListMeta>
-          {formatListPagination({
-            page,
-            pageCount: items.length,
-            pageSize: ME_PAGE_SIZE,
-            total,
-            hasNext: nextPage !== undefined,
-          })}
-        </ListMeta>
-      )}
 
       <AsyncBody
         loading={loading}

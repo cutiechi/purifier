@@ -10,7 +10,9 @@ export function useScrollTop(
   opts?: { behavior?: ScrollBehavior }
 ) {
   useEffect(() => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    const reduce = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)"
+    ).matches
     window.scrollTo({
       top: 0,
       behavior: reduce ? "auto" : (opts?.behavior ?? "smooth"),
@@ -86,6 +88,7 @@ export function FilterTabs<T extends string>({
   onChange,
   className,
   variant = "accent",
+  ariaLabel,
 }: {
   options: { value: T; label: string; title?: string }[]
   value: T
@@ -93,9 +96,14 @@ export function FilterTabs<T extends string>({
   className?: string
   /** accent：浅色选中；primary：深色选中（排序等） */
   variant?: "accent" | "primary"
+  ariaLabel?: string
 }) {
   return (
-    <div className={cn("mb-4 flex flex-wrap items-center gap-1.5", className)}>
+    <div
+      role={ariaLabel ? "group" : undefined}
+      aria-label={ariaLabel}
+      className={cn("mb-4 flex flex-wrap items-center gap-1.5", className)}
+    >
       {options.map((opt) => {
         const active = value === opt.value
         return (

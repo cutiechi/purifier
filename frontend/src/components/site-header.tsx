@@ -8,19 +8,16 @@ import {
   IconSearch,
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
-import { useSite } from "@/hooks/use-site"
+import { useSite, useSetSite } from "@/hooks/use-site"
 import { useAuth } from "@/lib/auth"
-import {
-  FORUM_NAV_ITEMS,
-  NOVEL_NAV_ITEMS,
-  routes,
-} from "@/lib/routes"
+import { FORUM_NAV_ITEMS, NOVEL_NAV_ITEMS, routes } from "@/lib/routes"
 import { cn } from "@/lib/utils"
 
 export function SiteHeader({ showBack }: { showBack?: boolean }) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const site = useSite()
+  const setSite = useSetSite()
   const { enabled, user, logout } = useAuth()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLElement | null>(null)
@@ -36,6 +33,41 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
   const currentChannel = isNovel ? "novel" : "forum"
   const items = isNovel ? NOVEL_NAV_ITEMS : FORUM_NAV_ITEMS
+
+  // 顶栏药丸按页切换站点逻辑：
+  // 1. 停留并只改 ?site= (路径不变)
+  const isStayAndSetSite =
+    pathname === "/browse" ||
+    pathname === "/categories" ||
+    pathname === "/trending" ||
+    pathname === "/search" ||
+    pathname.startsWith("/read/") ||
+    pathname.startsWith("/book/")
+
+  // 2. 论坛专属页：切书库跳 /novel，切论坛留在原地
+  const isForumOnly =
+    pathname === "/featured" ||
+    pathname === "/picks" ||
+    pathname === "/comments" ||
+    pathname === "/groups"
+
+  const handleSwitchToForum = () => {
+    if (isStayAndSetSite) {
+      setSite("1")
+    } else if (isForumOnly) {
+      setSite("1")
+    } else {
+      navigate(routes.home)
+    }
+  }
+
+  const handleSwitchToNovel = () => {
+    if (isStayAndSetSite) {
+      setSite("2")
+    } else {
+      navigate(routes.novel)
+    }
+  }
 
   useEffect(() => {
     setOpen(false)
@@ -97,28 +129,30 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
         {/* 顶级频道切换 Segmented Pill (论坛 vs 书库) */}
         <div className="flex items-center rounded-xl bg-muted/60 p-0.5 text-xs font-medium">
-          <Link
-            to={routes.home}
+          <button
+            type="button"
+            onClick={handleSwitchToForum}
             className={cn(
-              "flex items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
+              "flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
               currentChannel === "forum"
-                ? "bg-background text-foreground shadow-xs font-semibold"
+                ? "bg-background font-semibold text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             论坛
-          </Link>
-          <Link
-            to={routes.novel}
+          </button>
+          <button
+            type="button"
+            onClick={handleSwitchToNovel}
             className={cn(
-              "flex items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
+              "flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
               currentChannel === "novel"
-                ? "bg-background text-foreground shadow-xs font-semibold"
+                ? "bg-background font-semibold text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             书库
-          </Link>
+          </button>
         </div>
 
         {/* 频道专属导航项（桌面端） */}
@@ -197,7 +231,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
                   className={cn(
                     "inline-flex h-10 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",
                     active
-                      ? "bg-accent text-foreground font-semibold"
+                      ? "bg-accent font-semibold text-foreground"
                       : "bg-muted/50 text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >

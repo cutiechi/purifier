@@ -55,34 +55,48 @@ export function Pager({
         icon={<IconChevronLeft size={16} />}
       />
       <div className="min-w-0 px-1 text-center text-sm text-muted-foreground tabular-nums">
-        <span className="block sm:inline">{label}</span>
-        {sub}
-        {totalPages != null && totalPages > 1 && onPage && (
-          <span className="mt-1 block sm:mt-0 sm:ml-2 sm:inline-flex sm:items-center sm:gap-1">
-            <input
-              type="number"
-              min={1}
-              max={totalPages}
-              value={jump}
-              onChange={(e) => setJump(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  submitJump()
-                }
-              }}
-              aria-label="跳转到页码"
-              className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-xs tabular-nums"
-            />
-            <button
-              type="button"
-              onClick={submitJump}
-              className="inline-flex min-h-7 items-center rounded-md bg-accent px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent/70"
-            >
-              跳转
-            </button>
-          </span>
-        )}
+        <div>
+          <span className="block sm:inline">{label}</span>
+          {sub}
+          {totalPages != null && totalPages > 1 && onPage && (
+            <span className="mt-1 block sm:mt-0 sm:ml-2 sm:inline-flex sm:items-center sm:gap-1">
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={jump}
+                onChange={(e) => setJump(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    submitJump()
+                  }
+                }}
+                aria-label="跳转到页码"
+                className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-xs tabular-nums"
+              />
+              <button
+                type="button"
+                onClick={submitJump}
+                className="inline-flex min-h-7 items-center rounded-md bg-accent px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent/70"
+              >
+                跳转
+              </button>
+            </span>
+          )}
+        </div>
+        <div>
+          <button
+            type="button"
+            className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => {
+              document.getElementById("main")?.focus()
+              window.scrollTo({ top: 0, behavior: "smooth" })
+            }}
+          >
+            回到顶部
+          </button>
+        </div>
       </div>
       <PagerButton
         onClick={onNext}

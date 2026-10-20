@@ -6,7 +6,6 @@ import { PageHeader } from "@/components/page-header"
 import { SectionTabs } from "@/components/section-tabs"
 import {
   FilterTabs,
-  ListMeta,
   SearchForm,
   useScrollTop,
 } from "@/components/form-controls"
@@ -20,7 +19,6 @@ import { useAllTabs } from "@/lib/hub-tabs"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
-  formatListPagination,
   totalPages as calcTotalPages,
 } from "@/lib/list-meta"
 import {
@@ -319,18 +317,6 @@ export default function ArchivePage() {
         onChange={(v) => update({ sort: v, page: 1 })}
         variant="primary"
       />
-
-      {!loading && !error && items.length > 0 && (
-        <ListMeta>
-          {formatListPagination({
-            page,
-            pageCount: items.length,
-            pageSize: ARCHIVE_PAGE_SIZE,
-            total,
-            hasNext,
-          })}
-        </ListMeta>
-      )}
 
       <AsyncBody
         loading={loading}

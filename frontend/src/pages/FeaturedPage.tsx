@@ -2,7 +2,6 @@ import { useMemo } from "react"
 import { Navigate } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import { PageSiteTabs } from "@/components/page-site-tabs"
 import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
@@ -15,7 +14,7 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, readPath, routes, DISCOVER_TABS } from "@/lib/routes"
+import { api, readPath, routes } from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 
 export default function FeaturedPage() {
@@ -53,16 +52,12 @@ export default function FeaturedPage() {
   return (
     <PageShell>
       <PageHeader
-        title="发现"
+        title="精华"
         description={
           items.length
             ? pageCountLabel(items.length, "篇", "精华热贴")
             : "在线榜单与栏目"
         }
-      />
-      <PageSiteTabs
-        sites={DISCOVER_TABS.find((t) => t.href === routes.featured)!.sites}
-        hideWhenSingle
       />
       <SectionTabs items={sectionTabs} />
 

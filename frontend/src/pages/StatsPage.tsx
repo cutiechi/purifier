@@ -2,10 +2,12 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { SectionTabs } from "@/components/section-tabs"
 import { StatsHeatmap } from "@/components/stats-heatmap"
 import { AsyncBody } from "@/components/ui-state"
-import { api, bookPath, readPath, type SiteId } from "@/lib/routes"
+import { api, bookPath, readPath, routes, type SiteId } from "@/lib/routes"
 import { formatDateTime, formatDuration } from "@/lib/format"
+import { useMeTabs } from "@/lib/hub-tabs"
 
 type StatsResult = {
   summary: {
@@ -86,12 +88,15 @@ export default function StatsPage() {
   const maxHour = data ? Math.max(1, ...data.timeOfDay) : 1
   const topMax = data?.topItems[0]?.durationS ?? 0
 
+  const meTabs = useMeTabs(routes.stats)
+
   return (
     <PageShell maxWidth="xwide">
       <PageHeader
         title="统计"
         description="阅读时长 · 连读 · 时段（论坛与书库）"
       />
+      <SectionTabs items={meTabs} />
 
       <AsyncBody
         loading={loading}

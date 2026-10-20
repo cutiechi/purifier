@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AsyncBody, Spinner } from "@/components/ui-state"
-import { PageHeader } from "@/components/page-header"
+import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
@@ -67,7 +67,7 @@ function StreamError({
   return (
     <div
       role="alert"
-      className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm"
+      className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-destructive/25 bg-destructive/8 px-4 py-3.5 text-sm"
     >
       <span className="text-destructive">
         {label}加载失败：{message}
@@ -75,7 +75,7 @@ function StreamError({
       <button
         type="button"
         onClick={onRetry}
-        className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-foreground hover:bg-accent"
+        className="ml-auto inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-foreground hover:bg-accent"
       >
         重试
       </button>
@@ -226,19 +226,20 @@ export default function HomePage() {
   const error = bothFailed ? forumError : ""
   const noMore = !initialLoading && !error && !hasMore && total > 0
 
-  const retryStream = useCallback(
-    async (key: StreamKey) => {
-      const setter = key === "forum" ? setForum : setLibrary
-      const setErr = key === "forum" ? setForumError : setLibraryError
-      setErr("")
-      try {
-        setter(await parseHomeResponse(await fetch(`${api.posts}?site=${SITE_OF[key]}`)))
-      } catch (e) {
-        setErr(msgOf(e))
-      }
-    },
-    []
-  )
+  const retryStream = useCallback(async (key: StreamKey) => {
+    const setter = key === "forum" ? setForum : setLibrary
+    const setErr = key === "forum" ? setForumError : setLibraryError
+    setErr("")
+    try {
+      setter(
+        await parseHomeResponse(
+          await fetch(`${api.posts}?site=${SITE_OF[key]}`)
+        )
+      )
+    } catch (e) {
+      setErr(msgOf(e))
+    }
+  }, [])
 
   function renderGrouped(g: GroupedItem<ChapterLink>, site: string) {
     const isBook = site === "2"
@@ -334,7 +335,17 @@ export default function HomePage() {
         )}
 
         <PostList>
+          {forumGrouped.length > 0 && (
+            <SectionLabel className="sticky top-14 z-10 -mx-3.5 bg-background/95 px-3.5 py-2 backdrop-blur sm:-mx-5 sm:px-5">
+              论坛更新
+            </SectionLabel>
+          )}
           {forumGrouped.map((g) => renderGrouped(g, "1"))}
+          {libraryGrouped.length > 0 && (
+            <SectionLabel className="sticky top-14 z-10 -mx-3.5 bg-background/95 px-3.5 py-2 backdrop-blur sm:-mx-5 sm:px-5">
+              书库更新
+            </SectionLabel>
+          )}
           {libraryGrouped.map((g) => renderGrouped(g, "2"))}
         </PostList>
 
@@ -361,9 +372,21 @@ export default function HomePage() {
         )}
 
         {noMore && (
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            已经到底了
-          </p>
+          <div className="flex flex-col items-center py-10">
+            <p className="text-center text-sm text-muted-foreground">
+              已经到底了
+            </p>
+            <button
+              type="button"
+              className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => {
+                document.getElementById("main")?.focus()
+                window.scrollTo({ top: 0, behavior: "smooth" })
+              }}
+            >
+              回到顶部
+            </button>
+          </div>
         )}
       </AsyncBody>
     </PageShell>

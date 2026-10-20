@@ -43,7 +43,7 @@ export function MeItemCard({
       : bookPath(item.id, { site: item.site })
   const time = item.last_visited_at ?? item.favorited_at
   return (
-    <div className="group flex flex-col rounded-2xl border border-border/80 bg-card/80 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
+    <div className="group flex flex-col rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">
       <div className="flex items-start gap-2 sm:items-center sm:gap-3.5">
         <Link
           to={href}

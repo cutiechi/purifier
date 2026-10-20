@@ -85,7 +85,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
           <div key={wi} className="flex flex-col gap-[3px]">
             {Array.from({ length: 7 }).map((_, di) => {
               const c = week[di] ?? null
-              if (!c) return <div key={di} className="h-2.5 w-2.5" />
+              if (!c) return <div key={di} className="h-4 w-4" />
               return (
                 <div
                   key={c.date}
@@ -94,7 +94,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
                   onMouseLeave={() => setHover(null)}
                   onClick={() => setSelected(c)}
                   className={cn(
-                    "h-2.5 w-2.5 rounded-[2px]",
+                    "h-4 w-4 rounded-[2px]",
                     LEVEL_BG[level(c.durationS)],
                     c.estimated === 1 && "ring-1 ring-amber-400/70 ring-inset"
                   )}
@@ -105,7 +105,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
         ))}
       </div>
       {shown && (
-        <p className="text-xs text-muted-foreground">
+        <p aria-live="polite" className="text-xs text-muted-foreground">
           {shown.date} · {formatDuration(shown.durationS)}
           {shown.estimated === 1 ? "（历史活跃日，无时长）" : ""}
         </p>

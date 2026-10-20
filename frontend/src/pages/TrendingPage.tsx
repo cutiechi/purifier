@@ -1,5 +1,5 @@
-import { useMemo } from "react"
-import { PageHeader } from "@/components/page-header"
+import { Fragment, useMemo } from "react"
+import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
 import { PostList } from "@/components/post-card"
@@ -41,14 +41,19 @@ export default function TrendingPage() {
 
   const { isExpanded, toggle } = useExpandedBooks("trending")
   const libraryGrouped = useMemo(
-    () => groupBooks(items, (p) => p.title, (p) => p.tid),
+    () =>
+      groupBooks(
+        items,
+        (p) => p.title,
+        (p) => p.tid
+      ),
     [items]
   )
 
   return (
     <PageShell>
       <PageHeader
-        title="发现"
+        title="人气"
         description={
           items.length
             ? pageCountLabel(
@@ -114,20 +119,49 @@ export default function TrendingPage() {
                   </CollapsibleBookGroup>
                 )
               )
-            : items.map((p) => (
-                <SimilarPostCard
-                  key={`f:${p.tid}`}
-                  href={readPath(p.tid, "1")}
-                  rawTitle={p.title}
-                  tid={p.tid}
-                  site="1"
-                  rank={p.rank}
-                  statValue={formatCount(p.reads)}
-                  statUnit="读"
-                  showGenre
-                  badge={<SourceBadge site="1" />}
-                />
-              ))}
+            : (() => {
+                let lastBucket = -1
+                return items.map((p) => {
+                  let header = null
+                  if (items.length > 20 && p.rank != null) {
+                    const bucket = Math.floor((p.rank - 1) / 20)
+                    if (bucket > lastBucket) {
+                      lastBucket = bucket
+                      const start = bucket * 20 + 1
+                      header = (
+                        <SectionLabel
+                          key={`bucket:${start}`}
+                          className="sticky top-14 z-10 -mx-3.5 bg-background/95 px-3.5 py-2 backdrop-blur sm:-mx-5 sm:px-5"
+                        >
+                          {`${start}–${start + 19}`}
+                        </SectionLabel>
+                      )
+                    }
+                  }
+                  const card = (
+                    <SimilarPostCard
+                      key={`f:${p.tid}`}
+                      href={readPath(p.tid, "1")}
+                      rawTitle={p.title}
+                      tid={p.tid}
+                      site="1"
+                      rank={p.rank}
+                      statValue={formatCount(p.reads)}
+                      statUnit="读"
+                      showGenre
+                      badge={<SourceBadge site="1" />}
+                    />
+                  )
+                  return header ? (
+                    <Fragment key={`frag:${p.tid}`}>
+                      {header}
+                      {card}
+                    </Fragment>
+                  ) : (
+                    card
+                  )
+                })
+              })()}
         </PostList>
       </AsyncBody>
     </PageShell>

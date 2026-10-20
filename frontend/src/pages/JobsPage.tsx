@@ -3,7 +3,15 @@ import { useSearchParams } from "react-router-dom"
 import { Download, Plus, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageShell, Pager } from "@/components/page-shell"
-import { useScrollTop } from "@/components/form-controls"
+import { SectionTabs } from "@/components/section-tabs"
+import { FilterTabs, useScrollTop } from "@/components/form-controls"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { AsyncBody } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { JobStatsCards } from "@/components/job-stats-cards"
@@ -21,7 +29,8 @@ import {
   type Job,
   type JobSortKey,
 } from "@/lib/jobs"
-import { api, parsePage, type SiteId } from "@/lib/routes"
+import { api, parsePage, routes, type SiteId } from "@/lib/routes"
+import { useMeTabs } from "@/lib/hub-tabs"
 
 const POLL_MS = 1500
 const JOB_TYPES = [
@@ -29,6 +38,13 @@ const JOB_TYPES = [
   "archive_books",
   "archive_auto_group",
 ] as const
+
+const JOB_TYPE_OPTIONS = [
+  { value: "", label: "全部类型" },
+  { value: "archive_posts", label: "论坛归档" },
+  { value: "archive_books", label: "书库归档" },
+  { value: "archive_auto_group", label: "自动分组" },
+]
 
 export default function JobsPage() {
   const confirm = useConfirm()
@@ -289,6 +305,8 @@ export default function JobsPage() {
     )
   }
 
+  const meTabs = useMeTabs(routes.jobs)
+
   return (
     <PageShell maxWidth="xwide">
       <PageHeader
@@ -328,6 +346,7 @@ export default function JobsPage() {
           </div>
         }
       />
+      <SectionTabs items={meTabs} />
 
       {toast && (
         <div
@@ -354,29 +373,31 @@ export default function JobsPage() {
 
       {/* 筛选 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select
+        <FilterTabs
+          options={JOB_TYPE_OPTIONS}
           value={type}
-          onChange={(e) => update({ type: e.target.value })}
-          aria-label="类型筛选"
-          className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
+          onChange={(v) => update({ type: v })}
+          className="mb-0"
+          ariaLabel="类型筛选"
+        />
+        <Select
+          value={status || "all"}
+          onValueChange={(value) => {
+            if (value == null) return
+            update({ status: value === "all" ? "" : value })
+          }}
         >
-          <option value="">全部类型</option>
-          <option value="archive_posts">论坛归档</option>
-          <option value="archive_books">书库归档</option>
-          <option value="archive_auto_group">自动分组</option>
-        </select>
-        <select
-          value={status}
-          onChange={(e) => update({ status: e.target.value })}
-          aria-label="状态筛选"
-          className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
-        >
-          <option value="">全部状态</option>
-          <option value="running">运行中</option>
-          <option value="paused">已暂停</option>
-          <option value="finished">已完成</option>
-          <option value="error">失败</option>
-        </select>
+          <SelectTrigger aria-label="状态筛选" className="h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="running">运行中</SelectItem>
+            <SelectItem value="paused">已暂停</SelectItem>
+            <SelectItem value="finished">已完成</SelectItem>
+            <SelectItem value="error">失败</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <AsyncBody

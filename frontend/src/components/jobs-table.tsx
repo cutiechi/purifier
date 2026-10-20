@@ -227,7 +227,7 @@ export function JobsTable({
           return (
             <li
               key={job.id}
-              className="rounded-2xl border border-border/80 bg-card/80 px-3 py-3 shadow-sm"
+              className="rounded-2xl border border-border/60 bg-card/60 px-3 py-3 shadow-sm"
             >
               <div className="flex items-center gap-2">
                 {terminal && (
@@ -261,14 +261,14 @@ export function JobsTable({
               <div className="mt-2 flex items-center gap-1 text-xs">
                 <Link
                   to={jumpTo(job)}
-                  className="rounded-lg px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="inline-flex min-h-11 items-center rounded-lg px-3 text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   查看
                 </Link>
                 <button
                   type="button"
                   onClick={() => setOpenLog(openLog === job.id ? null : job.id)}
-                  className="rounded-lg px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="inline-flex min-h-11 items-center rounded-lg px-3 text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   {openLog === job.id ? "收起日志" : "日志"}
                 </button>
@@ -276,7 +276,7 @@ export function JobsTable({
                   <button
                     type="button"
                     onClick={() => void onDeleteOne(job)}
-                    className="ml-auto rounded-lg px-2 py-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="ml-auto inline-flex min-h-11 items-center rounded-lg px-3 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   >
                     删除
                   </button>
