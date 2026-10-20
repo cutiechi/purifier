@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -9,7 +10,18 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaDDL = `
+// migration 是一次顺序 schema 变更。版本号写入 PRAGMA user_version，
+// 已部署库按版本号跳过，新增列/索引/约束只需在末尾追加一条。
+type migration struct {
+	version int
+	stmts   string
+}
+
+var migrations = []migration{
+	{
+		// v1：基线。全部 IF NOT EXISTS，对已有库是无操作。
+		version: 1,
+		stmts: `
 CREATE TABLE IF NOT EXISTS items (
   kind TEXT NOT NULL CHECK (kind IN ('post', 'book')),
   site TEXT NOT NULL DEFAULT '1',
@@ -155,7 +167,90 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_item
   ON bookmarks (site, kind, item_id, chapter, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_created
   ON bookmarks (created_at DESC);
-`
+`,
+	},
+	{
+		// v2：把生产库早已存在的索引写进 DDL，并让 tid 全局唯一成为受约束的行为。
+		// 去重保留每个 tid 最早加入的那条（added_at，同时间按 rowid），
+		// 避免 CREATE UNIQUE INDEX 在脏库上失败。
+		//
+		// 先 DROP 再建：SQLite 的 CREATE INDEX IF NOT EXISTS 只看名字，
+		// 同名但非 UNIQUE 的索引会让这里静默通过，tid 依旧能跨组重复。
+		version: 2,
+		stmts: `
+DELETE FROM group_items
+ WHERE rowid NOT IN (
+   SELECT rowid FROM group_items gi
+    WHERE NOT EXISTS (
+      SELECT 1 FROM group_items g2
+       WHERE g2.tid = gi.tid
+         AND (g2.added_at < gi.added_at
+              OR (g2.added_at = gi.added_at AND g2.rowid < gi.rowid))
+    )
+ );
+DROP INDEX IF EXISTS group_items_tid_unique;
+CREATE UNIQUE INDEX group_items_tid_unique ON group_items(tid);
+CREATE INDEX IF NOT EXISTS idx_character_names_cluster ON character_names(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_character_clusters_scope
+  ON character_clusters(scope_type, scope_id);
+`,
+	},
+	{
+		// v3：任务停止与取消的终态需要能被快速筛出。
+		version: 3,
+		stmts: `
+CREATE INDEX IF NOT EXISTS jobs_type_status_idx ON jobs(type, status);
+`,
+	},
+	{
+		// v4：归档目录按数字 tid 排序，用表达式索引消掉临时 B-tree。
+		version: 4,
+		stmts: `
+CREATE INDEX IF NOT EXISTS archive_posts_site_tid_num_idx
+  ON archive_posts(site, CAST(tid AS INTEGER));
+`,
+	},
+}
+
+// SchemaVersion 是当前代码期望的 schema 版本。
+func SchemaVersion() int {
+	return migrations[len(migrations)-1].version
+}
+
+func migrate(db *sqlx.DB) error {
+	var current int
+	if err := db.Get(&current, "PRAGMA user_version"); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+	for _, m := range migrations {
+		if m.version <= current {
+			continue
+		}
+		tx, err := db.Beginx()
+		if err != nil {
+			return fmt.Errorf("migration %d: begin: %w", m.version, err)
+		}
+		res, err := tx.Exec(m.stmts)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %d: %w", m.version, err)
+		}
+		// v2 会删掉重复 tid，属破坏性变更：留下行数，便于事后追溯。
+		if affected, aErr := res.RowsAffected(); aErr == nil && m.version == 2 && affected > 0 {
+			log.Printf("[db] migration v2 deduped %d duplicate group_items row(s)", affected)
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %d: set version: %w", m.version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("migration %d: commit: %w", m.version, err)
+		}
+		log.Printf("[db] migrated schema to v%d", m.version)
+		current = m.version
+	}
+	return nil
+}
 
 func OpenDB(dataDir string) (*sqlx.DB, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -163,16 +258,20 @@ func OpenDB(dataDir string) (*sqlx.DB, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "purifier.db")
-	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", dbPath)
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)", dbPath)
 
 	db, err := sqlx.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite: %w", err)
 	}
 
-	if _, err := db.Exec(SchemaDDL); err != nil {
+	// SQLite 单写多读：限制连接数，避免归档写入把页面请求拖进 5s 忙等超时。
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
+
+	if err := migrate(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to init schema: %w", err)
+		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
 
 	return db, nil

@@ -26,6 +26,9 @@ type JobListResult struct {
 	Total    int         `json:"total"`
 }
 
+// ErrActiveJobs 表示批量删除请求里含活动任务。
+var ErrActiveJobs = errors.New("contains active jobs")
+
 type CursorInfo struct {
 	Site      string  `json:"site" db:"site"`
 	NextMtid  *string `json:"next_mtid" db:"next_mtid"`
@@ -198,7 +201,7 @@ func (s *Store) ListJobs(ctx context.Context, q JobListQuery) (*JobListResult, e
 	if q.Status == "active" {
 		conditions = append(conditions, "status IN ('running', 'paused', 'pending')")
 	} else if q.Status == "finished" {
-		conditions = append(conditions, "status IN ('finished', 'error')")
+		conditions = append(conditions, "status IN ('finished', 'error', 'cancelled')")
 	} else if q.Status != "" {
 		conditions = append(conditions, "status = ?")
 		args = append(args, q.Status)
@@ -241,16 +244,21 @@ func (s *Store) ListJobs(ctx context.Context, q JobListQuery) (*JobListResult, e
 		items = []model.Job{}
 	}
 
-	return &JobListResult{
+	res := &JobListResult{
 		Items: items,
 		Total: total,
-	}, nil
+	}
+	if q.Offset+q.Limit < total {
+		next := q.Offset/q.Limit + 2
+		res.NextPage = &next
+	}
+	return res, nil
 }
 
 // DeleteFinishedJob 删除已结束任务
 func (s *Store) DeleteFinishedJob(ctx context.Context, id int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
-		"DELETE FROM jobs WHERE id = ? AND status IN ('finished', 'error')",
+		"DELETE FROM jobs WHERE id = ? AND status IN ('finished', 'error', 'cancelled')",
 		id,
 	)
 	if err != nil {
@@ -267,7 +275,7 @@ func (s *Store) DeleteFinishedJobsBatch(ctx context.Context, ids []int64) (int64
 	}
 
 	// 检查是否包含活动任务
-	query, args, err := sqlxIn("SELECT COUNT(*) FROM jobs WHERE id IN (?) AND status NOT IN ('finished', 'error')", ids)
+	query, args, err := sqlxIn("SELECT COUNT(*) FROM jobs WHERE id IN (?) AND status NOT IN ('finished', 'error', 'cancelled')", ids)
 	if err != nil {
 		return 0, err
 	}
@@ -276,7 +284,7 @@ func (s *Store) DeleteFinishedJobsBatch(ctx context.Context, ids []int64) (int64
 		return 0, err
 	}
 	if activeCount > 0 {
-		return 0, errors.New("contains active jobs")
+		return 0, ErrActiveJobs
 	}
 
 	delQuery, delArgs, err := sqlxIn("DELETE FROM jobs WHERE id IN (?)", ids)
@@ -363,62 +371,156 @@ func (s *Store) GetArchiveCursor(ctx context.Context, site string) (*CursorInfo,
 	return &c, err
 }
 
-// UpsertArchivePosts 批量保存归档帖子
-func (s *Store) UpsertArchivePosts(ctx context.Context, posts []model.ArchivePost) error {
+// UpsertArchivePosts 批量保存归档帖子，返回真正新插入与真正变更的行数。
+// 标题未变时不写 archived_at，避免「增量」把整表归档时间刷成刚刚。
+func (s *Store) UpsertArchivePosts(ctx context.Context, posts []model.ArchivePost) (inserted, updated int, err error) {
 	if len(posts) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 
+	// 一次取回本批已存在的标题，区分新增与更新
+	bySite := make(map[string][]string)
+	for _, p := range posts {
+		bySite[p.Site] = append(bySite[p.Site], p.Tid)
+	}
+	existing := make(map[string]string, len(posts))
+	for site, tids := range bySite {
+		query, args, qErr := sqlxIn("SELECT tid, title FROM archive_posts WHERE site = ? AND tid IN (?)", site, tids)
+		if qErr != nil {
+			return 0, 0, qErr
+		}
+		type row struct {
+			Tid   string `db:"tid"`
+			Title string `db:"title"`
+		}
+		var rows []row
+		if err := tx.SelectContext(ctx, &rows, query, args...); err != nil {
+			return 0, 0, err
+		}
+		for _, r := range rows {
+			existing[site+"\x00"+r.Tid] = r.Title
+		}
+	}
+
+	// 冲突时只更新标题，不刷 archived_at：否则任何一次重扫都会把整表
+	// 「归档时间」拨到刚刚，按归档时间排序的目录会整体错位。
+	// 首次归档时间只在插入时写入。
 	stmt, err := tx.PreparexContext(ctx, `
 		INSERT INTO archive_posts (site, tid, title, first_seen_at, archived_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(site, tid) DO UPDATE SET
-			title = excluded.title,
-			archived_at = excluded.archived_at
+			title = excluded.title
 	`)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	defer stmt.Close()
 
 	for _, p := range posts {
+		key := p.Site + "\x00" + p.Tid
+		oldTitle, seen := existing[key]
+		if seen && oldTitle == p.Title {
+			continue
+		}
 		if _, err := stmt.ExecContext(ctx, p.Site, p.Tid, p.Title, p.FirstSeenAt, p.ArchivedAt); err != nil {
-			return err
+			return 0, 0, err
+		}
+		if seen {
+			updated++
+		} else {
+			inserted++
 		}
 	}
 
-	return tx.Commit()
+	return inserted, updated, tx.Commit()
 }
 
-func sqlxIn(query string, params ...any) (string, []any, error) {
-	// 简单的 IN 参数展开 helper
-	var qb strings.Builder
-	paramIdx := 0
-	var finalArgs []any
-
-	for i := 0; i < len(query); i++ {
-		if query[i] == '?' && paramIdx < len(params) {
-			val := params[paramIdx]
-			paramIdx++
-			if slice, ok := val.([]int64); ok {
-				placeholders := make([]string, len(slice))
-				for sIdx, item := range slice {
-					placeholders[sIdx] = "?"
-					finalArgs = append(finalArgs, item)
-				}
-				qb.WriteString(strings.Join(placeholders, ","))
-			} else {
-				qb.WriteByte('?')
-				finalArgs = append(finalArgs, val)
-			}
-		} else {
-			qb.WriteByte(query[i])
-		}
+// ListAllArchivePosts 返回某站全部归档目录（自动分组任务用）。
+func (s *Store) ListAllArchivePosts(ctx context.Context, site string) ([]model.ArchivePost, error) {
+	items := []model.ArchivePost{}
+	err := s.db.SelectContext(ctx, &items,
+		"SELECT site, tid, title, first_seen_at, archived_at FROM archive_posts WHERE site = ? ORDER BY CAST(tid AS INTEGER) ASC",
+		site)
+	if err != nil {
+		return nil, err
 	}
+	return items, nil
+}
+
+// ArchiveMaxTid 返回某站归档里最大的数字 tid（无归档返回空串）。
+func (s *Store) ArchiveMaxTid(ctx context.Context, site string) (string, error) {
+	var maxTid sql.NullString
+	if err := s.db.GetContext(ctx, &maxTid,
+		"SELECT MAX(CAST(tid AS INTEGER)) FROM archive_posts WHERE site = ?", site); err != nil {
+		return "", err
+	}
+	if !maxTid.Valid {
+		return "", nil
+	}
+	return maxTid.String, nil
+}
+
+// PruneJobLogs 只保留该任务最近 keep 条日志，避免长期任务把 job_logs 堆满。
+func (s *Store) PruneJobLogs(ctx context.Context, jobID int64, keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM job_logs
+		WHERE job_id = ? AND id NOT IN (
+			SELECT id FROM job_logs WHERE job_id = ? ORDER BY id DESC LIMIT ?
+		)`, jobID, jobID, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// sqlxIn 把查询里的 `?` 依次展开，支持 []int64 与 []string 切片。
+func sqlxIn(query string, params ...any) (string, []any, error) {
+	var qb strings.Builder
+	finalArgs := make([]any, 0, len(params))
+	remaining := query
+
+	for _, val := range params {
+		idx := strings.IndexByte(remaining, '?')
+		if idx < 0 {
+			break
+		}
+		qb.WriteString(remaining[:idx])
+		remaining = remaining[idx+1:]
+
+		var placeholders []string
+		switch slice := val.(type) {
+		case []int64:
+			placeholders = make([]string, len(slice))
+			for i, item := range slice {
+				placeholders[i] = "?"
+				finalArgs = append(finalArgs, item)
+			}
+		case []string:
+			placeholders = make([]string, len(slice))
+			for i, item := range slice {
+				placeholders[i] = "?"
+				finalArgs = append(finalArgs, item)
+			}
+		default:
+			qb.WriteByte('?')
+			finalArgs = append(finalArgs, val)
+			continue
+		}
+		if len(placeholders) == 0 {
+			// 空集合：用不可能匹配的占位，避免生成 `IN ()` 语法错误
+			qb.WriteString("NULL")
+			continue
+		}
+		qb.WriteString(strings.Join(placeholders, ","))
+	}
+	qb.WriteString(remaining)
 	return qb.String(), finalArgs, nil
 }

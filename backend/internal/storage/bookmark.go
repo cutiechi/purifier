@@ -11,7 +11,18 @@ import (
 	"purifier/internal/model"
 )
 
-const BookmarkCapPerScope = 50
+const (
+	BookmarkCapPerScope = 50
+	// QuoteMaxRunes / NoteMaxRunes 与前端提示一致：超长在服务端截断而不是接受。
+	QuoteMaxRunes = 200
+	NoteMaxRunes  = 80
+)
+
+// 书签领域错误：HTTP 层用 errors.Is 映射，不比对字符串。
+var (
+	ErrItemNotFound  = errors.New("item not found")
+	ErrBookmarkLimit = errors.New("bookmark limit reached")
+)
 
 type BookmarkDetail struct {
 	ID             int64          `json:"id" db:"id"`
@@ -37,7 +48,7 @@ func (s *Store) AddBookmark(ctx context.Context, b model.Bookmark) (*BookmarkDet
 	var title string
 	err := s.db.GetContext(ctx, &title, "SELECT title FROM items WHERE site = ? AND kind = ? AND id = ?", b.Site, string(b.Kind), b.ItemID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("item not found")
+		return nil, ErrItemNotFound
 	} else if err != nil {
 		return nil, err
 	}
@@ -55,8 +66,11 @@ func (s *Store) AddBookmark(ctx context.Context, b model.Bookmark) (*BookmarkDet
 		return nil, err
 	}
 	if count >= BookmarkCapPerScope {
-		return nil, errors.New("bookmark limit reached")
+		return nil, ErrBookmarkLimit
 	}
+
+	b.Quote = truncateRunes(b.Quote, QuoteMaxRunes)
+	b.Note = truncateRunes(b.Note, NoteMaxRunes)
 
 	now := time.Now().UnixMilli()
 	query := `
@@ -167,6 +181,9 @@ func (s *Store) ListBookmarks(ctx context.Context, q string, kind model.ItemKind
 	if hasNext {
 		list = list[:PageSize]
 	}
+	if list == nil {
+		list = []BookmarkDetail{}
+	}
 
 	res := &BookmarkListResult{
 		Items: list,
@@ -181,8 +198,21 @@ func (s *Store) ListBookmarks(ctx context.Context, q string, kind model.ItemKind
 
 // UpdateBookmarkNote 修改书签备注
 func (s *Store) UpdateBookmarkNote(ctx context.Context, id int64, note string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE bookmarks SET note = ? WHERE id = ?", note, id)
+	_, err := s.db.ExecContext(ctx, "UPDATE bookmarks SET note = ? WHERE id = ?",
+		truncateRunes(note, NoteMaxRunes), id)
 	return err
+}
+
+// truncateRunes 按字符（非字节）截断，避免切碎多字节字符。
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
 }
 
 // DeleteBookmark 删除书签

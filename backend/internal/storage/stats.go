@@ -2,8 +2,8 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	"purifier/internal/core/upstream"
@@ -73,6 +73,8 @@ type RecentSession struct {
 	Title     string         `json:"title" db:"title"`
 }
 
+const dateLayout = "2006-01-02"
+
 // RecordSession 记录一段阅读时长
 func (s *Store) RecordSession(ctx context.Context, input SessionInput) error {
 	if input.DurationS < 3 {
@@ -105,8 +107,13 @@ func (s *Store) RecordSession(ctx context.Context, input SessionInput) error {
 	return err
 }
 
-// GetStats 综合统计数据
-func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error) {
+// GetStats 综合统计数据。日/时/周/月分桶统一按 loc（进程本地时区）计算，
+// 不依赖 SQLite 的 localtime（容器内可能是 UTC）。
+func (s *Store) GetStats(ctx context.Context, site string, loc *time.Location) (*StatsResult, error) {
+	if loc == nil {
+		loc = time.Local
+	}
+
 	siteCond := ""
 	var args []any
 	if site != "" {
@@ -114,139 +121,146 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 		args = append(args, site)
 	}
 
-	// 1. Inventory 资产总数
 	var inv Inventory
-	if site != "" {
-		_ = s.db.GetContext(ctx, &inv.History, "SELECT COUNT(*) FROM items WHERE site = ?", site)
-		_ = s.db.GetContext(ctx, &inv.Favorites, "SELECT COUNT(*) FROM favorites WHERE site = ?", site)
-		_ = s.db.GetContext(ctx, &inv.Tags, "SELECT COUNT(*) FROM tags WHERE site = ?", site)
-		_ = s.db.GetContext(ctx, &inv.Bookmarks, "SELECT COUNT(*) FROM bookmarks WHERE site = ?", site)
-		_ = s.db.GetContext(ctx, &inv.Groups, "SELECT COUNT(*) FROM groups")
-		_ = s.db.GetContext(ctx, &inv.Characters, "SELECT COUNT(*) FROM character_names")
-	} else {
-		_ = s.db.GetContext(ctx, &inv.History, "SELECT COUNT(*) FROM items")
-		_ = s.db.GetContext(ctx, &inv.Favorites, "SELECT COUNT(*) FROM favorites")
-		_ = s.db.GetContext(ctx, &inv.Tags, "SELECT COUNT(*) FROM tags")
-		_ = s.db.GetContext(ctx, &inv.Bookmarks, "SELECT COUNT(*) FROM bookmarks")
-		_ = s.db.GetContext(ctx, &inv.Groups, "SELECT COUNT(*) FROM groups")
-		_ = s.db.GetContext(ctx, &inv.Characters, "SELECT COUNT(*) FROM character_names")
+	inventoryQueries := []struct {
+		dst    *int
+		table  string
+		bySite bool
+	}{
+		{&inv.History, "items", true},
+		{&inv.Favorites, "favorites", true},
+		{&inv.Tags, "tags", true},
+		{&inv.Bookmarks, "bookmarks", true},
+		{&inv.Groups, "groups", false},
+		{&inv.Characters, "character_names", false},
+	}
+	for _, q := range inventoryQueries {
+		query := "SELECT COUNT(*) FROM " + q.table
+		queryArgs := []any{}
+		if site != "" && q.bySite {
+			query += " WHERE site = ?"
+			queryArgs = append(queryArgs, site)
+		}
+		if err := s.db.GetContext(ctx, q.dst, query, queryArgs...); err != nil {
+			return nil, err
+		}
 	}
 
-	// 2. Summary：总时长 + 本周/本月 + 起止时间
 	var totalSec int
-	summaryQuery := fmt.Sprintf(`
-		SELECT COALESCE(SUM(duration_s), 0)
-		FROM reading_sessions %s
-	`, siteCond)
-	_ = s.db.QueryRowContext(ctx, summaryQuery, args...).Scan(&totalSec)
+	if err := s.db.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", siteCond), args...).
+		Scan(&totalSec); err != nil {
+		return nil, err
+	}
 
-	nowLocal := time.Now()
-	weekStart := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, nowLocal.Location()).
-		AddDate(0, 0, -int(nowLocal.Weekday()+6)%7)
-	monthStart := time.Date(nowLocal.Year(), nowLocal.Month(), 1, 0, 0, 0, 0, nowLocal.Location())
+	nowLocal := time.Now().In(loc)
+	today := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
+	weekStart := today.AddDate(0, 0, -int(nowLocal.Weekday()+6)%7)
+	monthStart := time.Date(nowLocal.Year(), nowLocal.Month(), 1, 0, 0, 0, 0, loc)
 
+	var thisWeekS, thisMonthS int
 	weekCond := "WHERE started_at >= ?"
 	weekArgs := []any{weekStart.UnixMilli()}
 	monthCond := "WHERE started_at >= ?"
 	monthArgs := []any{monthStart.UnixMilli()}
-	rangeCond := ""
-	var rangeArgs []any
 	if site != "" {
 		weekCond = "WHERE site = ? AND started_at >= ?"
 		weekArgs = []any{site, weekStart.UnixMilli()}
 		monthCond = "WHERE site = ? AND started_at >= ?"
 		monthArgs = []any{site, monthStart.UnixMilli()}
-		rangeCond = "WHERE site = ?"
-		rangeArgs = []any{site}
+	}
+	if err := s.db.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", weekCond), weekArgs...).
+		Scan(&thisWeekS); err != nil {
+		return nil, err
+	}
+	if err := s.db.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", monthCond), monthArgs...).
+		Scan(&thisMonthS); err != nil {
+		return nil, err
 	}
 
-	var thisWeekS, thisMonthS int
-	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", weekCond), weekArgs...).Scan(&thisWeekS)
-	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COALESCE(SUM(duration_s), 0) FROM reading_sessions %s", monthCond), monthArgs...).Scan(&thisMonthS)
-
-	var trackedSince, lastActiveAt sql.NullInt64
-	_ = s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT MIN(started_at), MAX(started_at) FROM reading_sessions %s", rangeCond), rangeArgs...).Scan(&trackedSince, &lastActiveAt)
-
-	// 3. Calendar (近 365 天)
-	sinceMs := time.Now().AddDate(0, 0, -364).UnixMilli()
-	calCond := "WHERE started_at >= ?"
-	calArgs := []any{sinceMs}
-	if site != "" {
-		calCond = "WHERE site = ? AND started_at >= ?"
-		calArgs = []any{site, sinceMs}
+	// 一次扫描：按本地日/小时分桶，同时得到全时段活跃日集合
+	type sessionRow struct {
+		StartedAt int64 `db:"started_at"`
+		DurationS int   `db:"duration_s"`
+	}
+	var rows []sessionRow
+	if err := s.db.SelectContext(ctx, &rows, fmt.Sprintf(
+		"SELECT started_at, COALESCE(duration_s, 0) AS duration_s FROM reading_sessions %s ORDER BY started_at",
+		siteCond), args...); err != nil {
+		return nil, err
 	}
 
-	calQuery := fmt.Sprintf(`
-		SELECT strftime('%%Y-%%m-%%d', started_at / 1000, 'unixepoch', 'localtime') AS d,
-		       COALESCE(SUM(duration_s), 0) AS s,
-		       0 AS est
-		FROM reading_sessions
-		%s
-		GROUP BY d ORDER BY d ASC
-	`, calCond)
-
-	var calendar []CalendarDay
-	_ = s.db.SelectContext(ctx, &calendar, calQuery, calArgs...)
-	if calendar == nil {
-		calendar = []CalendarDay{}
-	}
-
-	// 计算连续天数
-	activeDays := len(calendar)
-	currStreak := 0
-	longStreak := 0
-	todayStr := time.Now().Format("2006-01-02")
-	dateSet := make(map[string]bool)
-	for _, d := range calendar {
-		dateSet[d.Date] = true
-	}
-
-	// 倒推当前连读
-	checkDay := todayStr
-	if !dateSet[checkDay] {
-		checkDay = time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	}
-	for dateSet[checkDay] {
-		currStreak++
-		t, _ := time.Parse("2006-01-02", checkDay)
-		checkDay = t.AddDate(0, 0, -1).Format("2006-01-02")
-	}
-	longStreak = currStreak
-	if activeDays > longStreak {
-		longStreak = activeDays
-	}
-
-	// 4. TimeOfDay (24 小时)
-	todCond := "WHERE duration_s IS NOT NULL"
-	var todArgs []any
-	if site != "" {
-		todCond = "WHERE site = ? AND duration_s IS NOT NULL"
-		todArgs = append(todArgs, site)
-	}
-
-	todQuery := fmt.Sprintf(`
-		SELECT CAST(strftime('%%H', started_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS h,
-		       COALESCE(SUM(duration_s), 0) AS s
-		FROM reading_sessions
-		%s
-		GROUP BY h
-	`, todCond)
-
-	type todRow struct {
-		H int `db:"h"`
-		S int `db:"s"`
-	}
-	var todRows []todRow
-	_ = s.db.SelectContext(ctx, &todRows, todQuery, todArgs...)
-
+	dayDurations := make(map[string]int)
+	daySet := make(map[string]bool)
 	timeOfDay := make([]int, 24)
-	for _, r := range todRows {
-		if r.H >= 0 && r.H < 24 {
-			timeOfDay[r.H] = r.S
+	var trackedSince, lastActiveAt *int64
+	for _, r := range rows {
+		t := time.UnixMilli(r.StartedAt).In(loc)
+		day := t.Format(dateLayout)
+		dayDurations[day] += r.DurationS
+		daySet[day] = true
+		timeOfDay[t.Hour()] += r.DurationS
+		if trackedSince == nil {
+			v := r.StartedAt
+			trackedSince = &v
 		}
+		v := r.StartedAt
+		lastActiveAt = &v
 	}
 
-	// 5. TopItems
+	// 日历：近 365 天（含今天）
+	calendar := make([]CalendarDay, 0, len(dayDurations))
+	cutoff := today.AddDate(0, 0, -364).Format(dateLayout)
+	for day, dur := range dayDurations {
+		if day < cutoff {
+			continue
+		}
+		calendar = append(calendar, CalendarDay{Date: day, DurationS: dur})
+	}
+	sort.Slice(calendar, func(i, j int) bool { return calendar[i].Date < calendar[j].Date })
+
+	activeDays := len(calendar)
+
+	// 当前连读：今天有记录从今天起算，否则从昨天起算
+	currStreak := 0
+	checkDay := today
+	if !daySet[checkDay.Format(dateLayout)] {
+		checkDay = today.AddDate(0, 0, -1)
+	}
+	for daySet[checkDay.Format(dateLayout)] {
+		currStreak++
+		checkDay = checkDay.AddDate(0, 0, -1)
+	}
+
+	// 最长连读：对全部活跃日排序后扫描连续段
+	allDays := make([]string, 0, len(daySet))
+	for day := range daySet {
+		allDays = append(allDays, day)
+	}
+	sort.Strings(allDays)
+	longStreak := 0
+	run := 0
+	var prev time.Time
+	for i, day := range allDays {
+		d, err := time.ParseInLocation(dateLayout, day, loc)
+		if err != nil {
+			continue
+		}
+		// 按日历日比较，不能用 d.Sub(prev)==24h：夏令时切换日只有 23h 或 25h，
+		// 那样会把连续两天判成断开。
+		if i > 0 && prev.AddDate(0, 0, 1).Equal(d) {
+			run++
+		} else {
+			run = 1
+		}
+		if run > longStreak {
+			longStreak = run
+		}
+		prev = d
+	}
+
 	topQuery := fmt.Sprintf(`
 		SELECT site, kind, item_id AS id,
 		       (SELECT r2.title FROM reading_sessions r2
@@ -263,12 +277,13 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 	`, siteCond)
 
 	var topItems []TopItem
-	_ = s.db.SelectContext(ctx, &topItems, topQuery, args...)
+	if err := s.db.SelectContext(ctx, &topItems, topQuery, args...); err != nil {
+		return nil, err
+	}
 	if topItems == nil {
 		topItems = []TopItem{}
 	}
 
-	// 6. RecentSessions
 	recentQuery := fmt.Sprintf(`
 		SELECT started_at, COALESCE(duration_s, 0) AS duration_s, kind, site, item_id AS id, title
 		FROM reading_sessions
@@ -278,7 +293,9 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 	`, siteCond)
 
 	var recentSessions []RecentSession
-	_ = s.db.SelectContext(ctx, &recentSessions, recentQuery, args...)
+	if err := s.db.SelectContext(ctx, &recentSessions, recentQuery, args...); err != nil {
+		return nil, err
+	}
 	if recentSessions == nil {
 		recentSessions = []RecentSession{}
 	}
@@ -290,14 +307,8 @@ func (s *Store) GetStats(ctx context.Context, site string) (*StatsResult, error)
 		LongestStreak:  longStreak,
 		ThisWeekS:      thisWeekS,
 		ThisMonthS:     thisMonthS,
-	}
-	if trackedSince.Valid {
-		v := trackedSince.Int64
-		summary.TrackedSince = &v
-	}
-	if lastActiveAt.Valid {
-		v := lastActiveAt.Int64
-		summary.LastActiveAt = &v
+		TrackedSince:   trackedSince,
+		LastActiveAt:   lastActiveAt,
 	}
 
 	return &StatsResult{

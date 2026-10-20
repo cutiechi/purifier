@@ -63,13 +63,19 @@ func (s *Store) ListArchivePosts(ctx context.Context, site, q string, page, limi
 		sortExpr = "archived_at"
 	}
 
+	// 主排序键与 tiebreak 相同时不重复排序键（表达式索引才可能被命中）
+	orderClause := fmt.Sprintf("%s %s", sortExpr, orderDir)
+	if sortCol != "tid" && sortCol != "" {
+		orderClause += fmt.Sprintf(", CAST(tid AS INTEGER) %s", orderDir)
+	}
+
 	dataQuery := fmt.Sprintf(`
 		SELECT site, tid, title, first_seen_at, archived_at
 		FROM archive_posts
 		%s
-		ORDER BY %s %s, CAST(tid AS INTEGER) %s
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, whereClause, sortExpr, orderDir, orderDir)
+	`, whereClause, orderClause)
 
 	args = append(args, limit+1, offset)
 
@@ -81,6 +87,9 @@ func (s *Store) ListArchivePosts(ctx context.Context, site, q string, page, limi
 	hasNext := len(items) > limit
 	if hasNext {
 		items = items[:limit]
+	}
+	if items == nil {
+		items = []model.ArchivePost{}
 	}
 
 	res := &ArchiveListResult{
