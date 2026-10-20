@@ -52,8 +52,8 @@ func (s *Service) GetBook(ctx context.Context, cid string, refresh bool) (*BookD
 	}
 
 	if rawHTML == "" {
-		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func() (string, error) {
-			return s.client.Fetch(ctx, pageURL)
+		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, pageURL)
 		})
 		if err != nil {
 			if refresh {
@@ -117,8 +117,8 @@ func (s *Service) GetChapter(ctx context.Context, cid string, chapter int, refre
 	}
 
 	if rawHTML == "" {
-		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func() (string, error) {
-			return s.client.Fetch(ctx, pageURL)
+		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, pageURL)
 		})
 		if err != nil {
 			if refresh {
@@ -223,8 +223,8 @@ func (s *Service) GetHome(ctx context.Context) (*model.CategoryPage, error) {
 
 // GetCategories 书库题材入口（主题浏览 + 有声）
 func (s *Service) GetCategories(ctx context.Context) ([]model.CategoryLink, error) {
-	rawHTML, err := s.client.FetchSingleflight(ctx, "xchina:home:html", func() (string, error) {
-		return s.client.Fetch(ctx, XChinaHomeURL)
+	rawHTML, err := s.client.FetchSingleflight(ctx, "xchina:home:html", func(fctx context.Context) (string, error) {
+		return s.client.Fetch(fctx, XChinaHomeURL)
 	})
 	if err != nil {
 		return nil, err
@@ -234,8 +234,8 @@ func (s *Service) GetCategories(ctx context.Context) ([]model.CategoryLink, erro
 
 // GetTrending 书库今日热读榜
 func (s *Service) GetTrending(ctx context.Context) ([]model.HotPost, error) {
-	rawHTML, err := s.client.FetchSingleflight(ctx, "xchina:home:html", func() (string, error) {
-		return s.client.Fetch(ctx, XChinaHomeURL)
+	rawHTML, err := s.client.FetchSingleflight(ctx, "xchina:home:html", func(fctx context.Context) (string, error) {
+		return s.client.Fetch(fctx, XChinaHomeURL)
 	})
 	if err != nil {
 		return nil, err

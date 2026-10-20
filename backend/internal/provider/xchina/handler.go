@@ -45,11 +45,7 @@ func (h *Handler) HandleGetBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	headers := httputil.ContentCacheHeaders
-	if refresh {
-		headers = httputil.NoStoreHeaders
-	}
-	httputil.JSON(w, http.StatusOK, res, headers)
+	httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 }
 
 func (h *Handler) HandleGetChapter(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +64,5 @@ func (h *Handler) HandleGetChapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	headers := httputil.ContentCacheHeaders
-	if refresh {
-		headers = httputil.NoStoreHeaders
-	}
-	httputil.JSON(w, http.StatusOK, res, headers)
+	httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 }

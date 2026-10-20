@@ -2,6 +2,7 @@ package me
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -57,7 +58,7 @@ func (c *JobController) HandleListJobs(w http.ResponseWriter, r *http.Request) {
 
 	res, err := c.store.ListJobs(r.Context(), q)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -79,15 +80,14 @@ func (c *JobController) HandleStartJob(w http.ResponseWriter, r *http.Request) {
 
 	job, err := c.runner.Start(r.Context(), body.Type, body.Payload)
 	if err != nil {
-		if err.Error() == "unknown job type" {
+		switch {
+		case errors.Is(err, jobs.ErrUnknownJobType):
 			httputil.JSONError(w, http.StatusBadRequest, "unknown job type")
-			return
-		}
-		if err.Error() == "job already running" {
+		case errors.Is(err, jobs.ErrJobAlreadyRunning):
 			httputil.JSONError(w, http.StatusConflict, "job already running")
-			return
+		default:
+			httputil.InternalError(w, err)
 		}
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -105,11 +105,11 @@ func (c *JobController) HandleDeleteJobsBatch(w http.ResponseWriter, r *http.Req
 
 	removed, err := c.store.DeleteFinishedJobsBatch(r.Context(), body.IDs)
 	if err != nil {
-		if err.Error() == "contains active jobs" {
+		if errors.Is(err, storage.ErrActiveJobs) {
 			httputil.JSONError(w, http.StatusConflict, "cannot delete active jobs")
 			return
 		}
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -126,7 +126,7 @@ func (c *JobController) HandleGetJob(w http.ResponseWriter, r *http.Request) {
 
 	job, err := c.store.GetJob(r.Context(), id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if job == nil {
@@ -147,7 +147,7 @@ func (c *JobController) HandleDeleteJob(w http.ResponseWriter, r *http.Request) 
 
 	job, err := c.store.GetJob(r.Context(), id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if job == nil {
@@ -155,7 +155,7 @@ func (c *JobController) HandleDeleteJob(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if job.Status != model.JobStatusFinished && job.Status != model.JobStatusError {
+	if !job.Status.Terminal() {
 		httputil.JSONError(w, http.StatusConflict, "cannot delete running job")
 		return
 	}
@@ -185,7 +185,7 @@ func (c *JobController) HandleGetJobLogs(w http.ResponseWriter, r *http.Request)
 
 	logs, err := c.store.ListJobLogs(r.Context(), id, limit, offset, level, order)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 

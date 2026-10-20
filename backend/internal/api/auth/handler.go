@@ -24,6 +24,12 @@ func NewHandler(cfg *config.Config, svc *auth.Service) *Handler {
 	}
 }
 
+// secureCookies 在 HTTPS 部署时给会话 cookie 加 Secure。
+// 通过 redirect_uri 协议判断：生产 OIDC 回调必然是 https。
+func (h *Handler) secureCookies() bool {
+	return strings.HasPrefix(strings.ToLower(h.cfg.OidcRedirectURI), "https://")
+}
+
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
@@ -88,8 +94,14 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nonce, err := auth.GenerateRandomBase64URL(16)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to generate nonce")
+		return
+	}
+
 	challenge := auth.CodeChallengeS256(verifier)
-	authURL := h.svc.BuildAuthorizeURL(state, challenge)
+	authURL := h.svc.BuildAuthorizeURL(state, challenge, nonce)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.CookieOAuthState,
@@ -97,6 +109,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   auth.OAuthCookieMaxAge,
 		HttpOnly: true,
+		Secure:   h.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -105,6 +118,16 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   auth.OAuthCookieMaxAge,
 		HttpOnly: true,
+		Secure:   h.secureCookies(),
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOAuthNonce,
+		Value:    nonce,
+		Path:     "/",
+		MaxAge:   auth.OAuthCookieMaxAge,
+		HttpOnly: true,
+		Secure:   h.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -146,7 +169,13 @@ func (h *Handler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := h.svc.ExchangeCode(code, verifierCookie.Value)
+	// nonce 缺失只可能是 cookie 过期或跨站重放；ID Token 校验会因此失败。
+	nonce := ""
+	if nonceCookie, err := r.Cookie(auth.CookieOAuthNonce); err == nil {
+		nonce = nonceCookie.Value
+	}
+
+	claims, err := h.svc.ExchangeCode(code, verifierCookie.Value, nonce)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "invalid_grant") {
@@ -170,6 +199,7 @@ func (h *Handler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   auth.SessionMaxAgeSec,
 		HttpOnly: true,
+		Secure:   h.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -183,6 +213,13 @@ func (h *Handler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.CookieOAuthVerifier,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieOAuthNonce,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -202,6 +239,7 @@ func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   h.secureCookies(),
 		SameSite: http.SameSiteLaxMode,
 	})
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": true}, httputil.NoStoreHeaders)

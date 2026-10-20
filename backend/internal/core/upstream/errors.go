@@ -28,6 +28,26 @@ type UpstreamTimeoutError struct {
 
 func (e *UpstreamTimeoutError) Error() string { return e.Message }
 
+// PublicMessage 返回可安全回给客户端的错误文案：领域错误的 Message 是有意写的，
+// 未知错误的原文可能泄露内部细节（文件路径、SQL、代理地址），只回泛化文案。
+func PublicMessage(err error) string {
+	var extractorErr *ExtractorError
+	if errors.As(err, &extractorErr) {
+		return extractorErr.Message
+	}
+	var timeoutErr *UpstreamTimeoutError
+	if errors.As(err, &timeoutErr) {
+		return timeoutErr.Message
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "upstream timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "request aborted"
+	}
+	return "internal server error"
+}
+
 // ErrorStatus 将领域错误映射为 HTTP 状态码；未知错误回退 500。
 func ErrorStatus(err error) (int, string) {
 	if err == nil {
@@ -61,7 +81,7 @@ func ErrorStatus(err error) (int, string) {
 		return 499, "request aborted"
 	}
 
-	return http.StatusInternalServerError, err.Error()
+	return http.StatusInternalServerError, PublicMessage(err)
 }
 
 // UpstreamStatusError 把上游非 2xx 归一为 502（404 例外：视为内容不存在）。

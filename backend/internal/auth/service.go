@@ -22,6 +22,7 @@ const (
 	CookieSession       = "purifier_session"
 	CookieOAuthState    = "purifier_oauth_state"
 	CookieOAuthVerifier = "purifier_oauth_verifier"
+	CookieOAuthNonce    = "purifier_oauth_nonce"
 	SessionMaxAgeSec    = 30 * 24 * 3600 // 30 天
 	OAuthCookieMaxAge   = 10 * 60        // 10 分钟
 )
@@ -32,6 +33,8 @@ type UserClaims struct {
 	Email             string `json:"email,omitempty"`
 	PreferredUsername string `json:"preferred_username,omitempty"`
 	Picture           string `json:"picture,omitempty"`
+	// Nonce 只用于校验 ID Token 与授权请求的对应关系，不写入会话。
+	Nonce string `json:"nonce,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -48,6 +51,9 @@ type Service struct {
 	httpClient *http.Client
 	mu         sync.RWMutex
 	discovery  *OpenIDConfiguration
+	// fallbackUntil 是「discovery 失败后暂用回退端点」的冷却截止时间。
+	// 过期后下次调用会重新尝试 discovery，避免一次启动抖动锁定整个进程生命周期。
+	fallbackUntil time.Time
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -70,6 +76,20 @@ func GenerateRandomBase64URL(n int) (string, error) {
 func CodeChallengeS256(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// audienceMatches 判断 ID Token 的 aud 是否包含本客户端。
+// OIDC Core 3.1.3.7 允许 aud 是字符串或数组。
+func audienceMatches(aud jwt.ClaimStrings, clientID string) bool {
+	if clientID == "" {
+		return false
+	}
+	for _, a := range aud {
+		if a == clientID {
+			return true
+		}
+	}
+	return false
 }
 
 // SignSession 签发包含用户信息的本地会话 JWT
@@ -99,7 +119,10 @@ func (s *Service) VerifySession(tokenStr string) (*UserClaims, error) {
 	return nil, errors.New("invalid session token")
 }
 
-// Discover 动态发现 OIDC 端点配置（带内存缓存与安全回退）
+const discoveryRetryInterval = 5 * time.Minute
+
+// Discover 动态发现 OIDC 端点配置（带内存缓存与安全回退）。
+// 回退端点只用于冷却窗口内，窗口过后会重试真实 discovery。
 func (s *Service) Discover() *OpenIDConfiguration {
 	s.mu.RLock()
 	if s.discovery != nil {
@@ -113,6 +136,9 @@ func (s *Service) Discover() *OpenIDConfiguration {
 	defer s.mu.Unlock()
 	if s.discovery != nil {
 		return s.discovery
+	}
+	if time.Now().Before(s.fallbackUntil) {
+		return s.fallbackEndpoints()
 	}
 
 	issuer := strings.TrimSuffix(s.cfg.OidcIssuer, "/")
@@ -137,9 +163,9 @@ func (s *Service) Discover() *OpenIDConfiguration {
 		}
 	}
 
-	// 回退机制
+	// 回退机制：只记住冷却窗口，不把猜测永久钉死
 	fallback := s.fallbackEndpoints()
-	s.discovery = fallback
+	s.fallbackUntil = time.Now().Add(discoveryRetryInterval)
 	return fallback
 }
 
@@ -169,8 +195,9 @@ func (s *Service) fallbackEndpoints() *OpenIDConfiguration {
 	}
 }
 
-// BuildAuthorizeURL 构造向 OIDC 发起授权跳转的 URL
-func (s *Service) BuildAuthorizeURL(state, challenge string) string {
+// BuildAuthorizeURL 构造向 OIDC 发起授权跳转的 URL。
+// nonce 会被 IdP 原样写回 ID Token，回调时用于拒绝重放的 token。
+func (s *Service) BuildAuthorizeURL(state, challenge, nonce string) string {
 	disc := s.Discover()
 	authEndpoint := disc.AuthorizationEndpoint
 
@@ -182,12 +209,16 @@ func (s *Service) BuildAuthorizeURL(state, challenge string) string {
 	params.Set("state", state)
 	params.Set("code_challenge", challenge)
 	params.Set("code_challenge_method", "S256")
+	if nonce != "" {
+		params.Set("nonce", nonce)
+	}
 
 	return fmt.Sprintf("%s?%s", authEndpoint, params.Encode())
 }
 
-// ExchangeCode 用授权码向 OIDC Token 端点换取 Token 并提取 UserClaims
-func (s *Service) ExchangeCode(code, verifier string) (*UserClaims, error) {
+// ExchangeCode 用授权码向 OIDC Token 端点换取 Token 并提取 UserClaims。
+// nonce 是授权请求里带的值，非空时必须与 ID Token 内的 nonce 一致。
+func (s *Service) ExchangeCode(code, verifier, nonce string) (*UserClaims, error) {
 	disc := s.Discover()
 
 	data := url.Values{}
@@ -236,8 +267,34 @@ func (s *Service) ExchangeCode(code, verifier string) (*UserClaims, error) {
 
 	claims := &UserClaims{}
 	if tr.IDToken != "" {
+		// ID Token 由 token 端点直接返回（TLS + client_secret 认证），
+		// 按 OIDC Core 3.1.3.7 可不再验签；但 iss/aud/exp/nonce 必须校验，
+		// 否则一个来自其它 client 或已过期的 token 会被当成有效身份。
+		// ParseUnverified 只做 base64+JSON 解码，不跑任何 claim 校验，
+		// 所以 exp/iat 必须在这里手工检查。
 		parser := jwt.NewParser()
-		_, _, _ = parser.ParseUnverified(tr.IDToken, claims)
+		if _, _, err := parser.ParseUnverified(tr.IDToken, claims); err != nil {
+			return nil, fmt.Errorf("invalid id token: %w", err)
+		}
+		if disc.Issuer != "" && claims.Issuer != disc.Issuer {
+			return nil, fmt.Errorf("id token issuer mismatch")
+		}
+		if !audienceMatches(claims.Audience, s.cfg.OidcClientID) {
+			return nil, fmt.Errorf("id token audience mismatch")
+		}
+		now := time.Now()
+		if claims.ExpiresAt == nil {
+			return nil, fmt.Errorf("id token missing exp")
+		}
+		if now.After(claims.ExpiresAt.Time) {
+			return nil, fmt.Errorf("id token expired")
+		}
+		if claims.IssuedAt != nil && claims.IssuedAt.Time.After(now.Add(5*time.Minute)) {
+			return nil, fmt.Errorf("id token issued in the future")
+		}
+		if nonce != "" && claims.Nonce != nonce {
+			return nil, fmt.Errorf("id token nonce mismatch")
+		}
 	}
 
 	// 如缺少用户信息且有 AccessToken 与 Userinfo 端点，拉取 userinfo 补全

@@ -7,14 +7,12 @@ import (
 )
 
 type Config struct {
-	Port        int
-	Host        string
-	DataDir     string
-	WebDist     string
-	ProxyURL    string
-	TZ          string
-	DBDriver    string
-	DatabaseURL string
+	Port     int
+	Host     string
+	DataDir  string
+	WebDist  string
+	ProxyURL string
+	TZ       string
 
 	// OIDC 认证配置
 	OidcEnabled      bool
@@ -59,11 +57,6 @@ func Load() *Config {
 		tz = "Asia/Shanghai"
 	}
 
-	dbDriver := os.Getenv("DB_DRIVER")
-	if dbDriver == "" {
-		dbDriver = "sqlite"
-	}
-
 	issuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
 	clientID := strings.TrimSpace(os.Getenv("OIDC_CLIENT_ID"))
 	clientSecret := strings.TrimSpace(os.Getenv("OIDC_CLIENT_SECRET"))
@@ -83,8 +76,6 @@ func Load() *Config {
 		WebDist:          webDist,
 		ProxyURL:         proxyURL,
 		TZ:               tz,
-		DBDriver:         dbDriver,
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		OidcEnabled:      oidcEnabled,
 		OidcIssuer:       issuer,
 		OidcClientID:     clientID,

@@ -46,6 +46,38 @@ type HomeResponse struct {
 	NextMtid *string       `json:"nextMtid,omitempty"`
 }
 
+// GetPostMeta 只解析帖子标题，供补充分组等只需要标题的场景使用：
+// 不抓跟帖、不写阅读历史（避免把用户没点开的帖记进 items）。
+func (s *Service) GetPostMeta(ctx context.Context, tid string) (*PostResponse, error) {
+	if err := upstream.AssertSafeID(tid); err != nil {
+		return nil, upstream.NewExtractorError("invalid tid", http.StatusBadRequest)
+	}
+
+	pageURL := fmt.Sprintf("%s?app=forum&act=threadview&tid=%s", Cool18HomeURL, tid)
+	cacheKey := fmt.Sprintf("%s:post:%s", Cool18SiteID, tid)
+
+	rawHTML := ""
+	if cached, err := upstream.ReadContentCache(s.dataDir, Cool18SiteID, model.KindPost, tid, nil); err == nil && cached != nil {
+		rawHTML = cached.Data
+	}
+	if rawHTML == "" {
+		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, pageURL)
+		})
+		if err != nil {
+			return nil, err
+		}
+		rawHTML = fetched
+		_ = upstream.WriteContentCache(s.dataDir, Cool18SiteID, model.KindPost, tid, rawHTML, nil)
+	}
+
+	extracted, err := ExtractPost(rawHTML)
+	if err != nil {
+		return nil, err
+	}
+	return &PostResponse{Title: extracted.Title, URL: pageURL}, nil
+}
+
 // GetPost 获取帖子正文与跟帖（带二级磁盘缓存与防击穿）
 func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostResponse, error) {
 	if err := upstream.AssertSafeID(tid); err != nil {
@@ -71,8 +103,8 @@ func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostR
 
 	// 2. 缓存未命中或强制刷新
 	if rawHTML == "" {
-		fetchedHTML, err := s.client.FetchSingleflight(ctx, cacheKey, func() (string, error) {
-			return s.client.Fetch(ctx, pageURL)
+		fetchedHTML, err := s.client.FetchSingleflight(ctx, cacheKey, func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, pageURL)
 		})
 		if err != nil {
 			if refresh {
@@ -148,8 +180,8 @@ func (s *Service) getReplies(ctx context.Context, tid string, refresh bool) ([]R
 	}
 
 	if rawJSON == "" {
-		res, err := s.client.FetchSingleflight(ctx, fmt.Sprintf("%s:replies:%s", Cool18SiteID, tid), func() (string, error) {
-			return s.client.Fetch(ctx, repliesURL)
+		res, err := s.client.FetchSingleflight(ctx, fmt.Sprintf("%s:replies:%s", Cool18SiteID, tid), func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, repliesURL)
 		})
 		if err != nil {
 			return []ReplyNode{}, err
@@ -233,8 +265,8 @@ func (s *Service) GetHomePosts(ctx context.Context, mtid string) (*HomeResponse,
 }
 
 func (s *Service) fetchHomeHTML(ctx context.Context) (string, error) {
-	return s.client.FetchSingleflight(ctx, "cool18:home:html", func() (string, error) {
-		return s.client.Fetch(ctx, Cool18HomeURL)
+	return s.client.FetchSingleflight(ctx, "cool18:home:html", func(fctx context.Context) (string, error) {
+		return s.client.Fetch(fctx, Cool18HomeURL)
 	})
 }
 
@@ -245,8 +277,8 @@ const (
 )
 
 func (s *Service) fetchHTML(ctx context.Context, key, targetURL string) (string, error) {
-	return s.client.FetchSingleflight(ctx, key, func() (string, error) {
-		return s.client.Fetch(ctx, targetURL)
+	return s.client.FetchSingleflight(ctx, key, func(fctx context.Context) (string, error) {
+		return s.client.Fetch(fctx, targetURL)
 	})
 }
 
@@ -273,8 +305,8 @@ func (s *Service) GetBook(ctx context.Context, cid string, refresh bool) (*Extra
 	}
 
 	if rawHTML == "" {
-		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func() (string, error) {
-			return s.client.Fetch(ctx, pageURL)
+		fetched, err := s.client.FetchSingleflight(ctx, cacheKey, func(fctx context.Context) (string, error) {
+			return s.client.Fetch(fctx, pageURL)
 		})
 		if err != nil {
 			if refresh {

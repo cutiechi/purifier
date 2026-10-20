@@ -95,17 +95,34 @@ func (c *Client) Fetch(ctx context.Context, targetURL string) (string, error) {
 	return string(utf8Bytes), nil
 }
 
-// FetchSingleflight 针对相同 key 的请求进行协程防击穿
-func (c *Client) FetchSingleflight(ctx context.Context, key string, fetchFn func() (string, error)) (string, error) {
-	v, err, _ := c.sfGroup.Do(key, func() (any, error) {
-		return fetchFn()
+// FetchSingleflight 针对相同 key 的请求进行协程防击穿。
+// 共享抓取不绑定任何一个调用方的 ctx：首个调用方取消不会让同 key 的后来者一起失败；
+// 调用方自己的 ctx 结束时立刻返回，不再干等。
+func (c *Client) FetchSingleflight(ctx context.Context, key string, fetchFn func(context.Context) (string, error)) (string, error) {
+	type result struct {
+		body string
+		err  error
+	}
+	ch := c.sfGroup.DoChan(key, func() (any, error) {
+		// 共享抓取使用独立 ctx（由 http client 超时兜底）
+		return fetchFn(context.Background())
 	})
-	if err != nil {
-		return "", err
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return "", res.Err
+		}
+		r, ok := res.Val.(result)
+		if !ok {
+			s, ok := res.Val.(string)
+			if !ok {
+				return "", errors.New("unexpected type from singleflight")
+			}
+			return s, nil
+		}
+		return r.body, r.err
 	}
-	s, ok := v.(string)
-	if !ok {
-		return "", errors.New("unexpected type from singleflight")
-	}
-	return s, nil
 }

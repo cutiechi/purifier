@@ -42,13 +42,13 @@ func (h *Handler) HandleGetCharacters(w http.ResponseWriter, r *http.Request) {
 
 	scope, err := h.store.ResolveCharacterScope(r.Context(), kind, id)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
 	clusters, err := h.store.ListClusters(r.Context(), scope)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -84,27 +84,27 @@ func (h *Handler) HandlePutCharacters(w http.ResponseWriter, r *http.Request) {
 
 	scope, err := h.store.ResolveCharacterScope(r.Context(), kind, id)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
 	cluster, err := h.store.AddCharacter(r.Context(), scope, name, body.ClusterID)
 	if err != nil {
 		if errors.Is(err, storage.ErrCharacterConflict) {
-			httputil.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+			httputil.JSONError(w, http.StatusConflict, err.Error())
 			return
 		}
 		if errors.Is(err, storage.ErrNotFound) {
 			httputil.JSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"}, httputil.NoStoreHeaders)
 			return
 		}
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
 	clusters, err := h.store.ListClusters(r.Context(), scope)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -130,13 +130,13 @@ func (h *Handler) HandleDeleteCharacters(w http.ResponseWriter, r *http.Request)
 
 	scope, err := h.store.ResolveCharacterScope(r.Context(), kind, id)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
 	removed, err := h.store.RemoveCharacter(r.Context(), scope, name)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *Handler) HandlePatchCharacters(w http.ResponseWriter, r *http.Request) 
 
 	scope, err := h.store.ResolveCharacterScope(r.Context(), kind, id)
 	if err != nil {
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -210,10 +210,10 @@ func (h *Handler) HandlePatchCharacters(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if errors.Is(err, storage.ErrSingletonSplit) || errors.Is(err, storage.ErrInvalidInput) || errors.Is(err, storage.ErrInvalidHue) {
-			httputil.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		httputil.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 

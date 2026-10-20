@@ -48,9 +48,12 @@ type ChapterDetail struct {
 var authorRegex = regexp.MustCompile(`作者[：:]\s*([^·\n]+)`)
 var novelChapterRegex = regexp.MustCompile(`^/novel/([^/]+)/(\d+)`)
 
+// chapterPrefixRegex 匹配「第 N 章 / 第 N 节 / 第 N 回」前缀，
+// N 可能是阿拉伯数字，也可能是中文数字（第一章、第十二回）。
+var chapterPrefixRegex = regexp.MustCompile(`^\s*第\s*[0-9０-９零〇一二三四五六七八九十百千两]+\s*[章节回]\s*`)
+
 func parseChapterTitle(text string) string {
-	re := regexp.MustCompile(`^\s*第\s*\d+\s*章\s*`)
-	stripped := re.ReplaceAllString(text, "")
+	stripped := chapterPrefixRegex.ReplaceAllString(text, "")
 	if strings.TrimSpace(stripped) != "" {
 		return strings.TrimSpace(stripped)
 	}

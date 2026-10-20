@@ -2,6 +2,7 @@ package httputil
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"purifier/internal/core/upstream"
@@ -19,6 +20,15 @@ var (
 	}
 )
 
+// ContentHeaders 是正文类响应的统一缓存策略：刷新或回退旧缓存时不可缓存。
+// v1 与兼容层必须共用这一处，避免两套路由的头分叉。
+func ContentHeaders(refresh, stale bool) map[string]string {
+	if refresh || stale {
+		return NoStoreHeaders
+	}
+	return ContentCacheHeaders
+}
+
 func JSON(w http.ResponseWriter, status int, data any, headers map[string]string) {
 	for k, v := range headers {
 		w.Header().Set(k, v)
@@ -28,6 +38,12 @@ func JSON(w http.ResponseWriter, status int, data any, headers map[string]string
 	if data != nil {
 		_ = json.NewEncoder(w).Encode(data)
 	}
+}
+
+// InternalError 记录真实错误并只回泛化文案，避免把 SQL/路径/代理细节泄露给客户端。
+func InternalError(w http.ResponseWriter, err error) {
+	log.Printf("[error] %v", err)
+	JSONError(w, http.StatusInternalServerError, "internal server error")
 }
 
 func JSONError(w http.ResponseWriter, status int, msg string) {

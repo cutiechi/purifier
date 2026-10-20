@@ -37,22 +37,33 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 
 	// 基础中间件
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// RealIP 会无条件信任 X-Forwarded-For / X-Real-IP。只有在反向代理后面
+	// 才应启用（TRUST_PROXY=1），否则任何能直连端口的客户端都能伪造来源 IP，
+	// 绕过按 IP 的限流。
+	if trustProxy() {
+		r.Use(middleware.RealIP)
+	}
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// CORS 跨域配置
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// CORS：本应用同源部署（SPA 由本服务托管），不放行任意源携带凭据。
+	// 需要跨源调试时用 ALLOWED_ORIGINS 显式列出。
+	if origins := parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS")); len(origins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   origins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+			ExposedHeaders:   []string{"Link"},
+			AllowCredentials: true,
+			MaxAge:           300,
+		}))
+	}
 
 	// 1. API 路由
 	r.Route("/api", func(r chi.Router) {
+		// 请求体上限：所有写接口共用，挡住把整库塞进内存的解码。
+		r.Use(limitBodyMiddleware)
+
 		// 健康检查
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			httputil.JSON(w, http.StatusOK, map[string]string{
@@ -87,7 +98,13 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			r.Mount("/me", deps.MeHandler)
 		})
 
-		r.Get("/posts", func(w http.ResponseWriter, r *http.Request) {
+		// 列表类接口统一套一层短 TTL 进程缓存（refresh=1 绕过）
+		listCached := func(h http.HandlerFunc) http.HandlerFunc {
+			cached := listCacheMiddleware(h)
+			return func(w http.ResponseWriter, r *http.Request) { cached.ServeHTTP(w, r) }
+		}
+
+		r.Get("/posts", listCached(func(w http.ResponseWriter, r *http.Request) {
 			site, err := resolveSiteParam(r.URL.Query().Get("site"))
 			if err != nil {
 				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
@@ -112,6 +129,17 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				return
 			}
 
+			if tid != "" && r.URL.Query().Get("meta") == "1" {
+				// 只取标题：补充分组等场景不需要正文/跟帖，也不应写阅读历史
+				res, err := deps.Cool18Service.GetPostMeta(r.Context(), tid)
+				if err != nil {
+					httputil.Error(w, err)
+					return
+				}
+				httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(false, false))
+				return
+			}
+
 			if tid != "" {
 				// 获取单帖
 				refresh := r.URL.Query().Get("refresh") == "1"
@@ -120,11 +148,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 					httputil.Error(w, err)
 					return
 				}
-				headers := httputil.ContentCacheHeaders
-				if refresh || res.Stale {
-					headers = httputil.NoStoreHeaders
-				}
-				httputil.JSON(w, http.StatusOK, res, headers)
+				httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 				return
 			}
 
@@ -135,7 +159,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				return
 			}
 			httputil.JSON(w, http.StatusOK, res, httputil.ListCacheHeaders)
-		})
+		}))
 
 		r.Get("/books/home", deps.XChinaHandler.HandleGetHome)
 		r.Get("/books", func(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +187,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 					httputil.Error(w, err)
 					return
 				}
-				headers := httputil.ContentCacheHeaders
-				if refresh || res.Stale {
-					headers = httputil.NoStoreHeaders
-				}
-				httputil.JSON(w, http.StatusOK, res, headers)
+				httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 				return
 			}
 
@@ -182,11 +202,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 					httputil.Error(w, err)
 					return
 				}
-				headers := httputil.ContentCacheHeaders
-				if refresh || res.Stale {
-					headers = httputil.NoStoreHeaders
-				}
-				httputil.JSON(w, http.StatusOK, res, headers)
+				httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 				return
 			}
 
@@ -195,11 +211,7 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				httputil.Error(w, err)
 				return
 			}
-			headers := httputil.ContentCacheHeaders
-			if refresh || res.Stale {
-				headers = httputil.NoStoreHeaders
-			}
-			httputil.JSON(w, http.StatusOK, res, headers)
+			httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 		})
 
 		r.Get("/categories", func(w http.ResponseWriter, r *http.Request) {
@@ -235,10 +247,10 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				handler(w, r)
 			}
 		}
-		r.Get("/featured", unsupportedOnLibrary("featured", deps.Cool18Handler.HandleFeatured))
-		r.Get("/picks", unsupportedOnLibrary("picks", deps.Cool18Handler.HandlePicks))
-		r.Get("/comments", unsupportedOnLibrary("comments", deps.Cool18Handler.HandleComments))
-		r.Get("/trending", func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/featured", listCached(unsupportedOnLibrary("featured", deps.Cool18Handler.HandleFeatured)))
+		r.Get("/picks", listCached(unsupportedOnLibrary("picks", deps.Cool18Handler.HandlePicks)))
+		r.Get("/comments", listCached(unsupportedOnLibrary("comments", deps.Cool18Handler.HandleComments)))
+		r.Get("/trending", listCached(func(w http.ResponseWriter, r *http.Request) {
 			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
 			if siteErr != nil {
 				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
@@ -254,8 +266,8 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				return
 			}
 			deps.Cool18Handler.HandleTrending(w, r)
-		})
-		r.Get("/browse", func(w http.ResponseWriter, r *http.Request) {
+		}))
+		r.Get("/browse", listCached(func(w http.ResponseWriter, r *http.Request) {
 			site, siteErr := resolveSiteParam(r.URL.Query().Get("site"))
 			if siteErr != nil {
 				httputil.JSONError(w, http.StatusBadRequest, "invalid site")
@@ -277,8 +289,10 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 				return
 			}
 			deps.Cool18Handler.HandleBrowse(w, r)
-		})
-		r.Get("/search", NewSearchHandler(deps.Cool18Service, deps.XChinaService).HandleSearch)
+		}))
+		// 搜索一个请求会并发打两个上游，按客户端 IP 限流。
+		searchLimiter := newRateLimiter(20, time.Minute)
+		r.With(searchLimiter.middleware).Get("/search", NewSearchHandler(deps.Cool18Service, deps.XChinaService).HandleSearch)
 	})
 
 	// 2. 前端 SPA 静态托管及回退
@@ -289,6 +303,17 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 	}
 
 	return r
+}
+
+// trustProxy 报告是否信任反向代理写入的转发头。
+// 生产部署在 Nginx Proxy Manager 后面时设 TRUST_PROXY=1。
+func trustProxy() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TRUST_PROXY"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func strconvAtoi(s string) (int, error) {
@@ -342,4 +367,15 @@ func fileServer(r chi.Router, path string, root http.FileSystem) {
 
 		fs.ServeHTTP(w, req)
 	})
+}
+
+// parseAllowedOrigins 解析逗号分隔的允许来源列表。
+func parseAllowedOrigins(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if o := strings.TrimSpace(part); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }

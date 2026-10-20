@@ -16,16 +16,22 @@ import (
 )
 
 type Handler struct {
-	store   *storage.Store
-	jobCtrl *JobController
-	dataDir string
+	store    *storage.Store
+	jobCtrl  *JobController
+	dataDir  string
+	location *time.Location
 }
 
 func NewHandler(store *storage.Store, runner *jobs.JobRunner, dataDir string) *Handler {
+	loc := time.Local
+	if loc == nil {
+		loc = time.UTC
+	}
 	return &Handler{
-		store:   store,
-		jobCtrl: NewJobController(store, runner),
-		dataDir: dataDir,
+		store:    store,
+		jobCtrl:  NewJobController(store, runner),
+		dataDir:  dataDir,
+		location: loc,
 	}
 }
 
@@ -91,7 +97,7 @@ func (h *Handler) HandleListHistory(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.store.ListHistory(r.Context(), q)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -103,7 +109,7 @@ func (h *Handler) HandleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 		site := r.URL.Query().Get("site")
 		removed, err := h.store.ClearHistory(r.Context(), site)
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.InternalError(w, err)
 			return
 		}
 		httputil.JSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed}, httputil.NoStoreHeaders)
@@ -118,7 +124,7 @@ func (h *Handler) HandleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && len(body.Items) > 0 {
 			removed, err := h.store.DeleteHistoryBatch(r.Context(), body.Items)
 			if err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				httputil.InternalError(w, err)
 				return
 			}
 			httputil.JSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed}, httputil.NoStoreHeaders)
@@ -136,7 +142,7 @@ func (h *Handler) HandleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 
 	if id != "" && kind != "" {
 		if err := h.store.PurgeItem(r.Context(), site, kind, id); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.InternalError(w, err)
 			return
 		}
 		httputil.JSON(w, http.StatusOK, map[string]any{"ok": true, "removed": 1}, httputil.NoStoreHeaders)
@@ -159,7 +165,7 @@ func (h *Handler) HandleListFavorites(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.store.ListFavorites(r.Context(), q)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -175,7 +181,7 @@ func (h *Handler) HandleAddFavorite(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := h.store.AddFavorite(r.Context(), site, kind, id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if !ok {
@@ -194,7 +200,7 @@ func (h *Handler) HandleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.RemoveFavorite(r.Context(), site, kind, id); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": true}, httputil.NoStoreHeaders)
@@ -204,7 +210,7 @@ func (h *Handler) HandleGetTags(w http.ResponseWriter, r *http.Request) {
 	site := r.URL.Query().Get("site")
 	tags, err := h.store.GetTags(r.Context(), site)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"tags": tags}, httputil.NoStoreHeaders)
@@ -227,7 +233,7 @@ func (h *Handler) HandleUpdateTags(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := h.store.UpdateTags(r.Context(), body.Site, model.ItemKind(body.Kind), body.ID, body.Tags)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if !ok {
@@ -243,7 +249,7 @@ func (h *Handler) HandleDeleteTag(w http.ResponseWriter, r *http.Request) {
 
 	removed, err := h.store.DeleteTag(r.Context(), tag, site)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed}, httputil.NoStoreHeaders)
@@ -263,7 +269,7 @@ func (h *Handler) HandleListItemsByTag(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.store.ListItemsByTag(r.Context(), tag, q)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -279,7 +285,7 @@ func (h *Handler) HandleGetState(w http.ResponseWriter, r *http.Request) {
 
 	state, err := h.store.GetState(r.Context(), site, kind, id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if state == nil {
@@ -307,7 +313,7 @@ func (h *Handler) HandleSetProgress(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := h.store.SetProgress(r.Context(), body.Site, model.ItemKind(body.Kind), body.ID, body.Progress, body.Chapter)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if !ok {
@@ -335,7 +341,7 @@ func (h *Handler) HandleListBookmarks(w http.ResponseWriter, r *http.Request) {
 		}
 		items, err := h.store.ListBookmarksByItem(r.Context(), site, kind, id, chapter)
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.InternalError(w, err)
 			return
 		}
 		httputil.JSON(w, http.StatusOK, map[string]any{"items": items}, httputil.NoStoreHeaders)
@@ -351,7 +357,7 @@ func (h *Handler) HandleListBookmarks(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.store.ListBookmarks(r.Context(), q, kind, page)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -387,15 +393,14 @@ func (h *Handler) HandleAddBookmark(w http.ResponseWriter, r *http.Request) {
 
 	detail, err := h.store.AddBookmark(r.Context(), bm)
 	if err != nil {
-		if err.Error() == "item not found" {
+		switch {
+		case errors.Is(err, storage.ErrItemNotFound):
 			httputil.JSONError(w, http.StatusNotFound, "item not found")
-			return
-		}
-		if err.Error() == "bookmark limit reached" {
+		case errors.Is(err, storage.ErrBookmarkLimit):
 			httputil.JSONError(w, http.StatusConflict, "bookmark limit reached (max 50)")
-			return
+		default:
+			httputil.InternalError(w, err)
 		}
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -419,7 +424,7 @@ func (h *Handler) HandleUpdateBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.UpdateBookmarkNote(r.Context(), id, body.Note); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": true}, httputil.NoStoreHeaders)
@@ -435,7 +440,7 @@ func (h *Handler) HandleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 
 	removed, err := h.store.DeleteBookmark(r.Context(), id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": removed, "removed": removed}, httputil.NoStoreHeaders)
@@ -448,7 +453,7 @@ func (h *Handler) HandleArchiveStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.store.GetArchiveStatus(r.Context(), site)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -473,7 +478,7 @@ func (h *Handler) HandleListArchive(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.store.ListArchivePosts(r.Context(), site, q, page, limit, sort, order)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -483,7 +488,7 @@ func (h *Handler) HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	// 必须走 upstream.ClearContentCache：它同时失效内存 L1，否则清盘后仍命中旧内存
 	cleared, err := upstream.ClearContentCache(h.dataDir)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]int{"cleared": cleared}, httputil.NoStoreHeaders)
@@ -506,7 +511,7 @@ func (h *Handler) HandleRecordSession(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusBadRequest, "invalid session payload")
 			return
 		}
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -515,9 +520,9 @@ func (h *Handler) HandleRecordSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	site := r.URL.Query().Get("site")
-	res, err := h.store.GetStats(r.Context(), site)
+	res, err := h.store.GetStats(r.Context(), site, h.location)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -528,22 +533,19 @@ func (h *Handler) HandleListGroups(w http.ResponseWriter, r *http.Request) {
 		Q:         r.URL.Query().Get("q"),
 		Favorited: r.URL.Query().Get("favorited") == "1",
 		Sort:      r.URL.Query().Get("sort"),
+		Key:       r.URL.Query().Get("key"),
 	}
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil {
+	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
 		q.Page = p
 	}
-	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
 		q.Limit = l
 	}
 
+	// 分组列表强制分页：历史库有上万组，全量返回是十几 MB 的响应。
 	res, err := h.store.ListGroups(r.Context(), q)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if q.Page <= 0 && q.Limit <= 0 {
-		httputil.JSON(w, http.StatusOK, map[string]any{"groups": res.Items}, httputil.NoStoreHeaders)
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, res, httputil.NoStoreHeaders)
@@ -579,7 +581,11 @@ func (h *Handler) HandleUpsertGroup(w http.ResponseWriter, r *http.Request) {
 
 	group, err := h.store.UpsertGroup(r.Context(), body.Key, body.Title, body.Author, body.Genre, members)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		if errors.Is(err, storage.ErrTidInOtherGroup) {
+			httputil.JSONError(w, http.StatusConflict, "tid already in another group")
+			return
+		}
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -596,7 +602,7 @@ func (h *Handler) HandleGetGroup(w http.ResponseWriter, r *http.Request) {
 
 	group, err := h.store.GetGroup(r.Context(), id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if group == nil {
@@ -616,7 +622,7 @@ func (h *Handler) HandleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.DeleteGroup(r.Context(), id); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	httputil.JSON(w, http.StatusOK, map[string]bool{"ok": true}, httputil.NoStoreHeaders)
@@ -649,7 +655,7 @@ func (h *Handler) HandleDeleteGroupItems(w http.ResponseWriter, r *http.Request)
 
 	removed, deleted, err := h.store.DeleteGroupItems(r.Context(), id, tids)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 
@@ -670,7 +676,7 @@ func (h *Handler) HandleFavoriteGroup(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := h.store.ToggleGroupFavorite(r.Context(), id, true)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if !ok {
@@ -690,7 +696,7 @@ func (h *Handler) HandleUnfavoriteGroup(w http.ResponseWriter, r *http.Request) 
 
 	ok, err := h.store.ToggleGroupFavorite(r.Context(), id, false)
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.InternalError(w, err)
 		return
 	}
 	if !ok {

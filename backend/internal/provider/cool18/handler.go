@@ -53,11 +53,7 @@ func (h *Handler) HandleGetPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	headers := httputil.ContentCacheHeaders
-	if refresh || res.Stale {
-		headers = httputil.NoStoreHeaders
-	}
-	httputil.JSON(w, http.StatusOK, res, headers)
+	httputil.JSON(w, http.StatusOK, res, httputil.ContentHeaders(refresh, res.Stale))
 }
 
 func (h *Handler) HandleCategories(w http.ResponseWriter, r *http.Request) {
