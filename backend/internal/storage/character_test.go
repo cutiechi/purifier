@@ -1,7 +1,9 @@
 package storage_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"purifier/internal/model"
@@ -115,13 +117,21 @@ func TestCharactersLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 removed, got %d", removed)
 	}
 
-	// 9. 导出备份测试
-	backup, err := store.ExportBackup(ctx)
-	if err != nil {
+	// 9. 导出备份测试：流式输出必须是完整可解析 JSON，且包含角色表
+	var buf bytes.Buffer
+	if err := store.ExportBackup(ctx, &buf); err != nil {
 		t.Fatalf("export backup failed: %v", err)
 	}
-	if backup.Version != 3 {
-		t.Fatalf("expected backup version 3, got %d", backup.Version)
+	var backup struct {
+		Version        int              `json:"version"`
+		CharacterNames []map[string]any `json:"character_names"`
+		Items          []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &backup); err != nil {
+		t.Fatalf("exported backup is not valid json: %v", err)
+	}
+	if backup.Version != storage.ExportVersion {
+		t.Fatalf("expected backup version %d, got %d", storage.ExportVersion, backup.Version)
 	}
 	if len(backup.CharacterNames) != 2 {
 		t.Fatalf("expected 2 character names, got %d", len(backup.CharacterNames))
