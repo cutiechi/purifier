@@ -62,7 +62,7 @@ type Group struct {
 	FavoritedAt *int64      `json:"favorited_at,omitempty" db:"favorited_at"`
 	CreatedAt   int64       `json:"created_at" db:"created_at"`
 	UpdatedAt   int64       `json:"updated_at" db:"updated_at"`
-	Items       []GroupItem `json:"items,omitempty"`
+	Items       []GroupItem `json:"items"`
 }
 
 type GroupItem struct {
@@ -75,12 +75,22 @@ type GroupItem struct {
 type JobStatus string
 
 const (
-	JobStatusPending  JobStatus = "pending"
-	JobStatusRunning  JobStatus = "running"
-	JobStatusPaused   JobStatus = "paused"
-	JobStatusFinished JobStatus = "finished"
-	JobStatusError    JobStatus = "error"
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusPaused    JobStatus = "paused"
+	JobStatusFinished  JobStatus = "finished"
+	JobStatusError     JobStatus = "error"
+	JobStatusCancelled JobStatus = "cancelled"
 )
+
+// Terminal 报告任务是否已进入终态（finished / error / cancelled）。
+func (s JobStatus) Terminal() bool {
+	switch s {
+	case JobStatusFinished, JobStatusError, JobStatusCancelled:
+		return true
+	}
+	return false
+}
 
 type Job struct {
 	ID         int64     `json:"id" db:"id"`

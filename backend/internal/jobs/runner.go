@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -11,6 +12,9 @@ import (
 	"purifier/internal/model"
 	"purifier/internal/storage"
 )
+
+// maxJobLogsKept 是单个任务保留的日志条数上限。
+const maxJobLogsKept = 2000
 
 type JobContext struct {
 	JobID   int64
@@ -87,6 +91,7 @@ type JobRunner struct {
 	running      map[int64]*runningHandle
 	runningTypes map[string]bool
 	mu           sync.RWMutex
+	wg           sync.WaitGroup
 }
 
 func NewRunner(store *storage.Store) *JobRunner {
@@ -152,12 +157,12 @@ func (r *JobRunner) Start(ctx context.Context, jobType string, payload map[strin
 	handler, ok := r.handlers[jobType]
 	if !ok {
 		r.mu.Unlock()
-		return nil, errors.New("unknown job type")
+		return nil, ErrUnknownJobType
 	}
 
 	if r.runningTypes[jobType] {
 		r.mu.Unlock()
-		return nil, errors.New("job already running")
+		return nil, ErrJobAlreadyRunning
 	}
 
 	hasRunning, err := r.store.HasRunningOfType(ctx, jobType)
@@ -167,7 +172,7 @@ func (r *JobRunner) Start(ctx context.Context, jobType string, payload map[strin
 	}
 	if hasRunning {
 		r.mu.Unlock()
-		return nil, errors.New("job already running")
+		return nil, ErrJobAlreadyRunning
 	}
 
 	var payloadStr *string
@@ -214,11 +219,11 @@ func (r *JobRunner) resume(jobID int64, jobType string, payload map[string]any) 
 	handler, ok := r.handlers[jobType]
 	if !ok {
 		r.mu.Unlock()
-		return nil, errors.New("unknown job type")
+		return nil, ErrUnknownJobType
 	}
 	if r.runningTypes[jobType] {
 		r.mu.Unlock()
-		return nil, errors.New("job already running")
+		return nil, ErrJobAlreadyRunning
 	}
 
 	started, err := r.store.MarkRunning(context.Background(), jobID)
@@ -252,7 +257,9 @@ func (r *JobRunner) launchLocked(handler JobHandler, jobID int64, jobType string
 	r.running[jobID] = handle
 	r.runningTypes[jobType] = true
 
+	r.wg.Add(1)
 	go func() {
+		defer r.wg.Done()
 		defer func() {
 			r.mu.Lock()
 			delete(r.running, jobID)
@@ -269,7 +276,22 @@ func (r *JobRunner) launchLocked(handler JobHandler, jobID int64, jobType string
 			handle:  handle,
 		}
 
-		result, runErr := handler.Run(c)
+		// 任务 goroutine 没有 HTTP Recoverer 兜底：panic 必须就地收尾成 error，
+		// 否则会打死整个进程。
+		var (
+			result any
+			runErr error
+		)
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("[jobs] job %d (%s) panicked: %v", jobID, jobType, rec)
+					runErr = fmt.Errorf("job panicked: %v", rec)
+				}
+			}()
+			result, runErr = handler.Run(c)
+		}()
+
 		var resStr *string
 		if result != nil {
 			if b, err := json.Marshal(result); err == nil {
@@ -280,16 +302,27 @@ func (r *JobRunner) launchLocked(handler JobHandler, jobID int64, jobType string
 
 		status := model.JobStatusFinished
 		var errMsg *string
-		if runErr != nil {
+		switch {
+		case errors.Is(runErr, ErrJobStopped), errors.Is(runErr, context.Canceled):
+			// 主动停止是正常终态，不能与崩溃共用 error
+			status = model.JobStatusCancelled
+			msg := "stopped by user"
+			errMsg = &msg
+			log.Printf("[jobs] job %d (%s) stopped by user", jobID, jobType)
+		case runErr != nil:
 			status = model.JobStatusError
 			s := runErr.Error()
 			errMsg = &s
 			log.Printf("[jobs] job %d (%s) finished with error: %v", jobID, jobType, runErr)
-		} else {
+		default:
 			log.Printf("[jobs] job %d (%s) finished successfully", jobID, jobType)
 		}
 
 		_ = r.store.MarkFinished(context.Background(), jobID, status, resStr, errMsg)
+		// 长期任务会堆出几千条日志，收尾时只保留最近一段
+		if _, err := r.store.PruneJobLogs(context.Background(), jobID, maxJobLogsKept); err != nil {
+			log.Printf("[jobs] prune logs for job %d failed: %v", jobID, err)
+		}
 	}()
 }
 
@@ -350,4 +383,40 @@ func (r *JobRunner) Resume(ctx context.Context, jobID int64) bool {
 	h.paused = false
 	close(h.resumeCh)
 	return true
+}
+
+// StopAll 取消全部运行中的任务，返回被取消的数量。停机时先调用它，
+// 让任务在自己的 goroutine 里把游标写成 aborted 再退出。
+func (r *JobRunner) StopAll() int {
+	r.mu.Lock()
+	handles := make([]*runningHandle, 0, len(r.running))
+	for _, h := range r.running {
+		handles = append(handles, h)
+	}
+	r.mu.Unlock()
+	for _, h := range handles {
+		h.cancel()
+	}
+	return len(handles)
+}
+
+// Wait 等待任务 goroutine 收尾，最多等 timeout。
+func (r *JobRunner) Wait(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		log.Printf("[jobs] shutdown timed out waiting for %d running job(s)", r.RunningCount())
+	}
+}
+
+// RunningCount 返回仍在运行的任务数。
+func (r *JobRunner) RunningCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.running)
 }

@@ -55,7 +55,7 @@ func TestJobRunnerLifecycle(t *testing.T) {
 	}
 
 	// 3. 等待完成
-	time.Sleep(150 * time.Millisecond)
+	waitForStatus(t, store, job.ID, "finished", 10*time.Second)
 
 	finishedJob, err := store.GetJob(ctx, job.ID)
 	if err != nil {
@@ -87,8 +87,19 @@ func (h *pausingHandler) Run(ctx *JobContext) (any, error) {
 	case h.entered <- struct{}{}:
 	default:
 	}
-	if err := ctx.Checkpoint(); err != nil {
-		return nil, err
+	// 持续经过检查点：暂停请求可能在本 goroutine 首次 Checkpoint 之后才到，
+	// 单次检查点会让任务先跑完，测试随调度抖动。
+	for range 100 {
+		if err := ctx.Checkpoint(); err != nil {
+			return nil, err
+		}
+		if err := ctx.Sleep(5 * time.Millisecond); err != nil {
+			return nil, err
+		}
+		select {
+		case h.entered <- struct{}{}:
+		default:
+		}
 	}
 	return map[string]any{"ok": true}, nil
 }
@@ -217,7 +228,7 @@ func TestPausedJobResumesAfterRestart(t *testing.T) {
 	r2.RecoverOnStartup(ctx)
 
 	// 恢复后不应停在 paused（死状态），最终应完成
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		cur, err := store.GetJob(ctx, job.ID)
 		if err != nil {
@@ -233,4 +244,22 @@ func TestPausedJobResumesAfterRestart(t *testing.T) {
 	}
 	cur, _ := store.GetJob(ctx, job.ID)
 	t.Fatalf("paused job stuck after restart, status=%s", cur.Status)
+}
+
+// waitForStatus 轮询任务状态，避免用固定 sleep 在慢机器上抖动。
+func waitForStatus(t *testing.T, store *storage.Store, id int64, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		cur, err := store.GetJob(context.Background(), id)
+		if err != nil {
+			t.Fatalf("get job: %v", err)
+		}
+		if cur != nil && string(cur.Status) == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cur, _ := store.GetJob(context.Background(), id)
+	t.Fatalf("job %d did not reach %s within %s (status=%v)", id, want, timeout, cur)
 }
