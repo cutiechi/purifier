@@ -216,15 +216,20 @@ docker run -p 3000:3000 purifier:latest
 
 ### 1. 部署架构信息
 
-- **目标主机**：`oracle-cloud` (CPU: `aarch64` / ARM64)
+- **目标主机**：`oracle-cloud` (CPU: `aarch64` / ARM64，4 核 / 22G)
+- **源码构建目录**：`~/sources/purifier`（rsync 同步的构建副本，不是权威源；权威源始终是本地工作区）
 - **Compose 目录**：`~/composes/purifier/compose.yaml`
 - **持久化数据**：`~/datas/purifier`（挂载至容器内部 `/data`，包含 SQLite 库 `purifier.db` 及二级磁盘缓存 `cache/`）
 - **外部网络**：`my-bridge` (通过 Nginx Proxy Manager 反向代理提供 HTTPS 访问)
-- **镜像名称**：`ghcr.io/cutiechi/purifier:latest`
+- **镜像名称**：`purifier:latest`（远端本地构建，**不带 registry 前缀**）
 
-### 2. 标准更新与发布流程 (Local Build -> SCP -> Remote Deploy)
+镜像名不带 registry 前缀是硬约束：只要标签带 `ghcr.io/...`，`compose up`、`docker pull`、Watchtower 任一路径都可能把线上换回 GHCR 的旧镜像。仓库内已删除 GitHub Actions 构建 workflow，GHCR 不再是镜像来源。
 
-因为生产环境属于 ARM64 架构且建议节省服务器编译资源，采用本地跨平台/原生编译构建产物并通过 SCP 同步发布：
+purifier 通过 `com.centurylinklabs.watchtower.enable=false` 排除在 Watchtower 之外（容器级 label，不改全局 `WATCHTOWER_DISABLE_CONTAINERS`）。**禁止**给它加回自动更新，镜像只能由本流程产出。
+
+### 2. 标准更新与发布流程 (Rsync Source -> Remote Build -> Deploy)
+
+生产环境原生 arm64，直接在服务器上构建：源码只有 1.6MB / 217 文件，rsync 耗时 ~1s；首次构建 ~53s（基础镜像已预热），改代码后命中 BuildKit 缓存约 3s。不要再用 `docker save` 传镜像。
 
 #### Step 1: 远程数据与配置安全备份（发布前必须执行）
 
@@ -232,40 +237,42 @@ docker run -p 3000:3000 purifier:latest
 # 1. 备份数据目录 (SQLite 与缓存)
 ssh oracle-cloud "tar -czvf ~/datas/purifier-backup-\$(date +%Y%m%d%H%M%S).tar.gz -C ~/datas purifier"
 
-# 2. 备份当前运行镜像 Tag
-ssh oracle-cloud "docker tag ghcr.io/cutiechi/purifier:latest ghcr.io/cutiechi/purifier:backup-\$(date +%Y%m%d%H%M%S)"
-
-# 3. 备份 Compose 配置文件
+# 2. 备份 Compose 配置文件
 ssh oracle-cloud "cp ~/composes/purifier/compose.yaml ~/composes/purifier/compose.yaml.bak-\$(date +%Y%m%d%H%M%S)"
 ```
 
-#### Step 2: 本地构建 ARM64 生产镜像并打包
+#### Step 2: 同步源码并打回滚点
 
 ```bash
-# 1. 本地构建 linux/arm64 镜像
-docker build --platform linux/arm64 -t ghcr.io/cutiechi/purifier:latest .
+rsync -az --delete \
+  --exclude '.git' \
+  --exclude 'node_modules' \
+  --exclude 'frontend/node_modules' \
+  --exclude 'frontend/dist' \
+  --exclude 'data' \
+  --exclude 'backend/bin' \
+  --exclude '.worktrees' \
+  --exclude '.DS_Store' \
+  ./ oracle-cloud:~/sources/purifier/
 
-# 2. 导出并压缩镜像（约 9MB~20MB，耗时数秒）
-docker save ghcr.io/cutiechi/purifier:latest | gzip > purifier-latest-arm64.tar.gz
-
-# 3. SCP 传输到远程主机
-scp purifier-latest-arm64.tar.gz oracle-cloud:~/
-
-# 4. 清理本地临时文件
-rm purifier-latest-arm64.tar.gz
+# 回滚点必须在 build 之前打，否则备份到的是新镜像
+ssh oracle-cloud "docker tag purifier:latest purifier:backup-\$(date +%Y%m%d%H%M%S)"
 ```
 
-#### Step 3: 远程加载镜像并更新服务
+`--delete` 会清掉远端构建副本里已删除的文件，保证构建内容与本地一致；因为构建目录只放源码，该行为是安全的。
+
+#### Step 3: 远端构建并重建容器
 
 ```bash
-# 1. 在远程加载新镜像并删除传输包
-ssh oracle-cloud "docker load -i ~/purifier-latest-arm64.tar.gz && rm ~/purifier-latest-arm64.tar.gz"
+ssh oracle-cloud "cd ~/sources/purifier && docker build -t purifier:latest ."
 
-# 2. 确保挂载目录具备容器非 root 用户读写权限
-ssh oracle-cloud "chmod -R a+rwX ~/datas/purifier"
-
-# 3. 重建并启动容器
 ssh oracle-cloud "cd ~/composes/purifier && docker compose up -d --force-recreate"
+```
+
+构建产物自检（可选，改动涉及抓取/前端时建议做）：
+
+```bash
+ssh oracle-cloud "docker run --rm --entrypoint sh purifier:latest -c 'ls /app/purifier /app/web | head'"
 ```
 
 #### Step 4: 服务健康与功能验证
@@ -279,6 +286,16 @@ ssh oracle-cloud "docker exec purifier wget -qO- http://127.0.0.1:3000/api/healt
 
 # 检查最新容器启动日志
 ssh oracle-cloud "docker logs --tail 50 purifier"
+```
+
+上线要看到容器 `Up (healthy)`，且 `docker inspect purifier` 的 `.Image` 是刚构建的 ID。镜像构建成功不代表线上换了镜像，这两步都要看。
+
+#### 镜像清理
+
+`backup-*` tag 只保留最近 3 个，避免镜像堆积（该机 build cache 已占数十 GB）：
+
+```bash
+ssh oracle-cloud "docker images purifier --format '{{.Tag}}' | grep '^backup-' | sort -r | tail -n +4 | xargs -r -I{} docker rmi purifier:{}"
 ```
 
 ### 3. Compose 参考配置 (`composes/purifier/compose.yaml`)
@@ -308,7 +325,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    image: ghcr.io/cutiechi/purifier:latest
+    image: purifier:latest
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
     networks:
       - my-bridge
     restart: always
@@ -318,18 +337,21 @@ services:
 
 ### 4. 故障快速回滚流程
 
-若上线后出现异常需紧急回退：
+若上线后出现异常需紧急回退（镜像全部在本地，无需拉取远端仓库）：
 
 ```bash
-# 1. 恢复镜像至备份版本
-ssh oracle-cloud "docker tag ghcr.io/cutiechi/purifier:backup-<TIMESTAMP> ghcr.io/cutiechi/purifier:latest"
+# 1. 列出可用回滚点
+ssh oracle-cloud "docker images purifier --format '{{.Tag}} {{.CreatedAt}}' | grep '^backup-' | head"
 
-# 2. 恢复 compose.yaml（若有修改）
+# 2. 把备份 tag 指回 latest，再重建容器
+ssh oracle-cloud "docker tag purifier:backup-<TIMESTAMP> purifier:latest"
+ssh oracle-cloud "cd ~/composes/purifier && docker compose up -d --force-recreate"
+
+# 3. 若同时改坏了 compose.yaml
 ssh oracle-cloud "cp ~/composes/purifier/compose.yaml.bak-<TIMESTAMP> ~/composes/purifier/compose.yaml"
 
-# 3. 恢复数据目录（若数据库损坏）
+# 4. 若数据库损坏（会丢掉备份时间点之后的数据）
 ssh oracle-cloud "rm -rf ~/datas/purifier && tar -xzvf ~/datas/purifier-backup-<TIMESTAMP>.tar.gz -C ~/datas"
-
-# 4. 重启旧版本容器
-ssh oracle-cloud "cd ~/composes/purifier && docker compose up -d --force-recreate"
 ```
+
+回滚只切 tag，不回退远端源码副本：`~/sources/purifier` 是构建输入，不是发布产物，回滚后再按新流程发布即可覆盖。
