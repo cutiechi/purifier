@@ -9,6 +9,7 @@ import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { useDocumentTitle } from "@/components/page-header"
 import { AsyncBody, PageShell, SectionLabel } from "@/components/page-shell"
+import { Alert } from "@/components/ui/alert"
 import { PostCard, PostList } from "@/components/post-card"
 import { useReadingSettings } from "@/components/reading-settings"
 import { BookCover } from "@/components/book-cover"
@@ -411,9 +412,9 @@ export default function BookPage() {
         {book && loadedKey === currentKey ? (
           <>
             {refreshNotice && (
-              <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
+              <Alert variant="warning" className="mb-4">
                 {refreshNotice}
-              </div>
+              </Alert>
             )}
             {isCool18Book && (
               <>

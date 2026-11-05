@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { ReadingSettingsPanel } from "@/components/reading-settings-panel"
+import { Input } from "@/components/ui/input"
 import { TagChips } from "@/components/tag-chips"
 import { useSite } from "@/hooks/use-site"
 import { api } from "@/lib/routes"
@@ -311,7 +312,7 @@ function TagEditor({
     return (
       <div className="flex flex-col gap-1.5 px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <input
+          <Input
             autoFocus
             value={value}
             onChange={(e) => setValue(e.target.value)}

@@ -1,21 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { SectionTabs } from "@/components/section-tabs"
 import { SiteTabs } from "@/components/site-tabs"
+import { GroupedPostList } from "@/components/grouped-post-list"
 import {
   FilterTabs,
   SearchForm,
   useScrollTop,
 } from "@/components/form-controls"
-import { GenrePill, ListPostCard } from "@/components/list-post-card"
-import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { PostList } from "@/components/post-card"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { ListPostCard } from "@/components/list-post-card"
 import { useSite } from "@/hooks/use-site"
-import { groupBooks, type GroupedItem } from "@/lib/book-groups"
 import { useAllTabs } from "@/lib/hub-tabs"
+import { buttonVariants } from "@/components/ui/button"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import {
   ARCHIVE_PAGE_SIZE,
@@ -180,81 +178,8 @@ export default function ArchivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only draftQ
   }, [draftQ])
 
-  const { isExpanded, toggle } = useExpandedBooks("archive")
-  const grouped = useMemo(
-    () =>
-      groupBooks(
-        items,
-        (it) => it.title,
-        (it) => it.tid
-      ),
-    [items]
-  )
-
   function itemHref(it: ArchivePost): string {
     return it.site === "2" ? bookPath(it.tid) : readPath(it.tid)
-  }
-
-  function renderGrouped(g: GroupedItem<ArchivePost>) {
-    if (g.type === "single") {
-      const item = g.item
-      return (
-        <ListPostCard
-          key={`${item.site}:${item.tid}`}
-          href={itemHref(item)}
-          rawTitle={item.title}
-          trailing={
-            <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-              #{item.tid}
-            </span>
-          }
-        />
-      )
-    }
-    return (
-      <CollapsibleBookGroup
-        key={`group:${g.key}`}
-        title={g.title}
-        summary={[g.author, g.genre].filter(Boolean).join(" · ") || undefined}
-        count={g.items.length}
-        bookKey={g.key}
-        isExpanded={isExpanded(g.key)}
-        onToggle={() => toggle(g.key)}
-        trailing={
-          g.genre ? (
-            <span className="flex shrink-0 items-center gap-2">
-              <GenrePill genre={g.genre} />
-            </span>
-          ) : undefined
-        }
-      >
-        {g.items.map((it) => {
-          const parsed = parseListTitle(it.title)
-          const sub = formatTitleMeta(
-            parsed.chapters ? { ...parsed, chapters: null } : parsed
-          )
-          return (
-            <Link
-              key={`${it.site}:${it.tid}`}
-              to={itemHref(it)}
-              className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
-            >
-              <span className="line-clamp-2 min-w-0 flex-1 font-medium text-foreground">
-                {parsed.chapters || parsed.title}
-              </span>
-              {sub && (
-                <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                  {sub}
-                </span>
-              )}
-              <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
-                #{it.tid}
-              </span>
-            </Link>
-          )
-        })}
-      </CollapsibleBookGroup>
-    )
   }
 
   return (
@@ -273,7 +198,10 @@ export default function ArchivePage() {
             />
             <Link
               to={routes.jobs}
-              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className={buttonVariants({
+                variant: "outline",
+                className: "min-h-10 px-3.5",
+              })}
             >
               更新目录
             </Link>
@@ -317,7 +245,48 @@ export default function ArchivePage() {
           )
         }
       >
-        <PostList>{grouped.map((g) => renderGrouped(g))}</PostList>
+        <GroupedPostList
+          items={items}
+          site={site}
+          storageKey="archive"
+          renderSingle={(item) => (
+            <ListPostCard
+              key={`${item.site}:${item.tid}`}
+              href={itemHref(item)}
+              rawTitle={item.title}
+              trailing={
+                <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                  #{item.tid}
+                </span>
+              }
+            />
+          )}
+          renderChild={(it) => {
+            const parsed = parseListTitle(it.title)
+            const sub = formatTitleMeta(
+              parsed.chapters ? { ...parsed, chapters: null } : parsed
+            )
+            return (
+              <Link
+                key={`${it.site}:${it.tid}`}
+                to={itemHref(it)}
+                className="flex min-h-11 items-center gap-2 border-t border-border/50 px-3.5 py-2.5 text-sm transition-colors hover:bg-accent/40 sm:px-4"
+              >
+                <span className="line-clamp-2 min-w-0 flex-1 font-medium text-foreground">
+                  {parsed.chapters || parsed.title}
+                </span>
+                {sub && (
+                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                    {sub}
+                  </span>
+                )}
+                <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+                  #{it.tid}
+                </span>
+              </Link>
+            )
+          }}
+        />
         <Pager
           page={page}
           hasNext={hasNext}

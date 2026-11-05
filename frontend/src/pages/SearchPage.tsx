@@ -1,20 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { AsyncBody, EmptyState } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
-import { PostList } from "@/components/post-card"
-import { ListPostCard, GenrePill } from "@/components/list-post-card"
-import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { SimilarPostCard } from "@/components/similar-post-card"
+import { GroupedPostList } from "@/components/grouped-post-list"
 import { SiteTabs } from "@/components/site-tabs"
 import { SearchForm, ListMeta, useScrollTop } from "@/components/form-controls"
-import { groupBooks, type GroupedItem } from "@/lib/book-groups"
 import { formatListPagination } from "@/lib/list-meta"
 import { useSite } from "@/hooks/use-site"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
-import { api, bookPath, forumRoutes, libraryRoutes, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
+import { api, forumRoutes, libraryRoutes, parsePage, parseQuery, searchPath } from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 import { compareTid } from "@/lib/groups"
 
@@ -23,10 +18,6 @@ interface BrowseResponse {
   nextPage: number | null
   category?: string
   error?: string
-}
-
-function msgOf(e: unknown): string {
-  return e instanceof Error ? e.message : "未知错误"
 }
 
 /** 单源搜索：论坛 /cool-18/search，书库 /xbook-cn/search（源由路径前缀表达） */
@@ -44,12 +35,6 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const seqRef = useRef(0)
-
-  const { isExpanded, toggle } = useExpandedBooks("search")
-  const grouped = useMemo(
-    () => groupBooks(links, (l) => l.title, (l) => l.tid),
-    [links]
-  )
 
   useEffect(() => {
     setInput(q)
@@ -78,7 +63,8 @@ export default function SearchPage() {
         setLinks([...hits].sort((a, b) => compareTid(a.tid, b.tid)))
         setNextPage(json.nextPage)
       } catch (e) {
-        if (seq === seqRef.current) setError(msgOf(e))
+        if (seq === seqRef.current)
+          setError(e instanceof Error ? e.message : "未知错误")
       } finally {
         if (seq === seqRef.current) setLoading(false)
       }
@@ -99,68 +85,6 @@ export default function SearchPage() {
 
   function goTo(keyword: string, p: number) {
     navigate(searchPath({ q: keyword, page: p, site }))
-  }
-
-  function renderGrouped(g: GroupedItem<ChapterLink>) {
-    if (g.type === "single") {
-      const item = g.item
-      return isLibrary ? (
-        <ListPostCard
-          key={item.tid}
-          href={bookPath(item.tid)}
-          rawTitle={item.title}
-          showGenre
-        />
-      ) : (
-        <SimilarPostCard
-          key={item.tid}
-          href={readPath(item.tid)}
-          rawTitle={item.title}
-          tid={item.tid}
-          site="1"
-          showGenre
-        />
-      )
-    }
-    return (
-      <CollapsibleBookGroup
-        key={`group:${g.key}`}
-        title={g.title}
-        summary={g.author ?? undefined}
-        count={g.items.length}
-        bookKey={g.key}
-        isExpanded={isExpanded(g.key)}
-        onToggle={() => toggle(g.key)}
-        trailing={
-          g.genre ? (
-            <span className="flex shrink-0 items-center gap-2">
-              <GenrePill genre={g.genre} />
-            </span>
-          ) : undefined
-        }
-        similar={
-          !isLibrary
-            ? {
-                title: g.title,
-                groupKey: g.key,
-                seedItems: g.items.map((l) => ({
-                  tid: l.tid,
-                  title: l.title,
-                })),
-              }
-            : undefined
-        }
-      >
-        {g.items.map((link) => (
-          <ListPostCard
-            key={link.tid}
-            href={isLibrary ? bookPath(link.tid) : readPath(link.tid)}
-            rawTitle={link.title}
-            showGenre
-          />
-        ))}
-      </CollapsibleBookGroup>
-    )
   }
 
   return (
@@ -217,7 +141,7 @@ export default function SearchPage() {
               hasNext: nextPage !== null,
             })}
           </ListMeta>
-          <PostList>{grouped.map((g) => renderGrouped(g))}</PostList>
+          <GroupedPostList items={links} site={site} storageKey="search" />
           <Pager
             page={pageParam}
             hasNext={nextPage !== null}

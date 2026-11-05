@@ -4,23 +4,14 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
 import { SiteTabs } from "@/components/site-tabs"
-import { PostList } from "@/components/post-card"
+import { GroupedPostList } from "@/components/grouped-post-list"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
-import { AsyncBody } from "@/components/ui-state"
-import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { GenrePill } from "@/components/list-post-card"
 import { SimilarPostCard } from "@/components/similar-post-card"
-import { groupBooks } from "@/lib/book-groups"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import {
-  api,
-  forumRoutes,
-  libraryRoutes,
-  readPath,
-} from "@/lib/routes"
+import { api, forumRoutes, libraryRoutes, readPath } from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 
 export default function FeaturedPage() {
@@ -32,16 +23,6 @@ export default function FeaturedPage() {
     (json) => (json.links as ChapterLink[]) ?? []
   )
 
-  const { isExpanded, toggle } = useExpandedBooks("featured")
-  const grouped = useMemo(
-    () =>
-      groupBooks(
-        items,
-        (l) => l.title,
-        (l) => l.tid
-      ),
-    [items]
-  )
   // 原始 items 下标查找（用于 single 项的 index 兜底，避免 grouped 下标跳变）
   const indexOfItem = useMemo(() => {
     const m = new Map<string, number>()
@@ -77,50 +58,31 @@ export default function FeaturedPage() {
         onRetry={reload}
         emptyText="暂无精华"
       >
-        <PostList>
-          {grouped.map((g) =>
-            g.type === "single" ? (
-              <SimilarPostCard
-                key={g.item.tid}
-                href={readPath(g.item.tid)}
-                rawTitle={g.item.title}
-                tid={g.item.tid}
-                site="1"
-                index={g.item.index || indexOfItem.get(g.item.tid) || 1}
-                showGenre
-              />
-            ) : (
-              <CollapsibleBookGroup
-                key={`group:${g.key}`}
-                title={g.title}
-                summary={g.author ?? undefined}
-                count={g.items.length}
-                bookKey={g.key}
-                isExpanded={isExpanded(g.key)}
-                onToggle={() => toggle(g.key)}
-                trailing={g.genre ? <GenrePill genre={g.genre} /> : undefined}
-                similar={{
-                  title: g.title,
-                  groupKey: g.key,
-                  seedItems: g.items.map((l) => ({
-                    tid: l.tid,
-                    title: l.title,
-                  })),
-                }}
-              >
-                {g.items.map((link) => (
-                  <ListPostCard
-                    key={link.tid}
-                    href={readPath(link.tid)}
-                    rawTitle={link.title}
-                    index={link.index}
-                    showGenre
-                  />
-                ))}
-              </CollapsibleBookGroup>
-            )
+        <GroupedPostList
+          items={items}
+          site="1"
+          storageKey="featured"
+          renderSingle={(item) => (
+            <SimilarPostCard
+              key={item.tid}
+              href={readPath(item.tid)}
+              rawTitle={item.title}
+              tid={item.tid}
+              site="1"
+              index={item.index || indexOfItem.get(item.tid) || 1}
+              showGenre
+            />
           )}
-        </PostList>
+          renderChild={(link) => (
+            <ListPostCard
+              key={link.tid}
+              href={readPath(link.tid)}
+              rawTitle={link.title}
+              index={link.index}
+              showGenre
+            />
+          )}
+        />
       </AsyncBody>
     </PageShell>
   )

@@ -24,14 +24,14 @@ export function JobsActiveStrip({
   return (
     <section
       aria-label="进行中"
-      className="mb-4 space-y-2 rounded-2xl border border-blue-500/25 bg-blue-500/10 px-3.5 py-3"
+      className="mb-4 space-y-2 rounded-2xl border border-info/25 bg-info/10 px-3.5 py-3"
     >
       {jobs.map((job) => {
         const paused = job.status === "paused"
         return (
           <div
             key={job.id}
-            className="text-sm text-blue-700 dark:text-blue-300"
+            className="text-sm text-info"
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">
@@ -51,7 +51,7 @@ export function JobsActiveStrip({
                         .then(onChanged)
                         .catch(() => onChanged())
                     }}
-                    className="rounded-lg p-1.5 hover:bg-blue-500/15"
+                    className="rounded-lg p-1.5 hover:bg-info/15"
                   >
                     <Play size={14} />
                   </button>
@@ -64,7 +64,7 @@ export function JobsActiveStrip({
                         .then(onChanged)
                         .catch(() => onChanged())
                     }}
-                    className="rounded-lg p-1.5 hover:bg-blue-500/15"
+                    className="rounded-lg p-1.5 hover:bg-info/15"
                   >
                     <Pause size={14} />
                   </button>
@@ -77,7 +77,7 @@ export function JobsActiveStrip({
                       .then(onChanged)
                       .catch(() => onChanged())
                   }}
-                  className="rounded-lg p-1.5 hover:bg-blue-500/15"
+                  className="rounded-lg p-1.5 hover:bg-info/15"
                 >
                   <Square size={14} />
                 </button>

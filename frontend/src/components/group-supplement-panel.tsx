@@ -9,6 +9,7 @@ import {
 import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"
 import { api } from "@/lib/routes"
 import { useSite } from "@/hooks/use-site"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Loader2 } from "lucide-react"
 
 interface Props {
@@ -221,11 +222,9 @@ export function GroupSupplementPanel({
                 key={c.tid}
                 className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={c.checked}
-                  onChange={() => toggle(c.tid)}
-                  className="size-4 rounded border-border"
+                  onCheckedChange={() => toggle(c.tid)}
                 />
                 <span className="flex-1 truncate">《{c.title}》</span>
                 <span className="text-xs text-muted-foreground">

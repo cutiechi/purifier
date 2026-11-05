@@ -22,6 +22,7 @@ import { useAllTabs } from "@/lib/hub-tabs"
 import { compareTid, type Group } from "@/lib/groups"
 import { ME_PAGE_SIZE, totalPages as calcTotalPages } from "@/lib/list-meta"
 import { api, forumRoutes, parsePage, parseQuery, readPath, routes } from "@/lib/routes"
+import { buttonVariants } from "@/components/ui/button"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
 import { cn } from "@/lib/utils"
 
@@ -413,7 +414,10 @@ export default function GroupPage() {
         action={
           <Link
             to={routes.jobs}
-            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className={buttonVariants({
+              variant: "outline",
+              className: "min-h-10 px-3.5",
+            })}
           >
             自动分组
           </Link>
@@ -461,13 +465,19 @@ export default function GroupPage() {
               <span className="flex flex-wrap justify-center gap-2">
                 <Link
                   to={routes.jobs}
-                  className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                  className={buttonVariants({
+                    variant: "outline",
+                    className: "min-h-10 px-3.5 text-foreground",
+                  })}
                 >
                   去任务 · 自动分组
                 </Link>
                 <Link
                   to={forumRoutes.archive}
-                  className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className={buttonVariants({
+                    variant: "outline",
+                    className: "min-h-10 px-3.5",
+                  })}
                 >
                   查看归档
                 </Link>

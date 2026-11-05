@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react"
+import { Button } from "@/components/ui/button"
 
 type Props = {
   children: ReactNode
@@ -45,22 +46,15 @@ export class ErrorBoundary extends Component<Props, State> {
           {error.message || "未知错误"}
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={this.reset}
-            className="inline-flex min-h-10 items-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground"
-          >
-            重试
-          </button>
-          <button
-            type="button"
+          <Button onClick={this.reset}>重试</Button>
+          <Button
+            variant="outline"
             onClick={() => {
-              window.location.href = "/"
+              window.location.href = "/cool-18"
             }}
-            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-4 text-sm font-medium text-muted-foreground"
           >
             回首页
-          </button>
+          </Button>
         </div>
       </div>
     )

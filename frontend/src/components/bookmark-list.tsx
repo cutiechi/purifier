@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useState, type ChangeEvent } from "react"
 import type { Bookmark } from "@/hooks/use-bookmarks"
+import { Input } from "@/components/ui/input"
 import { formatDateTime } from "@/lib/format"
 
 /**
@@ -92,11 +93,13 @@ export function BookmarkList({
             <div className="flex items-center gap-3 pl-1 text-xs text-muted-foreground">
               {editingId === b.id ? (
                 <>
-                  <input
+                  <Input
                     value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      setDraft(e.target.value)
+                    }
                     placeholder="备注"
-                    className="h-7 w-40 rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+                    className="h-7 w-40 px-2 text-xs"
                   />
                   <button
                     type="button"

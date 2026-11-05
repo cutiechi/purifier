@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Download, Plus, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
+import { Button } from "@/components/ui/button"
 import { PageShell, Pager } from "@/components/page-shell"
+import { Alert } from "@/components/ui/alert"
 import { SectionTabs } from "@/components/section-tabs"
 import { FilterTabs, useScrollTop } from "@/components/form-controls"
 import {
@@ -314,8 +316,7 @@ export default function JobsPage() {
         description="同步目录、自动分组与备份"
         action={
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+            <Button
               onClick={() => {
                 if (
                   typeof Notification !== "undefined" &&
@@ -325,36 +326,25 @@ export default function JobsPage() {
                 }
                 setModalOpen(true)
               }}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+
             >
               <Plus size={14} /> 创建任务
-            </button>
-            <button
-              type="button"
-              onClick={() => downloadBackup()}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
+            </Button>
+            <Button variant="outline" onClick={() => downloadBackup()}>
               <Download size={14} /> 导出备份
-            </button>
-            <button
-              type="button"
-              onClick={() => void onClearCache()}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
+            </Button>
+            <Button variant="outline" onClick={() => void onClearCache()}>
               <Trash2 size={14} /> 清空缓存
-            </button>
+            </Button>
           </div>
         }
       />
       <SectionTabs items={meTabs} />
 
       {toast && (
-        <div
-          role="status"
-          className="mb-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-800 dark:text-emerald-300"
-        >
+        <Alert role="status" variant="success" className="mb-4">
           {toast}
-        </div>
+        </Alert>
       )}
 
       <JobStatsCards

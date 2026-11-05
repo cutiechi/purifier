@@ -1,14 +1,11 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
 import { SectionLabel } from "@/components/page-header"
-import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { GenrePill } from "@/components/list-post-card"
-import { PostCard, PostList } from "@/components/post-card"
+import { GroupedPostList } from "@/components/grouped-post-list"
+import { PostCard } from "@/components/post-card"
 import { SimilarSearchPanel } from "@/components/similar-search-panel"
 import { SimilarTrigger } from "@/components/similar-trigger"
-import { groupBooks } from "@/lib/book-groups"
 import { groupKeyFromTitle, groupSearchTitle } from "@/lib/groups"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { readPath } from "@/lib/routes"
 import { cn } from "@/lib/utils"
 
@@ -108,7 +105,6 @@ function PicksSimilarSingle({ link }: { link: PickLink }) {
 }
 
 export function PicksSections({ sections }: { sections: PickSection[] }) {
-  const { isExpanded, toggle } = useExpandedBooks("picks")
   return (
     <div className="flex flex-col gap-8 sm:gap-9">
       {sections.map((section) => {
@@ -146,49 +142,19 @@ export function PicksSections({ sections }: { sections: PickSection[] }) {
                 })}
               </div>
             ) : (
-              <PostList>
-                {(() => {
-                  const grouped = groupBooks(
-                    section.links,
-                    (l) => l.title,
-                    (l) => l.tid
-                  )
-                  return grouped.map((g) =>
-                    g.type === "single" ? (
-                      <PicksSimilarSingle key={g.item.tid} link={g.item} />
-                    ) : (
-                      <CollapsibleBookGroup
-                        key={`group:${g.key}`}
-                        title={g.title}
-                        summary={g.author ?? undefined}
-                        count={g.items.length}
-                        bookKey={g.key}
-                        isExpanded={isExpanded(g.key)}
-                        onToggle={() => toggle(g.key)}
-                        trailing={
-                          g.genre ? <GenrePill genre={g.genre} /> : undefined
-                        }
-                        similar={{
-                          title: g.title,
-                          groupKey: g.key,
-                          seedItems: g.items.map((l) => ({
-                            tid: l.tid,
-                            title: l.title,
-                          })),
-                        }}
-                      >
-                        {g.items.map((link) => (
-                          <PostCard
-                            key={link.tid}
-                            href={readPath(link.tid)}
-                            title={link.title}
-                          />
-                        ))}
-                      </CollapsibleBookGroup>
-                    )
-                  )
-                })()}
-              </PostList>
+              <GroupedPostList
+                items={section.links}
+                site="1"
+                storageKey="picks"
+                renderSingle={(link) => <PicksSimilarSingle key={link.tid} link={link} />}
+                renderChild={(link) => (
+                  <PostCard
+                    key={link.tid}
+                    href={readPath(link.tid)}
+                    title={link.title}
+                  />
+                )}
+              />
             )}
           </section>
         )

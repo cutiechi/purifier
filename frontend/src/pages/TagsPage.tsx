@@ -1,3 +1,4 @@
+import type React from "react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -5,6 +6,7 @@ import { IconClose } from "@/components/icons"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { PageHeader } from "@/components/page-header"
+import { Input } from "@/components/ui/input"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
 import { AsyncBody } from "@/components/ui-state"
@@ -92,12 +94,14 @@ function TagListView() {
       />
       <SectionTabs items={sectionTabs} />
 
-      <input
+      <Input
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setQ(e.target.value)
+        }
         placeholder="筛选标签…"
         type="search"
-        className="mb-4 h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+        className="mb-4 h-11"
       />
 
       <AsyncBody

@@ -1,3 +1,4 @@
+import type React from "react"
 import {
   useCallback,
   useEffect,
@@ -5,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { Input } from "@/components/ui/input"
 import { normalizeBookmarkQuote } from "@/lib/bookmarks"
 import { normalizeCharacterName } from "@/lib/character-highlight"
 import type { CharacterCluster } from "@/lib/character-highlight"
@@ -179,11 +181,13 @@ export function ReadingSelectionToolbar({
         <p className="max-h-32 overflow-y-auto text-sm leading-snug break-words text-foreground">
           {quote}
         </p>
-        <input
+        <Input
           value={anchor.note}
-          onChange={(e) => setAnchor({ ...anchor, note: e.target.value })}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            setAnchor({ ...anchor, note: e.target.value })
+          }
           placeholder="笔记（可选）"
-          className="h-8 w-full rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+          className="h-8 text-xs"
         />
         <div className="flex items-center justify-end gap-1.5">
           <button

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { Checkbox } from "@/components/ui/checkbox"
 import { PostCard, PostList } from "@/components/post-card"
 import { Spinner } from "@/components/ui-state"
 import {
@@ -296,11 +297,10 @@ export function SimilarSearchPanel({
         <>
           <div className="mb-2 flex items-center gap-2">
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
+              <Checkbox
                 ref={allRef}
                 checked={allSelected}
-                onChange={toggleSelectAll}
+                onCheckedChange={() => toggleSelectAll()}
                 className="size-3.5 shrink-0"
               />
               全选
@@ -325,11 +325,10 @@ export function SimilarSearchPanel({
               const added = known.has(hit.tid)
               return (
                 <div key={hit.tid} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(hit.tid)}
                     disabled={added || busy}
-                    onChange={() => toggleSelect(hit.tid)}
+                    onCheckedChange={() => toggleSelect(hit.tid)}
                     aria-label={`选择 ${parsed.title || hit.title}`}
                     className="size-3.5 shrink-0"
                   />

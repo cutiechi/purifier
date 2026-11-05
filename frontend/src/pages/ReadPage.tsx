@@ -9,6 +9,7 @@ import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
 import { useDocumentTitle } from "@/components/page-header"
 import { PageShell, AsyncBody } from "@/components/page-shell"
+import { Alert } from "@/components/ui/alert"
 import {
   pageWidthClass,
   useReadingSettings,
@@ -265,17 +266,14 @@ export default function ReadPage() {
           {content && (
             <>
               {refreshNotice && (
-                <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
+                <Alert variant="warning" className="mb-4">
                   {refreshNotice}
-                </div>
+                </Alert>
               )}
               {bookmarkError && (
-                <div
-                  role="alert"
-                  className="mb-4 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-2.5 text-sm text-destructive"
-                >
+                <Alert variant="destructive" className="mb-4">
                   {bookmarkError}
-                </div>
+                </Alert>
               )}
               <ArticleView
                 title={content.title}

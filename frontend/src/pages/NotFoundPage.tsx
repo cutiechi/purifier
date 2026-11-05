@@ -2,6 +2,7 @@ import { Link } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { forumRoutes } from "@/lib/routes"
+import { buttonVariants } from "@/components/ui/button"
 
 export default function NotFoundPage() {
   return (
@@ -13,7 +14,7 @@ export default function NotFoundPage() {
         />
         <Link
           to={forumRoutes.home}
-          className="inline-flex min-h-10 items-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          className={buttonVariants({ className: "min-h-10 px-4" })}
         >
           回到首页
         </Link>

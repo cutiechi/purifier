@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react"
 import { IconChevronLeft, IconChevronRight } from "@/components/icons"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
 export function Pager({
@@ -60,7 +61,7 @@ export function Pager({
           {sub}
           {totalPages != null && totalPages > 1 && onPage && (
             <span className="mt-1 block sm:mt-0 sm:ml-2 sm:inline-flex sm:items-center sm:gap-1">
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={totalPages}

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react"
 import { useConfirm } from "@/components/confirm-dialog"
+import { Button } from "@/components/ui/button"
 import { MeListPage } from "@/components/me-list-page"
 import { type MeListItem } from "@/components/me-item-card"
 import { api, meListQuery } from "@/lib/routes"
@@ -125,22 +126,22 @@ function HistoryToolbar({
 
   return (
     <div className="mb-4 flex flex-wrap gap-2">
-      <button
-        type="button"
+      <Button
+        variant="outline"
         disabled={busy || loading || items.length === 0}
         onClick={() => void clearPage()}
-        className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
       >
         清空本页
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="outline"
         disabled={busy || loading}
         onClick={() => void clearAll()}
-        className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
       >
         清空全部
-      </button>
+      </Button>
       {error && (
         <p role="alert" className="basis-full text-xs text-destructive">
           {error}

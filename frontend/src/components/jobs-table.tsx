@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { ChevronDown, ChevronUp, ExternalLink, Trash2 } from "lucide-react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobLogPanel } from "@/components/job-log-panel"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   deleteJob,
   deleteJobsMany,
@@ -233,10 +234,9 @@ export function JobsTable({
             >
               <div className="flex items-center gap-2">
                 {terminal && (
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.includes(job.id)}
-                    onChange={() => toggle(job.id)}
+                    onCheckedChange={() => toggle(job.id)}
                     className="size-4"
                   />
                 )}
@@ -301,10 +301,9 @@ export function JobsTable({
         <thead>
           <tr className="border-b border-border">
             <th className="w-8 px-3 py-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={allSelected}
-                onChange={() =>
+                onCheckedChange={() =>
                   onSelectedChange(allSelected ? [] : terminalIds)
                 }
                 aria-label="全选本页已结束任务"
@@ -370,10 +369,9 @@ export function JobsTable({
                 <tr className="border-b border-border/60 hover:bg-accent/30">
                   <td className="px-3 py-2.5">
                     {terminal ? (
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selected.includes(job.id)}
-                        onChange={() => toggle(job.id)}
+                        onCheckedChange={() => toggle(job.id)}
                         className="size-4"
                       />
                     ) : (

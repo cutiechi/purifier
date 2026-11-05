@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AsyncBody, Spinner } from "@/components/ui-state"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
-import { PostList } from "@/components/post-card"
-import { ListPostCard } from "@/components/list-post-card"
-import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
-import { GenrePill } from "@/components/list-post-card"
-import { SimilarPostCard } from "@/components/similar-post-card"
+import { GroupedPostList } from "@/components/grouped-post-list"
+import { Button } from "@/components/ui/button"
 import { SiteTabs } from "@/components/site-tabs"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
-import { api, forumRoutes, libraryRoutes, readPath } from "@/lib/routes"
-import { groupBooks, type GroupedItem } from "@/lib/book-groups"
+import { api, forumRoutes, libraryRoutes } from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 
 interface HomeResponse {
@@ -55,17 +50,6 @@ export default function HomePage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [fetchError, setFetchError] = useState("")
   const [loadMoreError, setLoadMoreError] = useState("")
-
-  const { isExpanded, toggle } = useExpandedBooks("home")
-  const grouped = useMemo(
-    () =>
-      groupBooks(
-        stream.links,
-        (l) => l.title,
-        (l) => l.tid
-      ),
-    [stream.links]
-  )
 
   const hasMore = stream.nextMtid !== null
   const loadingMoreRef = useRef(false)
@@ -144,57 +128,6 @@ export default function HomePage() {
   const total = stream.links.length
   const noMore = !initialLoading && !hasMore && total > 0
 
-  function renderGrouped(g: GroupedItem<ChapterLink>) {
-    if (g.type === "single") {
-      const item = g.item
-      return (
-        <SimilarPostCard
-          key={item.tid}
-          href={readPath(item.tid)}
-          rawTitle={item.title}
-          tid={item.tid}
-          site="1"
-          showGenre
-        />
-      )
-    }
-    return (
-      <CollapsibleBookGroup
-        key={`group:${g.key}`}
-        title={g.title}
-        summary={g.author ?? undefined}
-        count={g.items.length}
-        bookKey={g.key}
-        isExpanded={isExpanded(g.key)}
-        onToggle={() => toggle(g.key)}
-        trailing={
-          g.genre ? (
-            <span className="flex shrink-0 items-center gap-2">
-              <GenrePill genre={g.genre} />
-            </span>
-          ) : undefined
-        }
-        similar={{
-          title: g.title,
-          groupKey: g.key,
-          seedItems: g.items.map((l) => ({
-            tid: l.tid,
-            title: l.title,
-          })),
-        }}
-      >
-        {g.items.map((link) => (
-          <ListPostCard
-            key={link.tid}
-            href={readPath(link.tid)}
-            rawTitle={link.title}
-            showGenre
-          />
-        ))}
-      </CollapsibleBookGroup>
-    )
-  }
-
   return (
     <PageShell>
       <PageHeader
@@ -217,7 +150,7 @@ export default function HomePage() {
         onRetry={fetchFirstPage}
         emptyText="暂无内容"
       >
-        <PostList>{grouped.map((g) => renderGrouped(g))}</PostList>
+        <GroupedPostList items={stream.links} site="1" storageKey="home" />
 
         {!loadMoreError && hasMore && (
           <div ref={sentinelRef} aria-hidden className="h-4" />
@@ -228,16 +161,15 @@ export default function HomePage() {
         {loadMoreError && (
           <div className="py-6 text-center">
             <p className="mb-3 text-sm text-destructive">{loadMoreError}</p>
-            <button
-              type="button"
+            <Button
+              variant="outline"
               onClick={() => {
                 setLoadMoreError("")
                 loadMore()
               }}
-              className="inline-flex min-h-11 items-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
               加载更多 · 重试
-            </button>
+            </Button>
           </div>
         )}
 
