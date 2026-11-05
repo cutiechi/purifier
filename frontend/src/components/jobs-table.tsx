@@ -23,9 +23,9 @@ const POLL_MS = 1500
 
 const STATUS_BADGE: Record<Job["status"], string> = {
   pending: "bg-muted text-muted-foreground",
-  running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  paused: "bg-blue-500/15 text-blue-500 dark:text-blue-300",
-  finished: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  running: "bg-info/15 text-info",
+  paused: "bg-info/10 text-info/80",
+  finished: "bg-success/15 text-success",
   error: "bg-destructive/15 text-destructive",
   cancelled: "bg-muted text-muted-foreground",
 }

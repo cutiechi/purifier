@@ -68,6 +68,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 ## 技术约定
 
 - **前端**：**凡是可以使用 shadcn/ui 组件的地方，绝对不要手写原生 HTML 或重复造轮子**。必须优先通过 `bunx --bun shadcn@latest add <component>` 添加标准 shadcn/ui 组件（如 `button`, `dialog`, `dropdown-menu`, `input`, `select`, `badge`, `tooltip`, `tabs`, `card`, `sheet`, `popover`, `scroll-area`, `separator` 等）并在页面中复用，保持设计语言、无障碍访问（a11y）与统一暗黑主题。
+- **设计 token**：语义色一律走 `index.css` 的 shadcn 变量（`--background/--foreground/--muted/--accent/--destructive/--success/--info/--warning/--border/--ring/--glow` 及 `--radius` 阶梯，`@theme inline` 映射为 Tailwind 类）。禁止在组件里写 Tailwind 原始色板（`amber-*/sky-*/emerald-*/blue-*`）；仅生成式装饰色（图书封面按标题取色、榜单排名奖牌色）例外。状态横幅用 `<Alert variant="success|info|warning|destructive">`，按钮/链接按钮用 `Button` / `buttonVariants`（Base UI 版不支持 `render=<a>`）。
 - **后端**：Go 1.22+，使用 Chi 作为轻量路由，坚持标准 `net/http` 语义，错误返回统一结构 `{"error": "..."}`。
 - **存储**：SQL 统一封装在 `internal/storage` 领域 DAO 内。当前实现使用 SQLite 语法（`AUTOINCREMENT`、`COLLATE NOCASE`、`INSERT OR IGNORE`、`strftime`、`rowid`、`LastInsertId`、`?` 占位符），迁移 PostgreSQL 时需逐处改写，不承诺零改动切换。
 - **正文清洗**：所有外部 HTML 抓取内容必须经 `sanitize.SanitizeContentHTML` 管道清洗，剥除外链追踪与恶意脚本，只放行 `/cool-18/:tid` 与 `/xbook-cn/:cid`（含 `?chapter=`）站内安全链接。

@@ -96,7 +96,7 @@ export function StatsHeatmap({ days }: { days: Day[] }) {
                   className={cn(
                     "h-4 w-4 rounded-[2px]",
                     LEVEL_BG[level(c.durationS)],
-                    c.estimated === 1 && "ring-1 ring-amber-400/70 ring-inset"
+                    c.estimated === 1 && "ring-1 ring-warning/70 ring-inset"
                   )}
                 />
               )

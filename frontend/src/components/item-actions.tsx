@@ -168,7 +168,7 @@ export function ItemActions({
           className={cn(
             "relative inline-flex size-11 items-center justify-center rounded-2xl border border-border/80 bg-card/95 shadow-md backdrop-blur transition-colors sm:size-10",
             favorited
-              ? "text-amber-600 dark:text-amber-400"
+              ? "text-warning"
               : "text-muted-foreground hover:bg-accent hover:text-foreground"
           )}
         >
@@ -205,7 +205,7 @@ export function ItemActions({
               className={cn(
                 "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors disabled:opacity-50",
                 favorited
-                  ? "text-amber-600 hover:bg-amber-400/10 dark:text-amber-400"
+                  ? "text-warning hover:bg-warning/10"
                   : "hover:bg-accent"
               )}
             >
@@ -324,7 +324,7 @@ function TagEditor({
               }
             }}
             placeholder="多个标签用逗号分隔"
-            className="h-8 w-full min-w-0 rounded-lg border border-border bg-card px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-sky-500/60"
+            className="h-8 text-xs"
           />
         </div>
         <div className="flex items-center gap-1.5">

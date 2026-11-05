@@ -94,7 +94,7 @@ function BookmarkCard({
           to={bookmarkHref(item)}
           className="flex min-w-0 flex-1 flex-col gap-2"
         >
-          <p className="line-clamp-3 border-l-2 border-sky-500/40 pl-3 text-sm leading-relaxed text-foreground">
+          <p className="line-clamp-3 border-l-2 border-info/40 pl-3 text-sm leading-relaxed text-foreground">
             {item.quote}
           </p>
           <span className="text-xs text-muted-foreground">

@@ -84,7 +84,7 @@ export function BookmarkList({
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 {formatDateTime(b.createdAt)}
                 {b.id === staleId && (
-                  <span className="text-amber-600 dark:text-amber-400">
+                  <span className="text-warning">
                     原文可能已变
                   </span>
                 )}
@@ -105,7 +105,7 @@ export function BookmarkList({
                     type="button"
                     disabled={busyId === b.id}
                     onClick={() => void saveNote(b)}
-                    className="text-foreground transition-colors hover:text-sky-500 disabled:opacity-50"
+                    className="text-foreground transition-colors hover:text-info disabled:opacity-50"
                   >
                     保存
                   </button>

@@ -151,7 +151,7 @@ function GroupCard({
               {group.favorited && (
                 <Star
                   size={13}
-                  className="shrink-0 fill-amber-400 text-amber-500"
+                  className="shrink-0 fill-warning text-warning"
                   aria-label="已收藏"
                 />
               )}
@@ -229,7 +229,7 @@ function GroupCard({
               <Star
                 size={13}
                 className={cn(
-                  group.favorited && "fill-amber-400 text-amber-500"
+                  group.favorited && "fill-warning text-warning"
                 )}
               />
               {group.favorited ? "取消收藏" : "收藏分组"}

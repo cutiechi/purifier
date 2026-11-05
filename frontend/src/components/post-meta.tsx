@@ -80,7 +80,7 @@ export function PostMetaBar({
           </div>
           <Link
             to={readPath(parent.tid)}
-            className="text-[14px] leading-snug font-medium text-foreground transition-colors hover:text-sky-600 dark:hover:text-sky-400"
+            className="text-[14px] leading-snug font-medium text-foreground transition-colors hover:text-info"
           >
             {parent.title}
           </Link>
@@ -97,7 +97,7 @@ export function PostMetaBar({
             <div className="mt-2">
               <Link
                 to={readPath(rootTid)}
-                className="text-xs text-sky-600 hover:underline dark:text-sky-400"
+                className="text-xs text-info hover:underline"
               >
                 返回主题帖
               </Link>
@@ -110,7 +110,7 @@ export function PostMetaBar({
         <div>
           <Link
             to={readPath(rootTid)}
-            className="text-xs text-sky-600 hover:underline dark:text-sky-400"
+            className="text-xs text-info hover:underline"
           >
             返回主题帖
           </Link>

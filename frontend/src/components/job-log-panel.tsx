@@ -106,7 +106,7 @@ export function JobLogPanel({
               l.level === "error"
                 ? "text-destructive"
                 : l.level === "warn"
-                  ? "text-amber-600 dark:text-amber-400"
+                  ? "text-warning"
                   : "text-muted-foreground"
             }
           >
