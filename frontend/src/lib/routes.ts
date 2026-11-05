@@ -1,25 +1,28 @@
 /**
  * Canonical app routes & query helpers.
  *
- * | Page        | Path                         |
- * |-------------|------------------------------|
- * | Timeline    | `/`                          |
- * | Article     | `/read/:tid`                 |
- * | Book        | `/book/:cid` （书库）          |
- * | Featured    | `/featured`                  |
- * | Picks       | `/picks` （扫文推荐）         |
- * | Trending    | `/trending`                  |
- * | Comments    | `/comments`                  |
- * | Categories  | `/categories`                |
- * | Browse      | `/browse?type|q=&page=`      |
- * | Search      | `/search?q=&page=`           |
- * | History     | `/history`                   |
- * | Favorites   | `/favorites`                 |
- * | Tags        | `/tags?tag=&q=&kind=&page=`  |
- * | Bookmarks   | `/bookmarks`                 |
- * | Group       | `/groups`                    |
- * | Archive     | `/archive`                   |
- * | Jobs        | `/jobs`                      |
+ * 信息架构（2026-11）：一级 = 内容类型（首页/分类/榜单/目录/搜索/我的），
+ * 二级 = 内容源，由路径前缀表达：
+ *
+ * | 源   | 前缀        |
+ * |------|-------------|
+ * | 论坛 | `/cool-18`  |
+ * | 书库 | `/xbook-cn` |
+ *
+ * | 页面        | 路由                                          |
+ * |-------------|-----------------------------------------------|
+ * | Home        | `/cool-18`                                    |
+ * | LibraryHome | `/xbook-cn`                                   |
+ * | Featured    | `/cool-18/featured`                           |
+ * | Picks       | `/cool-18/picks`（扫文推荐）                  |
+ * | Trending    | `/cool-18/trending` · `/xbook-cn/trending`    |
+ * | Comments    | `/cool-18/comments`                           |
+ * | Categories  | `/cool-18/categories` · `/xbook-cn/categories`|
+ * | Browse      | `/cool-18/browse?type|q=&page=` · `/xbook-cn/browse?…` |
+ * | Search      | `/cool-18/search?q=&page=` · `/xbook-cn/search?…` |
+ * | Read        | `/cool-18/:tid`                               |
+ * | Book        | `/xbook-cn/:cid`（`?chapter=` 章节）          |
+ * | Me（跨站）  | `/me` `/history` `/favorites` `/tags` `/bookmarks` `/stats` `/jobs`，可选 `?site=` 过滤 |
  */
 
 export type SiteId = string
@@ -29,67 +32,47 @@ export const SITES: Record<SiteId, { label: string }> = {
   "2": { label: "书库" },
 }
 
+/** 与源无关的固定路由 */
 export const routes = {
-  home: "/",
-  novel: "/novel",
-  /** OIDC 登录页（不进 NAV_ITEMS） */
+  /** OIDC 登录页（不进导航） */
   login: "/login",
-  discover: "/discover",
   me: "/me",
-  featured: "/featured",
-  picks: "/picks",
-  trending: "/trending",
-  comments: "/comments",
-  categories: "/categories",
-  browse: "/browse",
-  search: "/search",
   history: "/history",
   favorites: "/favorites",
   tags: "/tags",
   bookmarks: "/bookmarks",
-  groups: "/groups",
-  /** 全站目录（原归档） */
-  archive: "/archive",
-  jobs: "/jobs",
   stats: "/stats",
+  jobs: "/jobs",
 } as const
 
-/** 发现页栏目（按站过滤） */
-export const DISCOVER_TABS: {
-  href: string
-  label: string
-  sites: readonly SiteId[]
-}[] = [
-  { href: routes.featured, label: "精华", sites: ["1"] },
-  { href: routes.picks, label: "扫文", sites: ["1"] },
-  { href: routes.comments, label: "评论", sites: ["1"] },
-  { href: routes.trending, label: "人气", sites: ["1", "2"] },
-]
+/** 论坛源（cool18）一级页路由 */
+export const forumRoutes = {
+  home: "/cool-18",
+  categories: "/cool-18/categories",
+  browse: "/cool-18/browse",
+  featured: "/cool-18/featured",
+  picks: "/cool-18/picks",
+  comments: "/cool-18/comments",
+  trending: "/cool-18/trending",
+  archive: "/cool-18/archive",
+  groups: "/cool-18/groups",
+  search: "/cool-18/search",
+} as const
 
-/** 我的页栏目（个人阅读数据） */
-export const ME_TABS: {
-  href: string
-  label: string
-  sites: readonly SiteId[]
-}[] = [
-  { href: routes.me, label: "概览", sites: ["1", "2"] },
-  { href: routes.history, label: "历史", sites: ["1", "2"] },
-  { href: routes.favorites, label: "收藏", sites: ["1", "2"] },
-  { href: routes.tags, label: "标签", sites: ["1", "2"] },
-  { href: routes.bookmarks, label: "书签", sites: ["1", "2"] },
-  { href: routes.stats, label: "统计", sites: ["1", "2"] },
-  { href: routes.jobs, label: "任务", sites: ["1", "2"] },
-]
+/** 书库源（xbookcn）一级页路由 */
+export const libraryRoutes = {
+  home: "/xbook-cn",
+  categories: "/xbook-cn/categories",
+  browse: "/xbook-cn/browse",
+  trending: "/xbook-cn/trending",
+  archive: "/xbook-cn/archive",
+  search: "/xbook-cn/search",
+} as const
 
-/** 目录页栏目（归档整理视图；书库站无分组） */
-export const ALL_TABS: {
-  href: string
-  label: string
-  sites: readonly SiteId[]
-}[] = [
-  { href: routes.archive, label: "目录", sites: ["1", "2"] },
-  { href: routes.groups, label: "分组", sites: ["1"] },
-]
+/** 按源取对应一级路由组 */
+export function sourceRoutes(site: SiteId) {
+  return site === "2" ? libraryRoutes : forumRoutes
+}
 
 export const api = {
   posts: "/api/posts",
@@ -101,7 +84,6 @@ export const api = {
   comments: "/api/comments",
   categories: "/api/categories",
   browse: "/api/browse",
-  search: "/api/search",
   meHistory: "/api/me/history",
   meFavorites: "/api/me/favorites",
   meTags: "/api/me/tags",
@@ -126,62 +108,49 @@ export const api = {
   health: "/api/health",
 } as const
 
-function withSite(params: URLSearchParams, site?: string) {
-  if (site && site !== DEFAULT_SITE) params.set("site", site)
-}
-
-/** 站点参数拼接到路径（默认站不加参数） */
-export function siteUrl(path: string, site?: SiteId): string {
-  if (!site || site === DEFAULT_SITE) return path
-  return `${path}?site=${site}`
-}
-
-export function readPath(tid: string, site?: SiteId, bm?: string): string {
+export function readPath(tid: string, bm?: string): string {
   const p = new URLSearchParams()
-  withSite(p, site)
   if (bm) p.set("bm", bm)
   const qs = p.toString()
-  return `/read/${encodeURIComponent(tid)}${qs ? `?${qs}` : ""}`
+  return `${forumRoutes.home}/${encodeURIComponent(tid)}${qs ? `?${qs}` : ""}`
 }
 
 export function bookPath(
   cid: string,
-  opts?: { site?: SiteId; chapter?: string; bm?: string }
+  opts?: { chapter?: string; bm?: string }
 ): string {
   const p = new URLSearchParams()
-  withSite(p, opts?.site)
   if (opts?.chapter) p.set("chapter", opts.chapter)
   if (opts?.bm) p.set("bm", opts.bm)
   const qs = p.toString()
-  return `/book/${encodeURIComponent(cid)}${qs ? `?${qs}` : ""}`
+  return `${libraryRoutes.home}/${encodeURIComponent(cid)}${qs ? `?${qs}` : ""}`
 }
 
-/** Category / column listing (filtered). */
+/** 源内分类/关键词列表路径（站点由路径前缀表达，不再带 ?site=） */
 export function browsePath(opts: {
+  site?: SiteId
   type?: string | null
   q?: string | null
   page?: number
-  site?: SiteId
 }): string {
   const params = new URLSearchParams()
-  withSite(params, opts.site)
   if (opts.type) params.set("type", opts.type)
   if (opts.q) params.set("q", opts.q)
   if (opts.page && opts.page > 1) params.set("page", String(opts.page))
   const qs = params.toString()
-  return qs ? `${routes.browse}?${qs}` : routes.browse
+  const base = sourceRoutes(opts.site ?? DEFAULT_SITE).browse
+  return qs ? `${base}?${qs}` : base
 }
 
 export function searchPath(opts: {
+  site?: SiteId
   q: string
   page?: number
-  site?: SiteId
 }): string {
   const params = new URLSearchParams()
   params.set("q", opts.q)
-  withSite(params, opts.site)
   if (opts.page && opts.page > 1) params.set("page", String(opts.page))
-  return `${routes.search}?${params.toString()}`
+  return `${sourceRoutes(opts.site ?? DEFAULT_SITE).search}?${params.toString()}`
 }
 
 /** /api/me/* 列表查询串（q/kind/page），page>1 才带 */
@@ -225,90 +194,95 @@ export function parseQuery(
   return (searchParams.get("q") ?? "").trim()
 }
 
-/**
- * 导航高亮匹配。第二个参数是 location.search：
- * 书库的「分类找书 / 排行榜」只在查询串里带 site=2 时才属于该栏目，
- * 只看 pathname 会让这两项永远不亮。
- */
-export const FORUM_NAV_ITEMS = [
-  {
-    href: routes.home,
-    label: "首页",
-    match: (p: string) => p === routes.home,
-  },
-  {
-    href: routes.categories,
-    label: "分类",
-    match: (p: string) => p === routes.categories || p === routes.browse,
-  },
-  {
-    href: routes.discover,
-    label: "榜单",
-    match: (p: string) =>
-      p === routes.discover ||
-      p === routes.featured ||
-      p === routes.picks ||
-      p === routes.comments ||
-      p === routes.trending,
-  },
-  {
-    href: routes.archive,
-    label: "全部",
-    match: (p: string) => p === routes.archive || p === routes.groups,
-  },
-  {
-    href: routes.search,
-    label: "搜索",
-    match: (p: string) => p === routes.search,
-  },
-  {
-    href: routes.me,
-    label: "我的",
-    match: (p: string) =>
-      p === routes.me ||
-      p === routes.history ||
-      p === routes.favorites ||
-      p === routes.tags ||
-      p === routes.bookmarks ||
-      p === routes.stats ||
-      p === routes.jobs,
-  },
-] as const
+export interface NavItem {
+  href: string
+  label: string
+  match: (pathname: string) => boolean
+}
 
-/** 小说书库专属导航菜单 */
-export const NOVEL_NAV_ITEMS = [
+/**
+ * 一级导航（首页/分类/榜单/目录/搜索/我的）。href 取当前源的同名页：
+ * 在书库任意页点「分类」去 /xbook-cn/categories，论坛侧同理。
+ */
+export function navItems(site: SiteId): NavItem[] {
+  const s = sourceRoutes(site)
+  const endsWithAny = (...suffixes: string[]) => (p: string) =>
+    suffixes.some((suf) => p === suf || p.startsWith(`${suf}/`)) ||
+    suffixes.some((suf) => p.endsWith(suf))
+  return [
+    {
+      href: s.home,
+      label: "首页",
+      match: (p) =>
+        p === "/" || p === forumRoutes.home || p === libraryRoutes.home,
+    },
+    {
+      href: s.categories,
+      label: "分类",
+      match: endsWithAny(forumRoutes.categories, forumRoutes.browse),
+    },
+    {
+      href: site === "2" ? s.trending : forumRoutes.featured,
+      label: "榜单",
+      match: endsWithAny(
+        forumRoutes.featured,
+        forumRoutes.picks,
+        forumRoutes.comments,
+        forumRoutes.trending
+      ),
+    },
+    {
+      href: s.archive,
+      label: "目录",
+      match: endsWithAny(forumRoutes.archive, forumRoutes.groups),
+    },
+    { href: s.search, label: "搜索", match: endsWithAny(s.search) },
+    {
+      href: routes.me,
+      label: "我的",
+      match: endsWithAny(
+        routes.me,
+        routes.history,
+        routes.favorites,
+        routes.tags,
+        routes.bookmarks,
+        routes.stats,
+        routes.jobs
+      ),
+    },
+  ]
+}
+
+/** 页内二级「论坛 / 书库」切换目标：每个一级页给出两源对应落地路径，缺失的源不显示 */
+export type SiteTabTargets = Partial<Record<SiteId, string>>
+
+/** 发现页栏目：label + 各源落地路径（缺源的栏目在该源不显示） */
+export const DISCOVER_TABS: { label: string; paths: SiteTabTargets }[] = [
+  { label: "精华", paths: { "1": forumRoutes.featured } },
+  { label: "扫文", paths: { "1": forumRoutes.picks } },
+  { label: "评论", paths: { "1": forumRoutes.comments } },
   {
-    href: routes.novel,
-    label: "书库首页",
-    match: (p: string) => p === routes.novel,
+    label: "人气",
+    paths: { "1": forumRoutes.trending, "2": libraryRoutes.trending },
   },
+]
+
+/** 我的页栏目（个人阅读数据，跨站） */
+export const ME_TABS: { label: string; path: string }[] = [
+  { label: "概览", path: routes.me },
+  { label: "历史", path: routes.history },
+  { label: "收藏", path: routes.favorites },
+  { label: "标签", path: routes.tags },
+  { label: "书签", path: routes.bookmarks },
+  { label: "统计", path: routes.stats },
+  { label: "任务", path: routes.jobs },
+]
+
+/** 目录页栏目（归档整理视图；分组仅论坛有） */
+export const ALL_TABS: { label: string; paths: SiteTabTargets }[] = [
   {
-    href: `${routes.browse}?site=2&type=fantasy`,
-    label: "分类找书",
-    match: (p: string, search: string) =>
-      p === routes.browse && search.includes("site=2"),
+    label: "目录",
+    paths: { "1": forumRoutes.archive, "2": libraryRoutes.archive },
   },
-  {
-    href: `${routes.trending}?site=2`,
-    label: "排行榜",
-    match: (p: string, search: string) =>
-      p === routes.trending && search.includes("site=2"),
-  },
-  {
-    href: `${routes.search}?site=2`,
-    label: "搜书",
-    match: (p: string) => p === routes.search,
-  },
-  {
-    href: routes.me,
-    label: "我的书架",
-    match: (p: string) =>
-      p === routes.me ||
-      p === routes.history ||
-      p === routes.favorites ||
-      p === routes.tags ||
-      p === routes.bookmarks ||
-      p === routes.stats ||
-      p === routes.jobs,
-  },
-] as const
+  { label: "分组", paths: { "1": forumRoutes.groups } },
+]

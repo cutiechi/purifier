@@ -23,9 +23,8 @@ import {
 /** 书签跳回原文/原章节，带 bm 定位摘录 */
 function bookmarkHref(item: Bookmark): string {
   return item.kind === "post"
-    ? readPath(item.itemId, item.site, String(item.id))
+    ? readPath(item.itemId, String(item.id))
     : bookPath(item.itemId, {
-        site: item.site,
         chapter: item.chapter != null ? String(item.chapter) : undefined,
         bm: String(item.id),
       })

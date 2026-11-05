@@ -119,7 +119,6 @@ export default function BookPage() {
     // 跳到 ?bm=<id>：复用定位 effect（保留 site/chapter，同章导航不重新抓内容）
     navigate(
       bookPath(cid, {
-        site,
         chapter: isChapterBody ? chapter : undefined,
         bm: String(item.id),
       })
@@ -169,9 +168,9 @@ export default function BookPage() {
       )
         return
       if (e.key === "ArrowLeft" && book?.prevChapter !== undefined) {
-        navigate(bookPath(cid, { site, chapter: String(book.prevChapter) }))
+        navigate(bookPath(cid, { chapter: String(book.prevChapter) }))
       } else if (e.key === "ArrowRight" && book?.nextChapter !== undefined) {
-        navigate(bookPath(cid, { site, chapter: String(book.nextChapter) }))
+        navigate(bookPath(cid, { chapter: String(book.nextChapter) }))
       }
     }
     window.addEventListener("keydown", onKeyDown)
@@ -192,9 +191,9 @@ export default function BookPage() {
       const diffY = e.changedTouches[0].clientY - touchStartY
       if (Math.abs(diffX) > 90 && Math.abs(diffY) < 50) {
         if (diffX < 0 && book?.nextChapter !== undefined) {
-          navigate(bookPath(cid, { site, chapter: String(book.nextChapter) }))
+          navigate(bookPath(cid, { chapter: String(book.nextChapter) }))
         } else if (diffX > 0 && book?.prevChapter !== undefined) {
-          navigate(bookPath(cid, { site, chapter: String(book.prevChapter) }))
+          navigate(bookPath(cid, { chapter: String(book.prevChapter) }))
         }
       }
     }
@@ -496,7 +495,6 @@ export default function BookPage() {
                 <div className="mb-4 flex items-center gap-3">
                   <Link
                     to={bookPath(cid, {
-                      site,
                       chapter: String(state?.lastChapter ?? 1),
                     })}
                     className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
@@ -522,7 +520,6 @@ export default function BookPage() {
                         <PostCard
                           key={ch.index}
                           href={bookPath(cid, {
-                            site,
                             chapter: String(ch.index),
                           })}
                           title={ch.title}
@@ -543,7 +540,7 @@ export default function BookPage() {
                       {book.related.map((r) => (
                         <PostCard
                           key={r.tid}
-                          href={bookPath(r.tid, { site })}
+                          href={bookPath(r.tid)}
                           title={r.title}
                           leading={
                             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-medium text-muted-foreground tabular-nums">
@@ -588,7 +585,6 @@ export default function BookPage() {
                       {book.prevChapter !== undefined ? (
                         <Link
                           to={bookPath(cid, {
-                            site,
                             chapter: String(book.prevChapter),
                           })}
                           className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -608,7 +604,7 @@ export default function BookPage() {
                           <List className="size-4" /> 目录
                         </Button>
                         <Link
-                          to={bookPath(cid, { site })}
+                          to={bookPath(cid)}
                           className="inline-flex items-center rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                         >
                           书页
@@ -617,7 +613,6 @@ export default function BookPage() {
                       {book.nextChapter !== undefined ? (
                         <Link
                           to={bookPath(cid, {
-                            site,
                             chapter: String(book.nextChapter),
                           })}
                           className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -699,7 +694,7 @@ export default function BookPage() {
                       onClick={() => {
                         setTocOpen(false)
                         navigate(
-                          bookPath(cid, { site, chapter: String(ch.index) })
+                          bookPath(cid, { chapter: String(ch.index) })
                         )
                       }}
                       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${

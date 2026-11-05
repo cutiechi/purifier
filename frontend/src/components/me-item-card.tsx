@@ -38,9 +38,7 @@ export function MeItemCard({
   subtitleOverride?: string
 }) {
   const href =
-    item.kind === "post"
-      ? readPath(item.id, item.site)
-      : bookPath(item.id, { site: item.site })
+    item.kind === "post" ? readPath(item.id) : bookPath(item.id)
   const time = item.last_visited_at ?? item.favorited_at
   return (
     <div className="group flex flex-col rounded-2xl border border-border/60 bg-card/60 px-3.5 py-3.5 shadow-sm transition-all duration-200 hover:border-border sm:px-4 sm:py-4">

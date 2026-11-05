@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AsyncBody, Spinner } from "@/components/ui-state"
-import { PageHeader, SectionLabel } from "@/components/page-header"
+import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
 import { SimilarPostCard } from "@/components/similar-post-card"
-import { SourceBadge } from "@/components/source-badge"
+import { SiteTabs } from "@/components/site-tabs"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
-import { api, bookPath, readPath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import { api, forumRoutes, libraryRoutes, readPath } from "@/lib/routes"
 import { groupBooks, type GroupedItem } from "@/lib/book-groups"
 import type { ChapterLink } from "@/lib/types"
 
@@ -24,14 +25,6 @@ interface StreamState {
 }
 
 const EMPTY_STREAM: StreamState = { links: [], nextMtid: null }
-
-type StreamKey = "forum" | "library"
-
-const SITE_OF: Record<StreamKey, string> = { forum: "1", library: "2" }
-
-function msgOf(e: unknown): string {
-  return e instanceof Error ? e.message : "未知错误"
-}
 
 /** 边界解析：网络 JSON → StreamState；错误体取 error 字段 */
 function parseHomeResponse(res: Response): Promise<StreamState> {
@@ -54,110 +47,72 @@ function parseHomeResponse(res: Response): Promise<StreamState> {
   })
 }
 
-/** 首页：论坛 + 书库更新流同页合并（带来源徽标），无限滚动两站同步推进 */
-function StreamError({
-  label,
-  message,
-  onRetry,
-}: {
-  label: string
-  message: string
-  onRetry: () => void
-}) {
-  return (
-    <div
-      role="alert"
-      className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-destructive/25 bg-destructive/8 px-4 py-3.5 text-sm"
-    >
-      <span className="text-destructive">
-        {label}加载失败：{message}
-      </span>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="ml-auto inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-foreground hover:bg-accent"
-      >
-        重试
-      </button>
-    </div>
-  )
-}
-
+/** 论坛首页：更新流 + 系列折叠，无限滚动 */
 export default function HomePage() {
-  const [forum, setForum] = useState<StreamState>(EMPTY_STREAM)
-  const [library, setLibrary] = useState<StreamState>(EMPTY_STREAM)
+  const site = useSite()
+  const [stream, setStream] = useState<StreamState>(EMPTY_STREAM)
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  // 两站错误分开保存：一站超时不应把另一站的列表一起打成错误页
-  const [forumError, setForumError] = useState("")
-  const [libraryError, setLibraryError] = useState("")
+  const [fetchError, setFetchError] = useState("")
   const [loadMoreError, setLoadMoreError] = useState("")
 
   const { isExpanded, toggle } = useExpandedBooks("home")
-  const forumGrouped = useMemo(
+  const grouped = useMemo(
     () =>
       groupBooks(
-        forum.links,
+        stream.links,
         (l) => l.title,
         (l) => l.tid
       ),
-    [forum.links]
-  )
-  const libraryGrouped = useMemo(
-    () =>
-      groupBooks(
-        library.links,
-        (l) => l.title,
-        (l) => l.tid
-      ),
-    [library.links]
+    [stream.links]
   )
 
-  const nextRef = useRef<{ forum: string | null; library: string | null }>({
-    forum: null,
-    library: null,
-  })
-  nextRef.current = { forum: forum.nextMtid, library: library.nextMtid }
-  const hasMore = forum.nextMtid !== null || library.nextMtid !== null
+  const hasMore = stream.nextMtid !== null
   const loadingMoreRef = useRef(false)
   const seqRef = useRef(0)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
 
-  const loadStream = useCallback(async (key: StreamKey, mtid: string) => {
-    const stream = await parseHomeResponse(
-      await fetch(`${api.posts}?mtid=${mtid}&site=${SITE_OF[key]}`)
-    )
-    const setter = key === "forum" ? setForum : setLibrary
-    const clearError = key === "forum" ? setForumError : setLibraryError
-    clearError("")
-    setter((prev) => {
-      const seen = new Set(prev.links.map((l) => l.tid))
-      return {
-        links: [...prev.links, ...stream.links.filter((l) => !seen.has(l.tid))],
-        nextMtid: stream.nextMtid,
+  const fetchFirstPage = useCallback(async () => {
+    const seq = ++seqRef.current // 使在途 loadMore 响应失效
+    setInitialLoading(true)
+    setLoadMoreError("")
+    setFetchError("")
+    setStream(EMPTY_STREAM)
+    try {
+      // promise 直接交给 await：fetch 自身 reject（DNS/断网/连接被拒）
+      // 会跳过下面的 setInitialLoading(false)，页面永久停在 Spinner；
+      // 这里用 try/finally 保证复位。
+      setStream(await parseHomeResponse(await fetch(`${api.posts}?site=1`)))
+    } catch (e) {
+      if (seq === seqRef.current) {
+        setFetchError(e instanceof Error ? e.message : "未知错误")
       }
-    })
+    } finally {
+      if (seq === seqRef.current) setInitialLoading(false)
+    }
   }, [])
 
   const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMore) return
+    if (loadingMoreRef.current || stream.nextMtid === null) return
     loadingMoreRef.current = true
     setLoadingMore(true)
     setLoadMoreError("")
-
     const seq = seqRef.current
     try {
-      const next = nextRef.current
-      const tasks: Promise<void>[] = []
-      if (next.forum !== null) tasks.push(loadStream("forum", next.forum))
-      if (next.library !== null) tasks.push(loadStream("library", next.library))
-      // 分站隔离：一站翻页失败不该让另一站的成功结果被丢掉，
-      // 也不该把整块列表打成错误态。
-      const settled = await Promise.allSettled(tasks)
+      const next = await parseHomeResponse(
+        await fetch(`${api.posts}?mtid=${stream.nextMtid}&site=1`)
+      )
       if (seq !== seqRef.current) return
-      const rejected = settled.find((r) => r.status === "rejected")
-      if (rejected && settled.every((r) => r.status === "rejected")) {
-        throw rejected.reason
-      }
+      setStream((prev) => {
+        const seen = new Set(prev.links.map((l) => l.tid))
+        return {
+          links: [
+            ...prev.links,
+            ...next.links.filter((l) => !seen.has(l.tid)),
+          ],
+          nextMtid: next.nextMtid,
+        }
+      })
     } catch (e) {
       if (seq === seqRef.current) {
         setLoadMoreError(e instanceof Error ? e.message : "未知错误")
@@ -166,40 +121,14 @@ export default function HomePage() {
       loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [hasMore, loadStream])
-
-  const fetchFirstPage = useCallback(async () => {
-    const seq = ++seqRef.current // 使在途 loadMore 响应失效
-    setInitialLoading(true)
-    setForumError("")
-    setLibraryError("")
-    setLoadMoreError("")
-    setForum(EMPTY_STREAM)
-    setLibrary(EMPTY_STREAM)
-    try {
-      // promise 直接交给 allSettled：先 await 的话，fetch 自身 reject
-      // （DNS/断网/连接被拒）会跳过下面的 setInitialLoading(false)，
-      // 页面永久停在 Spinner。同时两站并发，不再串行。
-      const [forumRes, libraryRes] = await Promise.allSettled([
-        fetch(`${api.posts}?site=1`).then(parseHomeResponse),
-        fetch(`${api.posts}?site=2`).then(parseHomeResponse),
-      ])
-      if (seq !== seqRef.current) return
-      if (forumRes.status === "fulfilled") setForum(forumRes.value)
-      else setForumError(msgOf(forumRes.reason))
-      if (libraryRes.status === "fulfilled") setLibrary(libraryRes.value)
-      else setLibraryError(msgOf(libraryRes.reason))
-    } finally {
-      if (seq === seqRef.current) setInitialLoading(false)
-    }
-  }, [])
+  }, [stream.nextMtid])
 
   useEffect(() => {
     fetchFirstPage()
   }, [fetchFirstPage])
 
   useEffect(() => {
-    if (initialLoading || loadMoreError) return
+    if (initialLoading || loadMoreError || !hasMore) return
     const el = sentinelRef.current
     if (!el) return
     const observer = new IntersectionObserver(
@@ -210,58 +139,28 @@ export default function HomePage() {
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [
-    loadMore,
-    initialLoading,
-    loadMoreError,
-    forum.links.length,
-    library.links.length,
-  ])
+  }, [loadMore, initialLoading, loadMoreError, hasMore, stream.links.length])
 
-  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const total = stream.links.length
+  const noMore = !initialLoading && !hasMore && total > 0
 
-  const total = forum.links.length + library.links.length
-  // 只有两站都失败才把整页打成错误；单站失败用行内提示，另一站照常展示
-  const bothFailed = forumError !== "" && libraryError !== ""
-  const error = bothFailed ? forumError : ""
-  const noMore = !initialLoading && !error && !hasMore && total > 0
-
-  const retryStream = useCallback(async (key: StreamKey) => {
-    const setter = key === "forum" ? setForum : setLibrary
-    const setErr = key === "forum" ? setForumError : setLibraryError
-    setErr("")
-    try {
-      setter(
-        await parseHomeResponse(
-          await fetch(`${api.posts}?site=${SITE_OF[key]}`)
-        )
-      )
-    } catch (e) {
-      setErr(msgOf(e))
-    }
-  }, [])
-
-  function renderGrouped(g: GroupedItem<ChapterLink>, site: string) {
-    const isBook = site === "2"
+  function renderGrouped(g: GroupedItem<ChapterLink>) {
     if (g.type === "single") {
       const item = g.item
       return (
         <SimilarPostCard
-          key={`${site}:${item.tid}`}
-          href={
-            isBook ? bookPath(item.tid, { site }) : readPath(item.tid, site)
-          }
+          key={item.tid}
+          href={readPath(item.tid)}
           rawTitle={item.title}
           tid={item.tid}
-          site={site}
+          site="1"
           showGenre
-          badge={<SourceBadge site={site} />}
         />
       )
     }
     return (
       <CollapsibleBookGroup
-        key={`group:${site}:${g.key}`}
+        key={`group:${g.key}`}
         title={g.title}
         summary={g.author ?? undefined}
         count={g.items.length}
@@ -269,30 +168,25 @@ export default function HomePage() {
         isExpanded={isExpanded(g.key)}
         onToggle={() => toggle(g.key)}
         trailing={
-          <span className="flex shrink-0 items-center gap-2">
-            {g.genre ? <GenrePill genre={g.genre} /> : null}
-            <SourceBadge site={site} />
-          </span>
+          g.genre ? (
+            <span className="flex shrink-0 items-center gap-2">
+              <GenrePill genre={g.genre} />
+            </span>
+          ) : undefined
         }
-        similar={
-          !isBook
-            ? {
-                title: g.title,
-                groupKey: g.key,
-                seedItems: g.items.map((l) => ({
-                  tid: l.tid,
-                  title: l.title,
-                })),
-              }
-            : undefined
-        }
+        similar={{
+          title: g.title,
+          groupKey: g.key,
+          seedItems: g.items.map((l) => ({
+            tid: l.tid,
+            title: l.title,
+          })),
+        }}
       >
         {g.items.map((link) => (
           <ListPostCard
             key={link.tid}
-            href={
-              isBook ? bookPath(link.tid, { site }) : readPath(link.tid, site)
-            }
+            href={readPath(link.tid)}
             rawTitle={link.title}
             showGenre
           />
@@ -306,48 +200,24 @@ export default function HomePage() {
       <PageHeader
         title="首页"
         description={
-          !initialLoading && total > 0
-            ? `已载入 ${total} 条 · 论坛与书库更新`
-            : "最新更新 · 论坛与书库"
+          !initialLoading && total > 0 ? `已载入 ${total} 条 · 论坛更新` : "最新更新 · 论坛"
+        }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{ "1": forumRoutes.home, "2": libraryRoutes.home }}
+          />
         }
       />
 
       <AsyncBody
         loading={initialLoading}
-        error={error}
+        error={fetchError}
         empty={total === 0}
         onRetry={fetchFirstPage}
         emptyText="暂无内容"
       >
-        {forumError && !bothFailed && (
-          <StreamError
-            label="论坛更新"
-            message={forumError}
-            onRetry={() => void retryStream("forum")}
-          />
-        )}
-        {libraryError && !bothFailed && (
-          <StreamError
-            label="书库更新"
-            message={libraryError}
-            onRetry={() => void retryStream("library")}
-          />
-        )}
-
-        <PostList>
-          {forumGrouped.length > 0 && (
-            <SectionLabel className="sticky top-14 z-10 -mx-3.5 bg-background/95 px-3.5 py-2 backdrop-blur sm:-mx-5 sm:px-5">
-              论坛更新
-            </SectionLabel>
-          )}
-          {forumGrouped.map((g) => renderGrouped(g, "1"))}
-          {libraryGrouped.length > 0 && (
-            <SectionLabel className="sticky top-14 z-10 -mx-3.5 bg-background/95 px-3.5 py-2 backdrop-blur sm:-mx-5 sm:px-5">
-              书库更新
-            </SectionLabel>
-          )}
-          {libraryGrouped.map((g) => renderGrouped(g, "2"))}
-        </PostList>
+        <PostList>{grouped.map((g) => renderGrouped(g))}</PostList>
 
         {!loadMoreError && hasMore && (
           <div ref={sentinelRef} aria-hidden className="h-4" />

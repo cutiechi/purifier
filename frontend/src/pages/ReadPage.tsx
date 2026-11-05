@@ -109,7 +109,7 @@ export default function ReadPage() {
   }
   const handleJumpBookmark = (item: Bookmark) => {
     // 跳到 ?bm=<id>：复用定位 effect（同篇导航不重新抓内容）
-    navigate(readPath(tid, site, String(item.id)))
+    navigate(readPath(tid, String(item.id)))
   }
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState<ContentData | null>(null)
@@ -368,7 +368,6 @@ export default function ReadPage() {
       <ChapterNavBar
         prev={neighbors.prev}
         next={neighbors.next}
-        site={site}
         widthClass={pageWidthClass(settings.maxWidth)}
       />
       <ReadingSelectionToolbar

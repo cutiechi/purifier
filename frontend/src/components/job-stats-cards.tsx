@@ -1,6 +1,11 @@
 import { Link } from "react-router-dom"
 import { formatJobProgress, type ArchiveStatus, type Job } from "@/lib/jobs"
-import { routes, SITES, type SiteId } from "@/lib/routes"
+import {
+  forumRoutes,
+  libraryRoutes,
+  SITES,
+  type SiteId,
+} from "@/lib/routes"
 
 function lastSummary(job: Job | undefined): string {
   if (!job) return "还没跑过"
@@ -65,21 +70,21 @@ export function JobStatsCards({
   return (
     <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
       <Card
-        to={routes.archive}
+        to={forumRoutes.archive}
         title={SITES["1"].label}
         value={statuses["1"] ? `库内 ${statuses["1"].total} 条` : "—"}
         sub={lastSummary(lastByType["archive_posts"])}
         state={siteState("archive_posts", statuses["1"])}
       />
       <Card
-        to={`${routes.archive}?site=2`}
+        to={libraryRoutes.archive}
         title={SITES["2"].label}
         value={statuses["2"] ? `库内 ${statuses["2"].total} 条` : "—"}
         sub={lastSummary(lastByType["archive_books"])}
         state={siteState("archive_books", statuses["2"])}
       />
       <Card
-        to={routes.groups}
+        to={forumRoutes.groups}
         title="自动分组"
         value={groupTotal != null ? `${groupTotal} 组` : "—"}
         sub={lastSummary(lastByType["archive_auto_group"])}

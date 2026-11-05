@@ -1,13 +1,14 @@
 import { Fragment, useMemo } from "react"
+import { useLocation } from "react-router-dom"
 import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
+import { SiteTabs } from "@/components/site-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { GenrePill } from "@/components/list-post-card"
 import { SimilarPostCard } from "@/components/similar-post-card"
-import { SourceBadge } from "@/components/source-badge"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
@@ -15,7 +16,13 @@ import { useSite } from "@/hooks/use-site"
 import { formatCount } from "@/lib/format"
 import { groupBooks } from "@/lib/book-groups"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, bookPath, readPath, routes } from "@/lib/routes"
+import {
+  api,
+  bookPath,
+  forumRoutes,
+  libraryRoutes,
+  readPath,
+} from "@/lib/routes"
 
 interface TrendingPost {
   rank: number
@@ -27,12 +34,13 @@ interface TrendingPost {
 const pickPosts = (json: Record<string, unknown>): TrendingPost[] =>
   (json.posts as TrendingPost[]) ?? []
 
-/** 人气榜：论坛 / 书库分站展示，遵循 ?site=（与其它列表页一致） */
+/** 人气榜：论坛 / 书库分源展示（源由路径前缀表达） */
 export default function TrendingPage() {
   const site = useSite()
-  const sectionTabs = useDiscoverTabs(routes.trending)
+  const { pathname } = useLocation()
+  const sectionTabs = useDiscoverTabs(pathname)
   const isLibrary = site === "2"
-  // 只拉当前站：另一站的榜单请求永远用不到
+  // 只拉当前源：另一源的榜单请求永远用不到
   const current = useAsyncList(
     `${api.trending}?site=${isLibrary ? "2" : "1"}`,
     pickPosts
@@ -63,6 +71,15 @@ export default function TrendingPage() {
               )
             : "在线榜单与栏目"
         }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": forumRoutes.trending,
+              "2": libraryRoutes.trending,
+            }}
+          />
+        }
       />
       <SectionTabs items={sectionTabs} />
 
@@ -79,7 +96,7 @@ export default function TrendingPage() {
                 g.type === "single" ? (
                   <SimilarPostCard
                     key={`b:${g.item.tid}`}
-                    href={bookPath(g.item.tid, { site: "2" })}
+                    href={bookPath(g.item.tid)}
                     rawTitle={g.item.title}
                     tid={g.item.tid}
                     site="2"
@@ -87,7 +104,6 @@ export default function TrendingPage() {
                     statValue={formatCount(g.item.reads)}
                     statUnit="读"
                     showGenre
-                    badge={<SourceBadge site="2" />}
                   />
                 ) : (
                   <CollapsibleBookGroup
@@ -99,16 +115,17 @@ export default function TrendingPage() {
                     isExpanded={isExpanded(g.key)}
                     onToggle={() => toggle(g.key)}
                     trailing={
-                      <span className="flex shrink-0 items-center gap-2">
-                        {g.genre ? <GenrePill genre={g.genre} /> : null}
-                        <SourceBadge site="2" />
-                      </span>
+                      g.genre ? (
+                        <span className="flex shrink-0 items-center gap-2">
+                          <GenrePill genre={g.genre} />
+                        </span>
+                      ) : undefined
                     }
                   >
                     {g.items.map((post) => (
                       <ListPostCard
                         key={post.tid}
-                        href={bookPath(post.tid, { site: "2" })}
+                        href={bookPath(post.tid)}
                         rawTitle={post.title}
                         rank={post.rank}
                         statValue={formatCount(post.reads)}
@@ -141,7 +158,7 @@ export default function TrendingPage() {
                   const card = (
                     <SimilarPostCard
                       key={`f:${p.tid}`}
-                      href={readPath(p.tid, "1")}
+                      href={readPath(p.tid)}
                       rawTitle={p.title}
                       tid={p.tid}
                       site="1"
@@ -149,7 +166,6 @@ export default function TrendingPage() {
                       statValue={formatCount(p.reads)}
                       statUnit="读"
                       showGenre
-                      badge={<SourceBadge site="1" />}
                     />
                   )
                   return header ? (

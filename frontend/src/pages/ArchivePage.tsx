@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { type ReactNode } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useSearchParams } from "react-router-dom"
 import { PageShell, AsyncBody, Pager } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { SectionTabs } from "@/components/section-tabs"
+import { SiteTabs } from "@/components/site-tabs"
 import {
   FilterTabs,
   SearchForm,
@@ -12,8 +12,8 @@ import {
 import { GenrePill, ListPostCard } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
 import { PostList } from "@/components/post-card"
-import { SourceBadge } from "@/components/source-badge"
 import { useExpandedBooks } from "@/hooks/use-expanded-books"
+import { useSite } from "@/hooks/use-site"
 import { groupBooks, type GroupedItem } from "@/lib/book-groups"
 import { useAllTabs } from "@/lib/hub-tabs"
 import { formatTitleMeta, parseListTitle } from "@/lib/title-parse"
@@ -24,6 +24,8 @@ import {
 import {
   api,
   bookPath,
+  forumRoutes,
+  libraryRoutes,
   parsePage,
   parseQuery,
   readPath,
@@ -77,18 +79,19 @@ function buildParams(
 
 const EMPTY: ArchivePageData = { items: [], total: 0 }
 
-/** 目录：论坛 + 书库归档同页合并（带来源徽标），不再用站点 Tab 切换 */
+/** 目录：当前源的本地归档（论坛 /cool-18/archive · 书库 /xbook-cn/archive） */
 export default function ArchivePage() {
+  const site = useSite()
+  const { pathname } = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const rawSort = searchParams.get("sort")
-  // UI 高亮用论坛侧排序键（书库侧 tid 自动回落 archived_at）
-  const sort = parseSort(rawSort, "1")
-  const sectionTabs = useAllTabs(routes.archive)
+  // 书库 tid 是 cid，按 tid 排序无意义，自动回落 archived_at
+  const sort = parseSort(rawSort, site)
+  const sectionTabs = useAllTabs(pathname)
   const q = parseQuery(searchParams)
   const page = parsePage(searchParams)
 
-  const [forum, setForum] = useState<ArchivePageData>(EMPTY)
-  const [library, setLibrary] = useState<ArchivePageData>(EMPTY)
+  const [data, setData] = useState<ArchivePageData>(EMPTY)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [draftQ, setDraftQ] = useState(q)
@@ -104,38 +107,22 @@ export default function ArchivePage() {
     setLoading(true)
     setError("")
     try {
-      const [forumRes, libraryRes] = await Promise.all([
-        fetch(
-          `${api.meArchive}?${buildParams(parseSort(rawSort, "1"), "1", page, q)}`
-        ),
-        fetch(
-          `${api.meArchive}?${buildParams(parseSort(rawSort, "2"), "2", page, q)}`
-        ),
-      ])
-      const parse = async (
-        res: Response,
-        _fallback: ArchivePageData
-      ): Promise<ArchivePageData> => {
-        const json = (await res.json()) as {
-          items?: ArchivePost[]
-          nextPage?: number
-          total?: number
-          error?: string
-        }
-        if (!res.ok) throw new Error(json.error || "请求失败")
-        return {
-          items: json.items ?? [],
-          nextPage: json.nextPage,
-          total: typeof json.total === "number" ? json.total : 0,
-        }
+      const res = await fetch(
+        `${api.meArchive}?${buildParams(sort, site, page, q)}`
+      )
+      const json = (await res.json()) as {
+        items?: ArchivePost[]
+        nextPage?: number
+        total?: number
+        error?: string
       }
-      const [f, l] = await Promise.all([
-        parse(forumRes, EMPTY),
-        parse(libraryRes, EMPTY),
-      ])
+      if (!res.ok) throw new Error(json.error || "请求失败")
       if (seq !== seqRef.current) return
-      setForum(f)
-      setLibrary(l)
+      setData({
+        items: json.items ?? [],
+        nextPage: json.nextPage,
+        total: typeof json.total === "number" ? json.total : 0,
+      })
     } catch (e) {
       if (seq === seqRef.current) {
         setError(e instanceof Error ? e.message : "未知错误")
@@ -143,7 +130,7 @@ export default function ArchivePage() {
     } finally {
       if (seq === seqRef.current) setLoading(false)
     }
-  }, [rawSort, page, q])
+  }, [sort, site, page, q])
 
   useEffect(() => {
     void reload()
@@ -151,18 +138,12 @@ export default function ArchivePage() {
 
   useScrollTop([page, sort, q])
 
-  const total = forum.total + library.total
-  const items = useMemo(
-    () => [...forum.items, ...library.items],
-    [forum.items, library.items]
-  )
-  const hasNext = forum.nextPage !== undefined || library.nextPage !== undefined
-  const maxPages = Math.max(
-    calcTotalPages(forum.total, ARCHIVE_PAGE_SIZE),
-    calcTotalPages(library.total, ARCHIVE_PAGE_SIZE)
-  )
+  const total = data.total
+  const items = data.items
+  const hasNext = data.nextPage !== undefined
+  const maxPages = calcTotalPages(data.total, ARCHIVE_PAGE_SIZE)
 
-  // 页码越界 → 回退到最后一页（两站页数取大者）
+  // 页码越界 → 回退到最后一页
   useEffect(() => {
     if (loading || error) return
     if (maxPages <= 0) return
@@ -177,7 +158,7 @@ export default function ArchivePage() {
       else params.delete("q")
     }
     if (next.sort !== undefined) {
-      if (next.sort === "tid") params.delete("sort")
+      if (next.sort === parseSort(null, site)) params.delete("sort")
       else params.set("sort", next.sort)
     }
     const pageChanged = next.page !== undefined
@@ -200,32 +181,21 @@ export default function ArchivePage() {
   }, [draftQ])
 
   const { isExpanded, toggle } = useExpandedBooks("archive")
-  const forumGrouped = useMemo(
+  const grouped = useMemo(
     () =>
       groupBooks(
-        forum.items,
+        items,
         (it) => it.title,
         (it) => it.tid
       ),
-    [forum.items]
-  )
-  const libraryGrouped = useMemo(
-    () =>
-      groupBooks(
-        library.items,
-        (it) => it.title,
-        (it) => it.tid
-      ),
-    [library.items]
+    [items]
   )
 
   function itemHref(it: ArchivePost): string {
-    return it.site === "2"
-      ? bookPath(it.tid, { site: it.site })
-      : readPath(it.tid, it.site)
+    return it.site === "2" ? bookPath(it.tid) : readPath(it.tid)
   }
 
-  function renderGrouped(g: GroupedItem<ArchivePost>, badge: ReactNode) {
+  function renderGrouped(g: GroupedItem<ArchivePost>) {
     if (g.type === "single") {
       const item = g.item
       return (
@@ -234,11 +204,8 @@ export default function ArchivePage() {
           href={itemHref(item)}
           rawTitle={item.title}
           trailing={
-            <span className="flex shrink-0 items-center gap-2">
-              <span className="text-xs text-muted-foreground/70 tabular-nums">
-                #{item.tid}
-              </span>
-              {badge}
+            <span className="shrink-0 text-xs text-muted-foreground/70 tabular-nums">
+              #{item.tid}
             </span>
           }
         />
@@ -254,10 +221,11 @@ export default function ArchivePage() {
         isExpanded={isExpanded(g.key)}
         onToggle={() => toggle(g.key)}
         trailing={
-          <span className="flex shrink-0 items-center gap-2">
-            {g.genre ? <GenrePill genre={g.genre} /> : null}
-            {badge}
-          </span>
+          g.genre ? (
+            <span className="flex shrink-0 items-center gap-2">
+              <GenrePill genre={g.genre} />
+            </span>
+          ) : undefined
         }
       >
         {g.items.map((it) => {
@@ -293,14 +261,23 @@ export default function ArchivePage() {
     <PageShell maxWidth="xwide">
       <PageHeader
         title="目录"
-        description="本地全站归档 · 论坛与书库（由任务同步）"
+        description={`本地归档 · ${site === "2" ? "书库" : "论坛"}（由任务同步）`}
         action={
-          <Link
-            to={routes.jobs}
-            className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            更新目录
-          </Link>
+          <div className="flex items-center gap-2">
+            <SiteTabs
+              site={site}
+              targets={{
+                "1": forumRoutes.archive,
+                "2": libraryRoutes.archive,
+              }}
+            />
+            <Link
+              to={routes.jobs}
+              className="inline-flex min-h-10 items-center rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              更新目录
+            </Link>
+          </div>
         }
       />
       <SectionTabs items={sectionTabs} />
@@ -335,17 +312,12 @@ export default function ArchivePage() {
               >
                 任务
               </Link>
-              开始一次全站归档
+              开始一次归档
             </>
           )
         }
       >
-        <PostList>
-          {forumGrouped.map((g) => renderGrouped(g, <SourceBadge site="1" />))}
-          {libraryGrouped.map((g) =>
-            renderGrouped(g, <SourceBadge site="2" />)
-          )}
-        </PostList>
+        <PostList>{grouped.map((g) => renderGrouped(g))}</PostList>
         <Pager
           page={page}
           hasNext={hasNext}

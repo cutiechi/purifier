@@ -110,7 +110,7 @@ func ExtractPost(rawHTML string) (*ExtractedPost, error) {
 			if label == "" {
 				label = tid
 			}
-			return "/read/" + tid, label, true
+			return "/cool-18/" + tid, label, true
 		}
 		return "", "", false
 	}, sanitize.Options{PBreakClosing: false})
@@ -230,7 +230,7 @@ func ExtractBook(rawHTML, pageURL string) (*ExtractedBook, error) {
 			if label == "" {
 				label = tid
 			}
-			return "/read/" + tid, label, true
+			return "/cool-18/" + tid, label, true
 		}
 		return "", "", false
 	}, sanitize.Options{PBreakClosing: false})
@@ -486,14 +486,14 @@ func ExtractCategoryLinks(rawHTML string) ([]CategoryLink, error) {
 			if q == "" {
 				return
 			}
-			spaURL = "/browse?q=" + url.QueryEscape(q)
+			spaURL = "/cool-18/browse?q=" + url.QueryEscape(q)
 		case strings.Contains(href, "type="):
 			kind = "type"
 			t := upstreamQueryValue(href, "type")
 			if t == "" {
 				return
 			}
-			spaURL = "/browse?type=" + url.QueryEscape(t)
+			spaURL = "/cool-18/browse?type=" + url.QueryEscape(t)
 		default:
 			return // 其它外链不进入站内分类
 		}

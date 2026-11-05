@@ -15,7 +15,7 @@ import {
   type Job,
   type JobSortKey,
 } from "@/lib/jobs"
-import { routes, siteUrl } from "@/lib/routes"
+import { forumRoutes, libraryRoutes } from "@/lib/routes"
 import { cn } from "@/lib/utils"
 
 const POLL_MS = 1500
@@ -50,8 +50,10 @@ function paramSummary(job: Job): string {
 }
 
 function jumpTo(job: Job): string {
-  if (job.type === "archive_auto_group") return routes.groups
-  return siteUrl(routes.archive, archiveSite(job))
+  if (job.type === "archive_auto_group") return forumRoutes.groups
+  return archiveSite(job) === "2"
+    ? libraryRoutes.archive
+    : forumRoutes.archive
 }
 
 /** 可排序表头 */

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom"
 import { IconChevronLeft, IconChevronRight } from "@/components/icons"
-import { readPath, type SiteId } from "@/lib/routes"
+import { readPath } from "@/lib/routes"
 import { type ChapterLinkLike } from "@/lib/chapter-nav"
 
 /**
@@ -10,12 +10,10 @@ import { type ChapterLinkLike } from "@/lib/chapter-nav"
 export function ChapterNavBar({
   prev,
   next,
-  site,
   widthClass = "max-w-3xl",
 }: {
   prev?: ChapterLinkLike
   next?: ChapterLinkLike
-  site: SiteId
   widthClass?: string
 }) {
   if (!prev && !next) return null
@@ -31,7 +29,7 @@ export function ChapterNavBar({
       >
         {prev ? (
           <Link
-            to={readPath(prev.tid, site)}
+            to={readPath(prev.tid)}
             className="inline-flex min-h-10 min-w-0 flex-1 items-center gap-1 rounded-xl px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <IconChevronLeft size={16} />
@@ -42,7 +40,7 @@ export function ChapterNavBar({
         )}
         {next ? (
           <Link
-            to={readPath(next.tid, site)}
+            to={readPath(next.tid)}
             className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-end gap-1 rounded-xl px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <span className="line-clamp-1">{next.title}</span>

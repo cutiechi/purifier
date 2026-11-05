@@ -10,7 +10,7 @@ import {
 } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { Spinner } from "@/components/ui-state"
-import { api, routes } from "@/lib/routes"
+import { api, forumRoutes, routes } from "@/lib/routes"
 
 /** 与 core 的 AuthMe 同形（web 不依赖 @workspace/core） */
 export type AuthMe = {
@@ -250,7 +250,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
   if (!enabled && pathname === routes.login) {
-    return <Navigate to={routes.home} replace />
+    return <Navigate to={forumRoutes.home} replace />
   }
   return <>{children}</>
 }

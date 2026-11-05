@@ -290,9 +290,6 @@ func SetupRouter(deps RouterDependencies) *chi.Mux {
 			}
 			deps.Cool18Handler.HandleBrowse(w, r)
 		}))
-		// 搜索一个请求会并发打两个上游，按客户端 IP 限流。
-		searchLimiter := newRateLimiter(20, time.Minute)
-		r.With(searchLimiter.middleware).Get("/search", NewSearchHandler(deps.Cool18Service, deps.XChinaService).HandleSearch)
 	})
 
 	// 2. 前端 SPA 静态托管及回退

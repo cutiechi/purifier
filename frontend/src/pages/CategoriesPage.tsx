@@ -1,10 +1,17 @@
 import { CategoryGrid, type CategoryItem } from "@/components/category-grid"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
+import { SiteTabs } from "@/components/site-tabs"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
-import { api, DEFAULT_SITE, SITES, type SiteId } from "@/lib/routes"
+import {
+  api,
+  DEFAULT_SITE,
+  forumRoutes,
+  libraryRoutes,
+  type SiteId,
+} from "@/lib/routes"
 
 function normalize(raw: CategoryItem): CategoryItem {
   if (raw.kind) return raw
@@ -28,19 +35,15 @@ type AsyncCategoryState = {
   reload: () => void
 }
 
-/** 单站分类区块：站点小标题 + 异步三态 + 网格 */
+/** 单源分类区块：异步三态 + 网格（源由页内二级切换表达，不再重复小标题） */
 function CategorySection({
-  siteId,
   items,
   loading,
   error,
   reload,
-}: AsyncCategoryState & { siteId: SiteId }) {
+}: AsyncCategoryState) {
   return (
     <section>
-      <h2 className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground">
-        {SITES[siteId].label}
-      </h2>
       <AsyncBody
         loading={loading}
         error={error}
@@ -54,24 +57,21 @@ function CategorySection({
   )
 }
 
-/** 页头描述：只统计成功加载（非 loading、非 error）的站，
- *  保证文案与页面可见内容一致；题材口径含书库「有声」（kind==="type"）。 */
-function describeHeader(...sites: AsyncCategoryState[]): string {
-  if (sites.some((s) => s.loading)) return "书屋栏目与题材"
-  const loaded = sites.filter((s) => !s.error)
-  if (loaded.length === 0) return "书屋栏目与题材"
-  const items = loaded.flatMap((s) => s.items)
-  const typeCount = items.filter((i) => i.kind === "type").length
+/** 页头描述：题材口径含书库「有声」（kind==="type"） */
+function describeHeader(site: SiteId, state: AsyncCategoryState): string {
+  if (state.loading) return site === "2" ? "书库题材" : "书屋栏目"
+  if (state.error || state.items.length === 0)
+    return site === "2" ? "书库题材" : "书屋栏目"
+  const typeCount = state.items.filter((i) => i.kind === "type").length
   if (typeCount > 0) return `共 ${typeCount} 个题材`
-  if (items.length > 0) return `共 ${items.length} 个入口`
-  return "书屋栏目与题材"
+  return `共 ${state.items.length} 个栏目入口`
 }
 
-/** 分类：单站渲染（遵循 ?site=），书库站返回题材标签入口 */
+/** 分类：当前源的栏目/题材入口，页内二级切换另一源 */
 export default function CategoriesPage() {
   const site = useSite()
   const isLibrary = site === "2"
-  // 只拉当前站：另一站的请求永远用不到
+  // 只拉当前源：另一源的请求永远用不到
   const current = useAsyncList(
     `${api.categories}?site=${isLibrary ? "2" : DEFAULT_SITE}`,
     pickLinks
@@ -81,10 +81,19 @@ export default function CategoriesPage() {
     <PageShell>
       <PageHeader
         title="分类"
-        description={describeHeader(current)}
+        description={describeHeader(site, current)}
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": forumRoutes.categories,
+              "2": libraryRoutes.categories,
+            }}
+          />
+        }
       />
       <div className="flex flex-col gap-8">
-        <CategorySection siteId={site} {...current} />
+        <CategorySection {...current} />
       </div>
     </PageShell>
   )

@@ -1,8 +1,9 @@
 import { useMemo } from "react"
-import { Navigate } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
+import { SiteTabs } from "@/components/site-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { AsyncBody } from "@/components/ui-state"
@@ -14,18 +15,21 @@ import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, readPath, routes } from "@/lib/routes"
+import {
+  api,
+  forumRoutes,
+  libraryRoutes,
+  readPath,
+} from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 
 export default function FeaturedPage() {
   const site = useSite()
-  const sectionTabs = useDiscoverTabs(routes.featured)
-  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
-  const isForum = site === "1"
+  const { pathname } = useLocation()
+  const sectionTabs = useDiscoverTabs(pathname)
   const { items, loading, error, reload } = useAsyncList(
     api.featured,
-    (json) => (json.links as ChapterLink[]) ?? [],
-    { enabled: isForum }
+    (json) => (json.links as ChapterLink[]) ?? []
   )
 
   const { isExpanded, toggle } = useExpandedBooks("featured")
@@ -45,10 +49,6 @@ export default function FeaturedPage() {
     return m
   }, [items])
 
-  if (site !== "1") {
-    return <Navigate to={`${routes.trending}?site=${site}`} replace />
-  }
-
   return (
     <PageShell>
       <PageHeader
@@ -57,6 +57,15 @@ export default function FeaturedPage() {
           items.length
             ? pageCountLabel(items.length, "篇", "精华热贴")
             : "在线榜单与栏目"
+        }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": forumRoutes.featured,
+              "2": libraryRoutes.trending,
+            }}
+          />
         }
       />
       <SectionTabs items={sectionTabs} />

@@ -1,11 +1,10 @@
 import { lazy, Suspense, type ReactNode } from "react"
-import { Route, Routes, useLocation } from "react-router-dom"
+import { Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 const HomePage = lazy(() => import("@/pages/HomePage"))
 const NovelPage = lazy(() => import("@/pages/NovelPage"))
 const CategoriesPage = lazy(() => import("@/pages/CategoriesPage"))
-const DiscoverPage = lazy(() => import("@/pages/DiscoverPage"))
 const FeaturedPage = lazy(() => import("@/pages/FeaturedPage"))
 const PicksPage = lazy(() => import("@/pages/PicksPage"))
 const CommentsPage = lazy(() => import("@/pages/CommentsPage"))
@@ -44,195 +43,87 @@ function RouteBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
 }
 
+function page(node: ReactNode) {
+  return <RouteBoundary>{node}</RouteBoundary>
+}
+
+/**
+ * 路由表：一级 = 内容类型，二级 = 内容源（路径前缀 /cool-18 · /xbook-cn）。
+ * 静态段（categories/featured/…）由 React Router 优先匹配，
+ * 极简内容路由 /cool-18/:tid · /xbook-cn/:cid 只兜底其余一级路径。
+ */
 export function App() {
   return (
     <ErrorBoundary>
       <Suspense fallback={<PageFallback />}>
         <Routes>
+          <Route path="/" element={<Navigate to="/cool-18" replace />} />
+
+          {/* 首页 */}
+          <Route path="/cool-18" element={page(<HomePage />)} />
+          <Route path="/xbook-cn" element={page(<NovelPage />)} />
+
+          {/* 分类 */}
           <Route
-            path="/"
-            element={
-              <RouteBoundary>
-                <HomePage />
-              </RouteBoundary>
-            }
+            path="/cool-18/categories"
+            element={page(<CategoriesPage />)}
+          />
+          <Route path="/cool-18/browse" element={page(<BrowsePage />)} />
+          <Route
+            path="/xbook-cn/categories"
+            element={page(<CategoriesPage />)}
+          />
+          <Route path="/xbook-cn/browse" element={page(<BrowsePage />)} />
+
+          {/* 榜单（论坛全量，书库仅人气） */}
+          <Route
+            path="/cool-18/featured"
+            element={page(<FeaturedPage />)}
+          />
+          <Route path="/cool-18/picks" element={page(<PicksPage />)} />
+          <Route
+            path="/cool-18/comments"
+            element={page(<CommentsPage />)}
           />
           <Route
-            path="/novel"
-            element={
-              <RouteBoundary>
-                <NovelPage />
-              </RouteBoundary>
-            }
+            path="/cool-18/trending"
+            element={page(<TrendingPage />)}
           />
           <Route
-            path="/categories"
-            element={
-              <RouteBoundary>
-                <CategoriesPage />
-              </RouteBoundary>
-            }
+            path="/xbook-cn/trending"
+            element={page(<TrendingPage />)}
           />
+
+          {/* 目录 */}
           <Route
-            path="/discover"
-            element={
-              <RouteBoundary>
-                <DiscoverPage />
-              </RouteBoundary>
-            }
+            path="/cool-18/archive"
+            element={page(<ArchivePage />)}
           />
+          <Route path="/cool-18/groups" element={page(<GroupPage />)} />
           <Route
-            path="/featured"
-            element={
-              <RouteBoundary>
-                <FeaturedPage />
-              </RouteBoundary>
-            }
+            path="/xbook-cn/archive"
+            element={page(<ArchivePage />)}
           />
-          <Route
-            path="/picks"
-            element={
-              <RouteBoundary>
-                <PicksPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/comments"
-            element={
-              <RouteBoundary>
-                <CommentsPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/trending"
-            element={
-              <RouteBoundary>
-                <TrendingPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/browse"
-            element={
-              <RouteBoundary>
-                <BrowsePage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/search"
-            element={
-              <RouteBoundary>
-                <SearchPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/read/:tid"
-            element={
-              <RouteBoundary>
-                <ReadPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/book/:cid"
-            element={
-              <RouteBoundary>
-                <BookPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/me"
-            element={
-              <RouteBoundary>
-                <MePage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <RouteBoundary>
-                <HistoryPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/favorites"
-            element={
-              <RouteBoundary>
-                <FavoritesPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/tags"
-            element={
-              <RouteBoundary>
-                <TagsPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/bookmarks"
-            element={
-              <RouteBoundary>
-                <BookmarksPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/groups"
-            element={
-              <RouteBoundary>
-                <GroupPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/jobs"
-            element={
-              <RouteBoundary>
-                <JobsPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/archive"
-            element={
-              <RouteBoundary>
-                <ArchivePage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/stats"
-            element={
-              <RouteBoundary>
-                <StatsPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="/login"
-            element={
-              <RouteBoundary>
-                <LoginPage />
-              </RouteBoundary>
-            }
-          />
-          <Route
-            path="*"
-            element={
-              <RouteBoundary>
-                <NotFoundPage />
-              </RouteBoundary>
-            }
-          />
+
+          {/* 搜索（单源，跨站合并搜索已退场） */}
+          <Route path="/cool-18/search" element={page(<SearchPage />)} />
+          <Route path="/xbook-cn/search" element={page(<SearchPage />)} />
+
+          {/* 内容页（极简动态段，静态段优先级更高） */}
+          <Route path="/cool-18/:tid" element={page(<ReadPage />)} />
+          <Route path="/xbook-cn/:cid" element={page(<BookPage />)} />
+
+          {/* 我的（跨站个人资产，保留可选 ?site= 过滤） */}
+          <Route path="/me" element={page(<MePage />)} />
+          <Route path="/history" element={page(<HistoryPage />)} />
+          <Route path="/favorites" element={page(<FavoritesPage />)} />
+          <Route path="/tags" element={page(<TagsPage />)} />
+          <Route path="/bookmarks" element={page(<BookmarksPage />)} />
+          <Route path="/jobs" element={page(<JobsPage />)} />
+          <Route path="/stats" element={page(<StatsPage />)} />
+
+          <Route path="/login" element={page(<LoginPage />)} />
+          <Route path="*" element={page(<NotFoundPage />)} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

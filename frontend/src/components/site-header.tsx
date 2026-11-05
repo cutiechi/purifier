@@ -8,66 +8,23 @@ import {
   IconSearch,
 } from "@/components/icons"
 import { ModeToggle } from "@/components/mode-toggle"
-import { useSite, useSetSite } from "@/hooks/use-site"
+import { useSite } from "@/hooks/use-site"
 import { useAuth } from "@/lib/auth"
-import { FORUM_NAV_ITEMS, NOVEL_NAV_ITEMS, routes } from "@/lib/routes"
+import { navItems, sourceRoutes } from "@/lib/routes"
 import { cn } from "@/lib/utils"
 
 export function SiteHeader({ showBack }: { showBack?: boolean }) {
   const navigate = useNavigate()
-  const { pathname, search } = useLocation()
+  const { pathname } = useLocation()
   const site = useSite()
-  const setSite = useSetSite()
   const { enabled, user, logout } = useAuth()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLElement | null>(null)
   const toggleRef = useRef<HTMLButtonElement | null>(null)
 
-  // 频道判断：路径为 novel 或 book 或 site=2 时进入小说书库模式
-  const isNovel =
-    pathname === routes.novel ||
-    pathname.startsWith("/novel") ||
-    pathname.startsWith("/book") ||
-    site === "2" ||
-    search.includes("site=2")
-
-  const currentChannel = isNovel ? "novel" : "forum"
-  const items = isNovel ? NOVEL_NAV_ITEMS : FORUM_NAV_ITEMS
-
-  // 顶栏药丸按页切换站点逻辑：
-  // 1. 停留并只改 ?site= (路径不变)
-  const isStayAndSetSite =
-    pathname === "/browse" ||
-    pathname === "/categories" ||
-    pathname === "/trending" ||
-    pathname === "/search" ||
-    pathname.startsWith("/read/") ||
-    pathname.startsWith("/book/")
-
-  // 2. 论坛专属页：切书库跳 /novel，切论坛留在原地
-  const isForumOnly =
-    pathname === "/featured" ||
-    pathname === "/picks" ||
-    pathname === "/comments" ||
-    pathname === "/groups"
-
-  const handleSwitchToForum = () => {
-    if (isStayAndSetSite) {
-      setSite("1")
-    } else if (isForumOnly) {
-      setSite("1")
-    } else {
-      navigate(routes.home)
-    }
-  }
-
-  const handleSwitchToNovel = () => {
-    if (isStayAndSetSite) {
-      setSite("2")
-    } else {
-      navigate(routes.novel)
-    }
-  }
+  // 一级导航：首页/分类/榜单/目录/搜索/我的，href 取当前源的同名页
+  const items = navItems(site)
+  const source = sourceRoutes(site)
 
   useEffect(() => {
     setOpen(false)
@@ -103,7 +60,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
           <button
             type="button"
             onClick={() => {
-              if (window.history.state?.idx === 0) navigate(routes.home)
+              if (window.history.state?.idx === 0) navigate(source.home)
               else navigate(-1)
             }}
             className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -114,7 +71,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
         ) : null}
 
         <Link
-          to={isNovel ? routes.novel : routes.home}
+          to={source.home}
           className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-accent"
           aria-label="Purifier 首页"
         >
@@ -127,41 +84,13 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
           />
         </Link>
 
-        {/* 顶级频道切换 Segmented Pill (论坛 vs 书库) */}
-        <div className="flex items-center rounded-xl bg-muted/60 p-0.5 text-xs font-medium">
-          <button
-            type="button"
-            onClick={handleSwitchToForum}
-            className={cn(
-              "flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
-              currentChannel === "forum"
-                ? "bg-background font-semibold text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            论坛
-          </button>
-          <button
-            type="button"
-            onClick={handleSwitchToNovel}
-            className={cn(
-              "flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 transition-all select-none",
-              currentChannel === "novel"
-                ? "bg-background font-semibold text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            书库
-          </button>
-        </div>
-
-        {/* 频道专属导航项（桌面端） */}
+        {/* 一级导航项（桌面端） */}
         <nav className="ml-1 hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto md:flex">
           {items.map((item) => {
-            const active = item.match(pathname, search)
+            const active = item.match(pathname)
             return (
               <Link
-                key={item.href}
+                key={item.label}
                 to={item.href}
                 className={cn(
                   "inline-flex h-10 shrink-0 items-center rounded-lg px-2.5 text-[13px] font-medium transition-colors",
@@ -178,7 +107,7 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
 
         <div className="ml-auto flex items-center gap-1">
           <Link
-            to={isNovel ? routes.search + "?site=2" : routes.search}
+            to={source.search}
             className="flex size-10 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
             aria-label="搜索"
           >
@@ -223,10 +152,10 @@ export function SiteHeader({ showBack }: { showBack?: boolean }) {
         >
           <div className="grid grid-cols-2 gap-1.5 pb-1 sm:grid-cols-4">
             {items.map((item) => {
-              const active = item.match(pathname, search)
+              const active = item.match(pathname)
               return (
                 <Link
-                  key={item.href}
+                  key={item.label}
                   to={item.href}
                   className={cn(
                     "inline-flex h-10 items-center justify-center rounded-xl px-3.5 text-[13px] font-medium transition-colors",

@@ -4,18 +4,10 @@
  * Group 在 lib/groups.ts、书签在 hooks/use-bookmarks.ts），此处不再重复定义。
  */
 
-export type ItemKind = "post" | "book"
-
 export interface ChapterLink {
   index: number
   title: string
   tid: string
-}
-
-export interface MergedSearchItem {
-  site: string
-  kind: ItemKind
-  link: ChapterLink
 }
 
 export interface CharacterScope {

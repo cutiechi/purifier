@@ -10,7 +10,7 @@ import {
 import { SectionTabs } from "@/components/section-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
-import { api, bookPath, readPath, routes } from "@/lib/routes"
+import { api, bookPath, forumRoutes, readPath, routes } from "@/lib/routes"
 import { BookCover } from "@/components/book-cover"
 import { useMeTabs } from "@/lib/hub-tabs"
 
@@ -124,7 +124,7 @@ export default function MePage() {
               阅读统计
             </Link>
             <Link
-              to={routes.groups}
+              to={forumRoutes.groups}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
               <Folder className="size-4" />
@@ -162,7 +162,7 @@ export default function MePage() {
                   <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
                     <div className="flex flex-col gap-1">
                       <Link
-                        to={bookPath(item.id, { site: "2" })}
+                        to={bookPath(item.id)}
                         className="line-clamp-2 text-sm font-semibold text-foreground transition-colors group-hover:text-primary"
                       >
                         {item.title}
@@ -176,7 +176,6 @@ export default function MePage() {
                     <div className="flex items-center justify-between pt-2">
                       <Link
                         to={bookPath(item.id, {
-                          site: "2",
                           chapter: String(item.last_chapter ?? 1),
                         })}
                         className="text-xs font-medium text-primary hover:underline"
@@ -184,7 +183,7 @@ export default function MePage() {
                         继续阅读 &rarr;
                       </Link>
                       <Link
-                        to={bookPath(item.id, { site: "2" })}
+                        to={bookPath(item.id)}
                         className="text-[11px] text-muted-foreground hover:text-foreground"
                       >
                         目录
@@ -224,7 +223,7 @@ export default function MePage() {
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <Link
-                      to={readPath(post.id, "1")}
+                      to={readPath(post.id)}
                       className="truncate text-sm font-medium text-foreground transition-colors hover:text-primary"
                     >
                       {post.title}
@@ -234,7 +233,7 @@ export default function MePage() {
                     </span>
                   </div>
                   <Link
-                    to={readPath(post.id, "1")}
+                    to={readPath(post.id)}
                     className="shrink-0 rounded-lg border border-border/60 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
                   >
                     阅读帖子

@@ -1,19 +1,19 @@
-import { Navigate } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
+import { SiteTabs } from "@/components/site-tabs"
 import { PicksSections, type PickSection } from "@/components/picks-sections"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
 import { useSite } from "@/hooks/use-site"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, routes } from "@/lib/routes"
+import { api, forumRoutes, libraryRoutes } from "@/lib/routes"
 
 export default function PicksPage() {
   const site = useSite()
-  const sectionTabs = useDiscoverTabs(routes.picks)
-  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
-  const isForum = site === "1"
+  const { pathname } = useLocation()
+  const sectionTabs = useDiscoverTabs(pathname)
   const {
     items: sections,
     loading,
@@ -22,15 +22,10 @@ export default function PicksPage() {
   } = useAsyncList(
     api.picks,
     (json) =>
-      ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length),
-    { enabled: isForum }
+      ((json.sections as PickSection[]) ?? []).filter((s) => s.links?.length)
   )
 
   const total = sections.reduce((n, s) => n + s.links.length, 0)
-
-  if (site !== "1") {
-    return <Navigate to={`${routes.trending}?site=${site}`} replace />
-  }
 
   return (
     <PageShell>
@@ -40,6 +35,15 @@ export default function PicksPage() {
           sections.length
             ? `扫文 · 共 ${total} 条 · ${sections.length} 组`
             : "在线榜单与栏目"
+        }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": forumRoutes.picks,
+              "2": libraryRoutes.trending,
+            }}
+          />
         }
       />
       <SectionTabs items={sectionTabs} />

@@ -36,7 +36,7 @@ func TestExtractPost(t *testing.T) {
 	if strings.Contains(post.Content, "水印噪音") {
 		t.Fatalf("watermark font should be removed, got: %s", post.Content)
 	}
-	if !strings.Contains(post.Content, `<a href="/read/14621195">下篇：第3-5章</a>`) {
+	if !strings.Contains(post.Content, `<a href="/cool-18/14621195">下篇：第3-5章</a>`) {
 		t.Fatalf("internal link in content should be preserved, got: %s", post.Content)
 	}
 	if len(post.Links) != 1 || post.Links[0].Tid != "14621196" {
@@ -122,17 +122,17 @@ func TestExtractCategoryLinksAreSPARoutes(t *testing.T) {
 		t.Fatalf("want 2 links (外链被剔除), got %d: %+v", len(links), links)
 	}
 	for _, l := range links {
-		if !strings.HasPrefix(l.URL, "/browse?") {
-			t.Errorf("url must be an internal /browse route, got %q", l.URL)
+		if !strings.HasPrefix(l.URL, "/cool-18/browse?") {
+			t.Errorf("url must be an internal /cool-18/browse route, got %q", l.URL)
 		}
 		if l.Label == "" {
 			t.Errorf("missing label for %q", l.URL)
 		}
 	}
-	if links[0].URL != "/browse?q=%E5%8E%9F%E5%88%9B" {
+	if links[0].URL != "/cool-18/browse?q=%E5%8E%9F%E5%88%9B" {
 		t.Errorf("column link wrong: %q", links[0].URL)
 	}
-	if links[1].URL != "/browse?type=%E9%83%BD%E5%B8%82" {
+	if links[1].URL != "/cool-18/browse?type=%E9%83%BD%E5%B8%82" {
 		t.Errorf("type link wrong: %q", links[1].URL)
 	}
 	if links[0].Kind != "column" || links[1].Kind != "type" {

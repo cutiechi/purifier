@@ -1,8 +1,9 @@
 import { Fragment, useMemo } from "react"
-import { Navigate } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { PageHeader, SectionLabel } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { SectionTabs } from "@/components/section-tabs"
+import { SiteTabs } from "@/components/site-tabs"
 import { PostList } from "@/components/post-card"
 import { ListPostCard, pageCountLabel } from "@/components/list-post-card"
 import { CollapsibleBookGroup } from "@/components/collapsible-book-group"
@@ -10,12 +11,12 @@ import { GenrePill } from "@/components/list-post-card"
 import { SimilarPostCard } from "@/components/similar-post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
-import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { useSite } from "@/hooks/use-site"
+import { useExpandedBooks } from "@/hooks/use-expanded-books"
 import { formatCount } from "@/lib/format"
 import { groupBooks } from "@/lib/book-groups"
 import { useDiscoverTabs } from "@/lib/hub-tabs"
-import { api, readPath, routes } from "@/lib/routes"
+import { api, forumRoutes, libraryRoutes, readPath } from "@/lib/routes"
 
 interface CommentRankPost {
   rank: number
@@ -26,30 +27,23 @@ interface CommentRankPost {
 
 export default function CommentsPage() {
   const site = useSite()
-  const sectionTabs = useDiscoverTabs(routes.comments)
-  // 非论坛站会立刻重定向到人气榜，先别打这一次上游。
-  const isForum = site === "1"
+  const { pathname } = useLocation()
+  const sectionTabs = useDiscoverTabs(pathname)
   const { items, loading, error, reload } = useAsyncList(
     api.comments,
-    (json) => (json.posts as CommentRankPost[]) ?? [],
-    { enabled: isForum }
+    (json) => (json.posts as CommentRankPost[]) ?? []
   )
 
   const { isExpanded, toggle } = useExpandedBooks("comments")
-  const grouped = useMemo(() => {
-    if (site !== "1") {
-      return items.map((item) => ({ type: "single" as const, item }))
-    }
-    return groupBooks(
-      items,
-      (p) => p.title,
-      (p) => p.tid
-    )
-  }, [items, site])
-
-  if (site !== "1") {
-    return <Navigate to={`${routes.trending}?site=${site}`} replace />
-  }
+  const grouped = useMemo(
+    () =>
+      groupBooks(
+        items,
+        (p) => p.title,
+        (p) => p.tid
+      ),
+    [items]
+  )
 
   return (
     <PageShell>
@@ -59,6 +53,15 @@ export default function CommentsPage() {
           items.length
             ? pageCountLabel(items.length, "帖", "评论榜")
             : "在线榜单与栏目"
+        }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": forumRoutes.comments,
+              "2": libraryRoutes.trending,
+            }}
+          />
         }
       />
       <SectionTabs items={sectionTabs} />

@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorBox } from "@/components/ui-state"
 import { useDocumentTitle } from "@/components/page-header"
 import { safeFrom, useAuth } from "@/lib/auth"
-import { routes } from "@/lib/routes"
+import { forumRoutes, routes } from "@/lib/routes"
 
 const EXPIRED_TEXT = "登录链接已过期，请重新登录"
 const FROM_KEY = "purifier:loginFrom"
@@ -12,7 +12,7 @@ const FROM_KEY = "purifier:loginFrom"
 function loginTarget(from: string | null): string {
   const target = safeFrom(from)
   return target === routes.login || target.startsWith(`${routes.login}?`)
-    ? routes.home
+    ? forumRoutes.home
     : target
 }
 

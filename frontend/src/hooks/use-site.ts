@@ -1,23 +1,14 @@
-import { useCallback } from "react"
-import { useSearchParams } from "react-router-dom"
-import { DEFAULT_SITE, type SiteId } from "@/lib/routes"
+import { useLocation, useSearchParams } from "react-router-dom"
+import type { SiteId } from "@/lib/routes"
 
+/**
+ * 站点身份由路径前缀表达：`/xbook-cn/*` → 书库，其余 → 论坛。
+ * 无前缀的跨站页（我的/*）保留可选 `?site=` 过滤。
+ */
 export function useSite(): SiteId {
+  const { pathname } = useLocation()
   const [params] = useSearchParams()
-  const s = params.get("site") ?? DEFAULT_SITE
-  return s === "2" ? "2" : "1" // 只认 1/2，其余归 1
-}
-
-/** 仅改当前 URL 的 ?site=，不跳转路径（页内站点 Tab 用） */
-export function useSetSite(): (next: SiteId) => void {
-  const [params, setParams] = useSearchParams()
-  return useCallback(
-    (next: SiteId) => {
-      const p = new URLSearchParams(params)
-      if (next === DEFAULT_SITE) p.delete("site")
-      else p.set("site", next)
-      setParams(p, { replace: true })
-    },
-    [params, setParams]
-  )
+  if (pathname.startsWith("/xbook-cn")) return "2"
+  const s = params.get("site")
+  return s === "2" ? "2" : "1"
 }

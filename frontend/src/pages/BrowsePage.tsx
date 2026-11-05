@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/page-header"
 import { PageShell } from "@/components/page-shell"
 import { ListMeta, useScrollTop } from "@/components/form-controls"
 import { Pager } from "@/components/pager"
+import { SiteTabs } from "@/components/site-tabs"
 import { formatListPagination } from "@/lib/list-meta"
 import { PostList } from "@/components/post-card"
 import { ListPostCard } from "@/components/list-post-card"
@@ -58,16 +59,15 @@ function BrowseContent() {
   const seqRef = useRef(0)
 
   const { isExpanded, toggle } = useExpandedBooks("browse")
-  const grouped = useMemo(() => {
-    if (site !== "1") {
-      return links.map((item) => ({ type: "single" as const, item }))
-    }
-    return groupBooks(
-      links,
-      (l) => l.title,
-      (l) => l.tid
-    )
-  }, [links, site])
+  const grouped = useMemo(
+    () =>
+      groupBooks(
+        links,
+        (l) => l.title,
+        (l) => l.tid
+      ),
+    [links]
+  )
 
   const loadPage = useCallback(
     async (p: number) => {
@@ -127,6 +127,15 @@ function BrowseContent() {
               : `第 ${pageParam} 页`
             : "请从分类目录选择"
         }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{
+              "1": browsePath({ site: "1", type, q }),
+              "2": browsePath({ site: "2", type, q }),
+            }}
+          />
+        }
       />
 
       {!queryString && <ErrorBox message="缺少分类参数，请从分类目录选择" />}
@@ -150,18 +159,23 @@ function BrowseContent() {
           <PostList>
             {grouped.map((g) =>
               g.type === "single" ? (
-                <SimilarPostCard
-                  key={g.item.tid}
-                  href={
-                    site === "2"
-                      ? bookPath(g.item.tid, { site })
-                      : readPath(g.item.tid, site)
-                  }
-                  rawTitle={g.item.title}
-                  tid={g.item.tid}
-                  site={site}
-                  showGenre
-                />
+                site === "2" ? (
+                  <ListPostCard
+                    key={g.item.tid}
+                    href={bookPath(g.item.tid)}
+                    rawTitle={g.item.title}
+                    showGenre
+                  />
+                ) : (
+                  <SimilarPostCard
+                    key={g.item.tid}
+                    href={readPath(g.item.tid)}
+                    rawTitle={g.item.title}
+                    tid={g.item.tid}
+                    site="1"
+                    showGenre
+                  />
+                )
               ) : (
                 <CollapsibleBookGroup
                   key={`group:${g.key}`}
@@ -188,7 +202,7 @@ function BrowseContent() {
                   {g.items.map((link) => (
                     <ListPostCard
                       key={link.tid}
-                      href={readPath(link.tid, site)}
+                      href={site === "2" ? bookPath(link.tid) : readPath(link.tid)}
                       rawTitle={link.title}
                       showGenre
                     />

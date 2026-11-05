@@ -94,7 +94,7 @@ func TestExtractChapter(t *testing.T) {
 	if strings.Contains(ch.Content, "水印噪音") {
 		t.Fatalf("watermark font should be removed: %s", ch.Content)
 	}
-	if !strings.Contains(ch.Content, `href="/book/abc123?chapter=3"`) {
+	if !strings.Contains(ch.Content, `href="/xbook-cn/abc123?chapter=3"`) {
 		t.Fatalf("internal chapter link should be rewritten: %s", ch.Content)
 	}
 	if strings.Contains(ch.Content, "evil.example.com") {
@@ -161,7 +161,7 @@ func TestParseCategoryLinks(t *testing.T) {
 	if len(links) != 2 {
 		t.Fatalf("links = %d, want 2", len(links))
 	}
-	if links[0].Label != "奇幻" || links[0].URL != "/browse?type=fantasy&site="+XChinaSiteID {
+	if links[0].Label != "奇幻" || links[0].URL != "/xbook-cn/browse?type=fantasy" {
 		t.Fatalf("links[0] = %+v", links[0])
 	}
 	for _, l := range links {

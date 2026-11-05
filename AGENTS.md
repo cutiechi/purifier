@@ -70,13 +70,22 @@ frontend/                            # Vite + React 19 + shadcn UI
 - **前端**：**凡是可以使用 shadcn/ui 组件的地方，绝对不要手写原生 HTML 或重复造轮子**。必须优先通过 `bunx --bun shadcn@latest add <component>` 添加标准 shadcn/ui 组件（如 `button`, `dialog`, `dropdown-menu`, `input`, `select`, `badge`, `tooltip`, `tabs`, `card`, `sheet`, `popover`, `scroll-area`, `separator` 等）并在页面中复用，保持设计语言、无障碍访问（a11y）与统一暗黑主题。
 - **后端**：Go 1.22+，使用 Chi 作为轻量路由，坚持标准 `net/http` 语义，错误返回统一结构 `{"error": "..."}`。
 - **存储**：SQL 统一封装在 `internal/storage` 领域 DAO 内。当前实现使用 SQLite 语法（`AUTOINCREMENT`、`COLLATE NOCASE`、`INSERT OR IGNORE`、`strftime`、`rowid`、`LastInsertId`、`?` 占位符），迁移 PostgreSQL 时需逐处改写，不承诺零改动切换。
-- **正文清洗**：所有外部 HTML 抓取内容必须经 `sanitize.SanitizeContentHTML` 管道清洗，剥除外链追踪与恶意脚本，只放行 `/read/:tid` 与 `/book/:cid` 站内安全链接。
+- **正文清洗**：所有外部 HTML 抓取内容必须经 `sanitize.SanitizeContentHTML` 管道清洗，剥除外链追踪与恶意脚本，只放行 `/cool-18/:tid` 与 `/xbook-cn/:cid`（含 `?chapter=`）站内安全链接。
 
 ## 前端路由
 
-| 页面      | 路由         |
-| --------- | ------------ |
-| Bookmarks | `/bookmarks` |
+一级 = 内容类型（首页/分类/榜单/目录/搜索/我的），二级 = 内容源，由路径前缀表达：论坛 `/cool-18`，书库 `/xbook-cn`。`/` 重定向到 `/cool-18`。
+
+| 一级 | 论坛 | 书库 |
+| ---- | ---- | ---- |
+| 首页 | `/cool-18` | `/xbook-cn` |
+| 分类 | `/cool-18/categories` · `/cool-18/browse?type=&q=&page=` | `/xbook-cn/categories` · `/xbook-cn/browse?type=&q=&page=` |
+| 榜单 | `/cool-18/featured` · `/cool-18/picks` · `/cool-18/comments` · `/cool-18/trending` | `/xbook-cn/trending` |
+| 目录 | `/cool-18/archive` · `/cool-18/groups` | `/xbook-cn/archive` |
+| 搜索 | `/cool-18/search?q=&page=` | `/xbook-cn/search?q=&page=` |
+| 内容 | `/cool-18/:tid?bm=` | `/xbook-cn/:cid?chapter=&bm=` |
+| 我的（跨站，可选 `?site=1\|2` 过滤） | `/me` `/history` `/favorites` `/tags` `/bookmarks` `/stats` `/jobs` | 同左 |
+| 其他 | `/login`、`*` 404 | — |
 
 ## API 约定
 
@@ -104,8 +113,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 | `GET /api/posts`                         | `mtid`、`site`（默认 `1`）                                                                                                                                                                                         | 首页分页列表 `{ links, nextMtid }`；`site=2` 返回书库更新流（`mtid` 为页码，首页给 `1`）                                                       |
 | `GET /api/books`                         | `cid`、`chapter`、`site`（默认 `1`）                                                                                                                                                                               | `site=1` 返回 Cool18 藏文单页 `{ title, content, meta, url }`（无章节模型，带 `chapter` 返回 404）；`site=2` 返回书库目录页或章节正文页       |
 | `GET /api/browse`                        | `type` 或 `q`、`page`、`site`（默认 `1`）                                                                                                                                                                          | 分类 / 关键词列表 `{ category, links, nextPage }`                                                                                             |
-| `GET /api/search`                        | `q`、`page`                                                                                                                                                                                                        | 跨站合并搜索 `{ items, nextPage, errors? }`（`NO_STORE`）                                                                                     |
-| `GET /api/categories`                    | `site`（默认 `1`）                                                                                                                                                                                                 | `{ links: CategoryLink[] }`；`site=2` 返回书库题材入口（`url` 形如 `/browse?type=<slug>&site=2`）                                              |
+| `GET /api/categories`                    | `site`（默认 `1`）                                                                                                                                                                                                 | `{ links: CategoryLink[] }`；`site=2` 返回书库题材入口（`url` 形如 `/xbook-cn/browse?type=<slug>`）                                            |
 | `GET /api/featured`                      | `site`（默认 `1`）                                                                                                                                                                                                 | `{ links }` 精华热贴；`site=2` 404                                                                                                            |
 | `GET /api/picks`                         | `site`（默认 `1`）                                                                                                                                                                                                 | `{ sections }` 扫文推荐分组；`site=2` 404                                                                                                     |
 | `GET /api/comments`                      | `site`（默认 `1`）                                                                                                                                                                                                 | `{ posts }` 评论榜（抓 `?act=cmtrank&y=1`）；`site=2` 404                                                                                     |
@@ -160,7 +168,6 @@ frontend/                            # Vite + React 19 + shadcn UI
 - `AuthError` 使用其 `statusCode` 与 `error` 字符串。
 - 400：`oidc disabled`、`url mismatch`、`invalid state`、`invalid_grant`。
 - 401：`unauthorized`（会话或 ID Token）。
-- 429：`too many requests`（仅 `/api/search`，带 `Retry-After`）。
 - 502：`oidc upstream`。ID Token 的 `iss`/`aud`/`exp`/`nonce` 校验失败同样映射 502（`invalid id token: ...`、`id token issuer mismatch`、`id token audience mismatch`、`id token nonce mismatch`）。
 
 列表响应使用 `LIST_CACHE_HEADERS`（`s-maxage=60`），正文响应使用 `CONTENT_CACHE_HEADERS`（`s-maxage=300`）。
@@ -170,7 +177,6 @@ frontend/                            # Vite + React 19 + shadcn UI
 请求防护（`internal/api/limits.go`）：
 
 - 所有 `/api/*` 请求体上限 1 MiB（`http.MaxBytesReader`），超限由 handler 返回 400。
-- `/api/search` 按客户端 IP 限流 20 次/分钟，超限返回 429 + `Retry-After: 60`。该端点一个请求会并发打两个上游。
 
 ## 环境变量
 
@@ -190,7 +196,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 | `AUTH_SECRET`                | 无                      | 会话签名密钥（HMAC，≥32 字符）。过短不会退出，只会让 OIDC 保持关闭、`/api/me/*` 对匿名开放     |
 | `OIDC_BUTTON_TEXT`           | `使用 Pocket ID 登录`   | 登录按钮文案（可选）                                                                           |
 | `ALLOWED_ORIGINS`            | 无                      | 逗号分隔的跨源白名单；为空时不挂 CORS（同源部署无需跨域）                                      |
-| `TRUST_PROXY`                | 无                      | 设为 `1` 时才信任 `X-Forwarded-For`/`X-Real-IP`（`middleware.RealIP`）。反向代理后必须设，否则按 IP 的限流可被伪造头绕过 |
+| `TRUST_PROXY`                | 无                      | 设为 `1` 时才信任 `X-Forwarded-For`/`X-Real-IP`（`middleware.RealIP`）。反向代理后必须设，否则日志里的客户端 IP 可被伪造头冒充 |
 
 ## 常见改动路径
 

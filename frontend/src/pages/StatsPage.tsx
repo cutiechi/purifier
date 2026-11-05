@@ -178,9 +178,7 @@ export default function StatsPage() {
                   <ul className="space-y-2">
                     {data.topItems.map((t) => {
                       const href =
-                        t.kind === "post"
-                          ? readPath(t.id, t.site)
-                          : bookPath(t.id, { site: t.site })
+                        t.kind === "post" ? readPath(t.id) : bookPath(t.id)
                       return (
                         <li key={`${t.site}:${t.kind}:${t.id}`}>
                           <Link to={href} className="block">
@@ -215,9 +213,7 @@ export default function StatsPage() {
                   <ul className="space-y-1.5">
                     {data.recentSessions.map((r, i) => {
                       const href =
-                        r.kind === "post"
-                          ? readPath(r.id, r.site)
-                          : bookPath(r.id, { site: r.site })
+                        r.kind === "post" ? readPath(r.id) : bookPath(r.id)
                       return (
                         <li key={i}>
                           <Link

@@ -1,10 +1,18 @@
 import { useCallback } from "react"
 import { Link } from "react-router-dom"
 import { PageHeader, PageShell, SectionLabel } from "@/components/page-shell"
+import { SiteTabs } from "@/components/site-tabs"
 import { PostCard, PostList } from "@/components/post-card"
 import { AsyncBody } from "@/components/ui-state"
 import { useAsyncList } from "@/hooks/use-async-list"
-import { api, bookPath, browsePath } from "@/lib/routes"
+import { useSite } from "@/hooks/use-site"
+import {
+  api,
+  bookPath,
+  browsePath,
+  forumRoutes,
+  libraryRoutes,
+} from "@/lib/routes"
 
 interface BookItem {
   index: number
@@ -24,8 +32,9 @@ const pickBooks = (json: Record<string, unknown>): BookItem[] =>
 const pickCategories = (json: Record<string, unknown>): CategoryItem[] =>
   (json.links as CategoryItem[]) ?? []
 
-/** 书库首页：话题材入口 + 热门推荐（结构与论坛「发现/首页」一致） */
+/** 书库首页：二级「论坛/书库」切换 + 话题材入口 + 热门推荐 */
 export default function NovelPage() {
+  const site = useSite()
   const books = useAsyncList(api.booksHome, pickBooks)
   const categories = useAsyncList(`${api.categories}?site=2`, pickCategories)
   const reload = useCallback(() => {
@@ -44,6 +53,12 @@ export default function NovelPage() {
           categories.items.length
             ? `共 ${categories.items.length} 个题材 · 无弹窗、无转码广告`
             : "沉浸式网文阅读，无弹窗、无转码广告"
+        }
+        action={
+          <SiteTabs
+            site={site}
+            targets={{ "1": forumRoutes.home, "2": libraryRoutes.home }}
+          />
         }
       />
 
@@ -89,7 +104,7 @@ export default function NovelPage() {
               {books.items.map((b) => (
                 <PostCard
                   key={b.tid}
-                  href={bookPath(b.tid, { site: "2" })}
+                  href={bookPath(b.tid)}
                   title={b.title}
                   leading={
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-[11px] font-medium text-muted-foreground tabular-nums">

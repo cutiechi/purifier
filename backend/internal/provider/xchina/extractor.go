@@ -165,7 +165,7 @@ func ExtractChapter(rawHTML string, currentChapter int, cid string) (*ChapterDet
 		if m := novelChapterRegex.FindStringSubmatch(href); len(m) > 2 {
 			cID := m[1]
 			ch := m[2]
-			return fmt.Sprintf("/book/%s?chapter=%s", cID, ch), label, true
+			return fmt.Sprintf("/xbook-cn/%s?chapter=%s", cID, ch), label, true
 		}
 		return "", "", false
 	}, sanitize.Options{PBreakClosing: true})
@@ -272,7 +272,7 @@ func HasMoreLink(rawHTML, target string) bool {
 var tagSlugRegex = regexp.MustCompile(`^/tag/([^/?#]+)$`)
 
 // ParseCategoryLinks 解析「主题浏览」题材入口 + 「有声小说」→ CategoryLink[]。
-// url 形如 /browse?type=<slug>&site=2，与 cool18 侧结构保持一致。
+// url 形如 /xbook-cn/browse?type=<slug>，源由路径前缀表达。
 func ParseCategoryLinks(rawHTML string) []model.CategoryLink {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(rawHTML))
 	if err != nil {
@@ -300,7 +300,7 @@ func ParseCategoryLinks(rawHTML string) []model.CategoryLink {
 			seen[slug] = true
 			links = append(links, model.CategoryLink{
 				Label: label,
-				URL:   "/browse?type=" + url.QueryEscape(slug) + "&site=" + XChinaSiteID,
+				URL:   "/xbook-cn/browse?type=" + url.QueryEscape(slug),
 				Kind:  "type",
 			})
 		})
@@ -323,7 +323,7 @@ func ParseCategoryLinks(rawHTML string) []model.CategoryLink {
 		seen["audio"] = true
 		links = append(links, model.CategoryLink{
 			Label: "有声",
-			URL:   "/browse?type=audio&site=" + XChinaSiteID,
+			URL:   "/xbook-cn/browse?type=audio",
 			Kind:  "type",
 		})
 	})
