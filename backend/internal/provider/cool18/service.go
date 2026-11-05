@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
+	"unicode"
 
 	"purifier/internal/core/upstream"
 	"purifier/internal/model"
@@ -386,29 +389,96 @@ func (s *Service) Browse(ctx context.Context, categoryType, keywords string, pag
 	if page < 1 {
 		page = 1
 	}
-	var targetURL string
-	var category string
 
 	if categoryType != "" {
-		category = categoryType
-		targetURL = fmt.Sprintf("%s?action=search&act=threadsearch&app=forum&type=%s&submit=%s",
+		category := categoryType
+		targetURL := fmt.Sprintf("%s?action=search&act=threadsearch&app=forum&type=%s&submit=%s",
 			Cool18HomeURL, url.QueryEscape(categoryType), url.QueryEscape("查询"))
-	} else if keywords != "" {
-		category = keywords
-		targetURL = fmt.Sprintf("%s?act=threadsearch&app=forum&keywords=%s&submit=%s",
-			Cool18HomeURL, url.QueryEscape(keywords), url.QueryEscape("栏目搜索"))
-	} else {
+		if page > 1 {
+			targetURL += fmt.Sprintf("&p=%d", page)
+		}
+		html, err := s.client.Fetch(ctx, targetURL)
+		if err != nil {
+			return nil, err
+		}
+		return ParseCategoryPage(html, category, page)
+	}
+
+	if keywords == "" {
 		return nil, upstream.NewExtractorError("missing type or keywords", http.StatusBadRequest)
 	}
 
-	if page > 1 {
-		targetURL += fmt.Sprintf("&p=%d", page)
-	}
+	return s.searchKeywords(ctx, s.client.Fetch, keywords, page)
+}
 
-	html, err := s.client.Fetch(ctx, targetURL)
+// searchKeywords 按关键词搜索。上游 threadsearch 有两个实测限制：
+//  1. 含空格的多词查询恒返回 0 条 → 按 token 长度降序逐词回退（最长词区分度最高）；
+//  2. ≥8 字左右的整串关键词也常返回 0 条，但其匹配是子串匹配，短词能命中 →
+//     token 回退后仍为空时按前缀截断（6/4 字，跳过仍含空白的截断）逐级放宽。
+//
+// 各级取首个非空结果；结果 category 回显实际生效的查询词，页码沿用原始 page。
+func (s *Service) searchKeywords(ctx context.Context, fetch func(context.Context, string) (string, error), keywords string, page int) (*CategoryPage, error) {
+	res, err := fetchSearchPage(ctx, fetch, keywords, page)
 	if err != nil {
 		return nil, err
 	}
+	if len(res.Links) > 0 {
+		return res, nil
+	}
+	fallbacks := append(searchTokens(keywords), prefixTruncations(keywords)...)
+	for _, token := range fallbacks {
+		fallback, err := fetchSearchPage(ctx, fetch, token, page)
+		if err != nil {
+			return nil, err
+		}
+		if len(fallback.Links) > 0 {
+			return fallback, nil
+		}
+	}
+	return res, nil
+}
 
-	return ParseCategoryPage(html, category, page)
+// searchTokens 把关键词拆成空白分隔 token，长度降序（并列保持原顺序），最多 3 个以限制上游请求次数。
+func searchTokens(keywords string) []string {
+	fields := strings.Fields(keywords)
+	if len(fields) <= 1 {
+		return nil
+	}
+	tokens := append([]string(nil), fields...)
+	sort.SliceStable(tokens, func(i, j int) bool { return len(tokens[i]) > len(tokens[j]) })
+	if len(tokens) > 3 {
+		tokens = tokens[:3]
+	}
+	return tokens
+}
+
+// prefixTruncations 生成整串的前缀截断（6/4 字，按 rune 计），用于绕过上游对长关键词的匹配失效。
+// 截断后仍含空白的多词前缀无意义（上游不支持），跳过；短于或等于原串的不生成。
+func prefixTruncations(keywords string) []string {
+	var out []string
+	runes := []rune(keywords)
+	for _, n := range []int{6, 4} {
+		if len(runes) <= n {
+			break
+		}
+		prefix := string(runes[:n])
+		if strings.ContainsFunc(prefix, unicode.IsSpace) {
+			continue
+		}
+		out = append(out, prefix)
+	}
+	return out
+}
+
+func fetchSearchPage(ctx context.Context, fetch func(context.Context, string) (string, error), keywords string, page int) (*CategoryPage, error) {
+	targetURL := fmt.Sprintf("%s?act=threadsearch&app=forum&keywords=%s&submit=%s",
+		Cool18HomeURL, url.QueryEscape(keywords), url.QueryEscape("栏目搜索"))
+	if page > 1 {
+		targetURL += fmt.Sprintf("&p=%d", page)
+	}
+	html, err := fetch(ctx, targetURL)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCategoryPage(html, keywords, page)
 }
