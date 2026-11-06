@@ -36,6 +36,8 @@ interface ContentData {
   title: string
   content: string
   links: { tid: string; title: string; index: number }[]
+  /** 跟帖即章节：后端预筛的可跳转回复（已滤点赞/评分噪音） */
+  replyLinks?: { tid: string; title: string }[]
   meta: PostMetaFields
   replies: ReplyNode[]
   url: string
@@ -246,7 +248,8 @@ export default function ReadPage() {
     )
   }, [content])
 
-  // 链接导航候选：正文 body 内链在前（章节语义），扩展链接在后；组件内按 tid 去重
+  // 链接导航候选：正文 body 内链在前（章节语义），扩展链接次之，最后是后端
+  // 预筛的跟帖链接（replyLinks：BFS 序、已滤点赞/评分噪音）；组件内按 tid 去重
   const navLinks = useMemo(() => {
     if (!content) return []
     const body = extractBodyChapterLinks(content.content)
@@ -254,7 +257,11 @@ export default function ReadPage() {
       tid: l.tid,
       title: l.title,
     }))
-    return [...body, ...ext]
+    const replies = (content.replyLinks ?? []).map((l) => ({
+      tid: l.tid,
+      title: l.title,
+    }))
+    return [...body, ...ext, ...replies]
   }, [content])
 
   const showChapterNav = Boolean(neighbors.prev || neighbors.next)

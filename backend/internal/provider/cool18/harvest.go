@@ -51,11 +51,12 @@ func CollectContentTids(content string, links []ChapterLink) []string {
 	return out
 }
 
-// CollectReplyTids 收集可入库的回复 tid（回复即章节的主要入口）。
-// 跳过自身与噪音跟帖，按 BFS 顺序（与 UI 层级一致），最多 maxHarvestPerPost 条。
-func CollectReplyTids(nodes []ReplyNode, selfTid string) []string {
+// CollectReplyLinks 收集可跳转/入库的回复（回复即章节的主要入口），带标题。
+// 跳过自身与噪音跟帖（点赞/评分等系统应援），按 BFS 顺序（与 UI 层级一致），
+// 最多 maxHarvestPerPost 条。
+func CollectReplyLinks(nodes []ReplyNode, selfTid string) []ChapterLink {
 	seen := make(map[string]bool)
-	out := make([]string, 0, 16)
+	out := make([]ChapterLink, 0, 16)
 	queue := append([]ReplyNode{}, nodes...)
 	for len(queue) > 0 {
 		n := queue[0]
@@ -64,14 +65,25 @@ func CollectReplyTids(nodes []ReplyNode, selfTid string) []string {
 		if n.Tid == "" || n.Tid == selfTid || seen[n.Tid] {
 			continue
 		}
-		if isNoisyReply(n.Subject) {
+		subject := strings.TrimSpace(n.Subject)
+		if isNoisyReply(subject) {
 			continue
 		}
 		seen[n.Tid] = true
-		out = append(out, n.Tid)
+		out = append(out, ChapterLink{Tid: n.Tid, Title: subject})
 		if len(out) >= maxHarvestPerPost {
 			break
 		}
+	}
+	return out
+}
+
+// CollectReplyTids 收集可入库的回复 tid（CollectReplyLinks 的 tid 投影）。
+func CollectReplyTids(nodes []ReplyNode, selfTid string) []string {
+	links := CollectReplyLinks(nodes, selfTid)
+	out := make([]string, len(links))
+	for i, l := range links {
+		out[i] = l.Tid
 	}
 	return out
 }

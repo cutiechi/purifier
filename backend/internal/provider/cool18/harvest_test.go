@@ -49,6 +49,31 @@ func TestCollectReplyTidsCap(t *testing.T) {
 	}
 }
 
+// CollectReplyLinks 与 tids 同一过滤规则，但带标题：链接导航面板直接展示。
+func TestCollectReplyLinks(t *testing.T) {
+	replies := []ReplyNode{
+		{Tid: "100", Subject: "给 红魔留名 点“赞”支持3银元奖励！！"},
+		{Tid: "101", Subject: "第一章 童年"},
+		{Children: []ReplyNode{
+			{Tid: "103", Subject: " 嵌套回复也收录 "},
+		}},
+		{Tid: "self", Subject: "自身跳过"},
+	}
+	got := CollectReplyLinks(replies, "self")
+	want := []ChapterLink{
+		{Tid: "101", Title: "第一章 童年"},
+		{Tid: "103", Title: "嵌套回复也收录"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CollectReplyLinks = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i].Tid != want[i].Tid || got[i].Title != want[i].Title {
+			t.Fatalf("CollectReplyLinks[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestIsNoisyReply(t *testing.T) {
 	noisy := []string{
 		"给 红魔留名 点“赞”支持3银元奖励！！",

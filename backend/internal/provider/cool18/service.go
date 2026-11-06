@@ -38,6 +38,8 @@ type PostResponse struct {
 	Links        []ChapterLink `json:"links"`
 	Meta         PostMeta      `json:"meta"`
 	Replies      []ReplyNode   `json:"replies"`
+	// ReplyLinks 跟帖即章节：可跳转的回复（BFS 序，已滤噪音跟帖），链接导航面板用。
+	ReplyLinks   []ChapterLink `json:"replyLinks"`
 	URL          string        `json:"url"`
 	Stale        bool          `json:"stale,omitempty"`
 	RefreshError string        `json:"refreshError,omitempty"`
@@ -158,12 +160,13 @@ func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostR
 	s.enqueueHarvest(ctx, tid, extracted, replies)
 
 	resp := &PostResponse{
-		Title:   extracted.Title,
-		Content: extracted.Content,
-		Links:   extracted.Links,
-		Meta:    extracted.Meta,
-		Replies: replies,
-		URL:     pageURL,
+		Title:      extracted.Title,
+		Content:    extracted.Content,
+		Links:      extracted.Links,
+		Meta:       extracted.Meta,
+		Replies:    replies,
+		ReplyLinks: CollectReplyLinks(replies, tid),
+		URL:        pageURL,
 	}
 	if stale {
 		resp.Stale = true
