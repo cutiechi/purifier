@@ -176,7 +176,13 @@ export default function ReadPage() {
       try {
         const res = await fetch(
           `${api.posts}?tid=${encodeURIComponent(tid)}&site=${site}${refresh ? "&refresh=1" : ""}`,
-          { signal: opts?.signal }
+          {
+            signal: opts?.signal,
+            // 绕过浏览器 HTTP 缓存：正文响应 max-age=300，命中缓存时服务端收不到
+            // 请求、RecordVisit 不计数，阅读次数/最后打开/链接面板统计会失真。
+            // 上游抓取有后端二级缓存兜底，这里每次打开都走一次真实请求。
+            cache: "no-store",
+          }
         )
         const json = await res.json()
         if (seq !== seqRef.current) return

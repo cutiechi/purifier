@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link2 } from "lucide-react"
 import {
   Popover,
@@ -108,6 +108,22 @@ export function LinkNavFab({
     setOpen(next)
     if (next) void load()
   }
+
+  // 面板开着时用户点了链接去新标签阅读，切回本页焦点/可见性变化 → 重拉统计，
+  // 次数/最后打开/时长即时反映，无需关开面板。
+  useEffect(() => {
+    if (!open) return
+    const onFocus = () => void load()
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load()
+    }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [open, load])
 
   if (targets.length === 0) return null
 
