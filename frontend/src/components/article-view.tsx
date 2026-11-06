@@ -25,8 +25,8 @@ function sanitizeBodyHtml(html: string): string {
     ALLOWED_TAGS: ["p", "br", "a"],
     ALLOWED_ATTR: ["href"],
     ALLOW_DATA_ATTR: false,
-    // 相对站内路径
-    ALLOWED_URI_REGEXP: /^(?:\/(?:read|book)\/)/i,
+    // 相对站内路径（论坛 /cool-18/:tid，书库 /xbook-cn/:cid）
+    ALLOWED_URI_REGEXP: /^(?:\/(?:cool-18|xbook-cn)\/)/i,
   })
 }
 
@@ -65,7 +65,11 @@ export function ContentBody({
       const a = target.closest("a")
       if (!a) return
       const href = a.getAttribute("href")
-      if (!href?.startsWith("/read/") && !href?.startsWith("/book/")) return
+      if (
+        !href?.startsWith("/cool-18/") &&
+        !href?.startsWith("/xbook-cn/")
+      )
+        return
       e.preventDefault()
       navigate(href)
     },

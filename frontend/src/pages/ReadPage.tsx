@@ -7,6 +7,7 @@ import { CharacterMarkPopover } from "@/components/character-mark-popover"
 import { CharacterPanel } from "@/components/character-panel"
 import { ReadingSelectionToolbar } from "@/components/reading-selection-toolbar"
 import { ItemActions, useItemState } from "@/components/item-actions"
+import { LinkNavFab } from "@/components/link-nav-fab"
 import { useDocumentTitle } from "@/components/page-header"
 import { PageShell, AsyncBody } from "@/components/page-shell"
 import { Alert } from "@/components/ui/alert"
@@ -245,6 +246,17 @@ export default function ReadPage() {
     )
   }, [content])
 
+  // 链接导航候选：正文 body 内链在前（章节语义），扩展链接在后；组件内按 tid 去重
+  const navLinks = useMemo(() => {
+    if (!content) return []
+    const body = extractBodyChapterLinks(content.content)
+    const ext = (content.links ?? []).map((l) => ({
+      tid: l.tid,
+      title: l.title,
+    }))
+    return [...body, ...ext]
+  }, [content])
+
   const showChapterNav = Boolean(neighbors.prev || neighbors.next)
 
   return (
@@ -367,6 +379,13 @@ export default function ReadPage() {
         prev={neighbors.prev}
         next={neighbors.next}
         widthClass={pageWidthClass(settings.maxWidth)}
+      />
+      <LinkNavFab
+        links={navLinks}
+        currentId={tid}
+        site={site}
+        kind="post"
+        hrefFor={readPath}
       />
       <ReadingSelectionToolbar
         clusters={clusters}

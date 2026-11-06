@@ -464,3 +464,68 @@ func TestMigrateV6StripsPunctuationFromGroupKeys(t *testing.T) {
 		t.Fatalf("members %+v, want tid 1,2,3 in group 1 and tid 9 in group 3", members)
 	}
 }
+
+// GetLinkStats 合并 items 访问计数与 reading_sessions 时长；未访问目标不出现。
+func TestGetLinkStatsMergesVisitsAndSessions(t *testing.T) {
+	s := newTestDB(t)
+	ctx := context.Background()
+
+	// 目标 1：2 次访问 + 2 段阅读（120s + 60s）；目标 2：仅访问；目标 3：从未访问。
+	if err := s.RecordVisit(ctx, "1", model.KindPost, "1", "标题一", "u1"); err != nil {
+		t.Fatalf("visit1: %v", err)
+	}
+	if err := s.RecordVisit(ctx, "1", model.KindPost, "1", "标题一", "u1"); err != nil {
+		t.Fatalf("visit1 again: %v", err)
+	}
+	if err := s.RecordVisit(ctx, "1", model.KindPost, "2", "标题二", "u2"); err != nil {
+		t.Fatalf("visit2: %v", err)
+	}
+	t0 := time.Now().Add(-time.Hour).UnixMilli()
+	t1 := time.Now().UnixMilli()
+	if err := s.RecordSession(ctx, SessionInput{Site: "1", Kind: model.KindPost, ID: "1", Title: "标题一", StartedAt: t0, DurationS: 120}); err != nil {
+		t.Fatalf("session1: %v", err)
+	}
+	if err := s.RecordSession(ctx, SessionInput{Site: "1", Kind: model.KindPost, ID: "1", Title: "标题一", StartedAt: t1, DurationS: 60}); err != nil {
+		t.Fatalf("session2: %v", err)
+	}
+
+	res, err := s.GetLinkStats(ctx, "1", model.KindPost, []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("GetLinkStats: %v", err)
+	}
+	byID := map[string]LinkStat{}
+	for _, r := range res {
+		byID[r.ID] = r
+	}
+	if len(res) != 2 {
+		t.Fatalf("rows %+v, want only visited ids 1 and 2", res)
+	}
+	got := byID["1"]
+	if got.VisitCount != 2 || got.TotalDurationS != 180 {
+		t.Fatalf("id1: visit=%d duration=%d, want 2/180", got.VisitCount, got.TotalDurationS)
+	}
+	if got.LastReadAt == nil || *got.LastReadAt != t1 {
+		t.Fatalf("id1: lastReadAt=%v, want %d", got.LastReadAt, t1)
+	}
+	if got.Title != "标题一" {
+		t.Fatalf("id1: title=%q, want 标题一", got.Title)
+	}
+	if byID["2"].VisitCount != 1 || byID["2"].TotalDurationS != 0 || byID["2"].LastReadAt != nil {
+		t.Fatalf("id2: %+v, want 1 visit, no sessions", byID["2"])
+	}
+
+	// site/kind 过滤：site=2 不可见。
+	res, err = s.GetLinkStats(ctx, "2", model.KindPost, []string{"1"})
+	if err != nil {
+		t.Fatalf("GetLinkStats site2: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("site2 rows %+v, want empty", res)
+	}
+
+	// 空入参防御。
+	res, err = s.GetLinkStats(ctx, "1", model.KindPost, nil)
+	if err != nil || len(res) != 0 {
+		t.Fatalf("empty ids: res=%v err=%v, want empty/no error", res, err)
+	}
+}

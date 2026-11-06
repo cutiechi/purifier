@@ -35,13 +35,13 @@ export function extractChapterNeighbors(
   return { prev, next }
 }
 
-/** 解析清洗后正文 HTML 的站内 /read/:tid 链接。
- * 后端 extractPreHtml（cheerio sanitizeContentHtml）输出规范为 <a href="/read/:tid">文本</a>，
+/** 解析清洗后正文 HTML 的站内 /cool-18/:tid 链接。
+ * 后端 sanitizeContentHtml 回调输出规范为 <a href="/cool-18/:tid">文本</a>，
  * 属性仅 href、顺序可控；article-view 渲染时的 DOMPurify 只是兜底、不改变结构。
  * 用正则以支持 bun test（bun 环境无 DOMParser），替代 spec 中的 DOMParser 表述。 */
 export function extractBodyChapterLinks(html: string): ChapterLinkLike[] {
   const out: ChapterLinkLike[] = []
-  const re = /<a\s+href="([^"]*\/read\/([^"?#]+)[^"]*)">([^<]*)<\/a>/g
+  const re = /<a\s+href="([^"]*\/cool-18\/([^"?#]+)[^"]*)">([^<]*)<\/a>/g
   let m: RegExpExecArray | null
   while ((m = re.exec(html)) !== null) {
     const tid = decodeURIComponent(m[2]!)

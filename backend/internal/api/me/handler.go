@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -52,6 +53,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/items", h.HandleListItemsByTag)
 
 	r.Get("/state", h.HandleGetState)
+	r.Get("/link-stats", h.HandleGetLinkStats)
 	r.Put("/progress", h.HandleSetProgress)
 
 	r.Get("/bookmarks", h.HandleListBookmarks)
@@ -293,6 +295,41 @@ func (h *Handler) HandleGetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.JSON(w, http.StatusOK, state, httputil.NoStoreHeaders)
+}
+
+// HandleGetLinkStats GET /api/me/link-stats?kind=&site=&ids=1,2,3
+// 正文页链接导航面板：按目标 ids 批量返回访问计数/最后打开/累计阅读时长。
+func (h *Handler) HandleGetLinkStats(w http.ResponseWriter, r *http.Request) {
+	kind := model.ItemKind(r.URL.Query().Get("kind"))
+	if kind != model.KindPost && kind != model.KindBook {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid kind")
+		return
+	}
+	site := r.URL.Query().Get("site")
+	if site == "" {
+		site = "1"
+	}
+
+	seen := make(map[string]bool)
+	var ids []string
+	for _, raw := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		if len(ids) >= 200 {
+			break
+		}
+	}
+
+	res, err := h.store.GetLinkStats(r.Context(), site, kind, ids)
+	if err != nil {
+		httputil.InternalError(w, err)
+		return
+	}
+	httputil.JSON(w, http.StatusOK, map[string]any{"items": res}, httputil.NoStoreHeaders)
 }
 
 func (h *Handler) HandleSetProgress(w http.ResponseWriter, r *http.Request) {

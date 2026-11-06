@@ -150,3 +150,63 @@ func (s *Store) GetState(ctx context.Context, site string, kind model.ItemKind, 
 
 	return state, nil
 }
+
+// LinkStat 正文页链接导航面板的目标聚合：访问计数/最后打开来自 items，
+// 累计阅读时长与最近一次阅读来自 reading_sessions。
+type LinkStat struct {
+	ID             string `json:"id" db:"id"`
+	Title          string `json:"title" db:"title"`
+	VisitCount     int    `json:"visitCount" db:"visit_count"`
+	LastVisitedAt  *int64 `json:"lastVisitedAt" db:"last_visited_at"`
+	TotalDurationS int64  `json:"totalDurationS" db:"total_duration_s"`
+	LastReadAt     *int64 `json:"lastReadAt" db:"last_read_at"`
+}
+
+// GetLinkStats 批量返回链接目标的访问与阅读聚合；从未访问过的目标不在结果中，
+// 由调用方补零。两个 IN 查询在应用层按 id 合并（sqlite 端无需 join 聚合表）。
+func (s *Store) GetLinkStats(ctx context.Context, site string, kind model.ItemKind, ids []string) ([]LinkStat, error) {
+	if len(ids) == 0 {
+		return []LinkStat{}, nil
+	}
+	itemQuery, itemArgs, err := sqlxIn(
+		"SELECT id, title, visit_count, last_visited_at FROM items WHERE site = ? AND kind = ? AND id IN (?)",
+		site, string(kind), ids)
+	if err != nil {
+		return nil, err
+	}
+	var rows []LinkStat
+	if err := s.db.SelectContext(ctx, &rows, itemQuery, itemArgs...); err != nil {
+		return nil, err
+	}
+
+	sessQuery, sessArgs, err := sqlxIn(
+		"SELECT item_id AS id, COALESCE(SUM(duration_s), 0) AS total_duration_s, MAX(started_at) AS last_read_at"+
+			" FROM reading_sessions WHERE site = ? AND kind = ? AND item_id IN (?) GROUP BY item_id",
+		site, string(kind), ids)
+	if err != nil {
+		return nil, err
+	}
+	var sess []struct {
+		ID             string `db:"id"`
+		TotalDurationS int64  `db:"total_duration_s"`
+		LastReadAt     *int64 `db:"last_read_at"`
+	}
+	if err := s.db.SelectContext(ctx, &sess, sessQuery, sessArgs...); err != nil {
+		return nil, err
+	}
+
+	index := make(map[string]int, len(rows))
+	for i, r := range rows {
+		index[r.ID] = i
+	}
+	for _, row := range sess {
+		if i, ok := index[row.ID]; ok {
+			rows[i].TotalDurationS = row.TotalDurationS
+			rows[i].LastReadAt = row.LastReadAt
+		}
+	}
+	if rows == nil {
+		rows = []LinkStat{}
+	}
+	return rows, nil
+}

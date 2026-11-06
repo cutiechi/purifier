@@ -15,7 +15,8 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3001",
+        // API_PROXY 文档化默认 http://127.0.0.1:3001，多实例联调时可覆盖
+        target: process.env.API_PROXY ?? "http://127.0.0.1:3001",
         changeOrigin: true,
       },
     },

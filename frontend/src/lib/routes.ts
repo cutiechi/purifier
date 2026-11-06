@@ -90,6 +90,7 @@ export const api = {
   meBookmarks: "/api/me/bookmarks",
   meItems: "/api/me/items",
   meState: "/api/me/state",
+  meLinkStats: "/api/me/link-stats",
   meProgress: "/api/me/progress",
   meCache: "/api/me/cache",
   meCharacters: "/api/me/characters",
