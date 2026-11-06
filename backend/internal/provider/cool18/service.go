@@ -154,6 +154,9 @@ func (s *Service) GetPost(ctx context.Context, tid string, refresh bool) (*PostR
 	// 5. 记录访问历史
 	_ = s.store.RecordVisit(ctx, Cool18SiteID, model.KindPost, tid, extracted.Title, pageURL)
 
+	// 6. 链接收割：正文内链 + 回复 tid 入发现前沿（失败静默，不影响阅读）
+	s.enqueueHarvest(ctx, tid, extracted, replies)
+
 	resp := &PostResponse{
 		Title:   extracted.Title,
 		Content: extracted.Content,

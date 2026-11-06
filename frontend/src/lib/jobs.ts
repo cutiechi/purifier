@@ -66,6 +66,7 @@ export const JOB_TYPE_LABEL: Record<string, string> = {
   archive_posts: "论坛归档",
   archive_books: "书库归档",
   archive_auto_group: "自动分组",
+  archive_linked: "链接归档",
 }
 
 export const ARCHIVE_MODE_LABEL: Record<ArchiveMode, string> = {

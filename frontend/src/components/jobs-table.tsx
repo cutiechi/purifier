@@ -46,7 +46,11 @@ function paramSummary(job: Job): string {
         ? "续跑"
         : mode === "incremental"
           ? "增量"
-          : ""
+          : mode === "harvest"
+            ? "回填"
+            : mode === "queue"
+              ? "队列"
+              : ""
   return [site, modeLabel].filter(Boolean).join(" · ")
 }
 

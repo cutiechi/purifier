@@ -204,7 +204,7 @@ frontend/                            # Vite + React 19 + shadcn UI
 - 新增前端页面：在 `frontend/src/App.tsx` 注册路由，必要时在 `frontend/src/lib/routes.ts` 添加导航项和 API 常量，页面放到 `frontend/src/pages/`（必须复用 `shadcn/ui` 组件）。
 - 新增 API：在 `backend/internal/api/router.go` 注册路由，控制器在对应领域包（如 `provider/cool18`、`provider/xchina` 或 `api/me`）。
 - 改动历史/收藏/标签或内容缓存：数据层在 `backend/internal/storage/`，API 层在 `backend/internal/api/me/`；加列/加索引走 `db.go` 的顺序迁移。
-- 改动任务（jobs）系统：执行器在 `backend/internal/jobs/`（`archive_posts` / `archive_books` / `archive_auto_group`），数据持久化在 `backend/internal/storage/job.go`。
+- 改动任务（jobs）系统：执行器在 `backend/internal/jobs/`（`archive_posts` / `archive_books` / `archive_auto_group` / `archive_linked`），数据持久化在 `backend/internal/storage/job.go`。链接归档（`archive_linked`）消费 `archive_frontier` 队列：评论即章节/正文内链指向的帖子不在 feed 里（上游翻页有深度上限），靠浏览时收割 + 队列消费补进归档目录。
 - 新增内容源切片：在 `backend/internal/provider/<site>/` 建立独立领域切片，实现专属的 extractor 与 service，在 `backend/internal/api/router.go` 挂载路由。
 - 调整正文清洗：统一在 `backend/internal/core/sanitize/sanitize.go` 管道中维护。
 - 鉴权逻辑：核心在 `backend/internal/auth/` 与 API 控制器 `backend/internal/api/auth/`。

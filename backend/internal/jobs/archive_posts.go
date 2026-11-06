@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"purifier/internal/model"
@@ -94,6 +95,16 @@ func (j *ArchivePostsJob) Run(ctx *JobContext) (any, error) {
 			return nil, fetchErr
 		}
 
+		// 上游 feed 有深度上限：mtid 早于阈值后返回固定占位页（首条「++++该贴
+		// 评分完成！」），且 nextMtid 会跳回一个固定值。识别到就干净收尾，
+		// 避免顺着占位页把同一批系统帖反复归档。
+		if isUpstreamStubPage(res.Links) {
+			ctx.Log("warn", fmt.Sprintf("upstream feed depth limit hit at mtid=%s; stop", mtid))
+			stopReason = "upstream_depth_limit"
+			_ = j.store.SetArchiveCursor(context.Background(), site, "", mode, "done", pages)
+			break
+		}
+
 		pages++
 		now := time.Now().UnixMilli()
 
@@ -163,6 +174,16 @@ func (j *ArchivePostsJob) Run(ctx *JobContext) (any, error) {
 		"stopReason": stopReason,
 		"durationS":  int(time.Since(startTime).Seconds()),
 	}, nil
+}
+
+// isUpstreamStubPage 识别上游 feed 深度上限后的固定占位页：
+// 首条标题形如「++++++++该贴评分完成！」，此时 mtid 游标已失效。
+func isUpstreamStubPage(links []model.ChapterLink) bool {
+	if len(links) == 0 {
+		return false
+	}
+	t := strings.TrimSpace(links[0].Title)
+	return strings.HasPrefix(t, "++") && strings.Contains(t, "评分完成")
 }
 
 // payloadSite 读取 site（默认 fallback），兼容 JSON 数字与字符串。

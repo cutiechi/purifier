@@ -210,6 +210,26 @@ CREATE INDEX IF NOT EXISTS archive_posts_site_tid_num_idx
   ON archive_posts(site, CAST(tid AS INTEGER));
 `,
 	},
+	{
+		// v5：链接发现前沿（回复即章节、正文内链扩散）。
+		// 归档 feed 有上游深度上限，更早/回复里的帖子靠这里发现。
+		version: 5,
+		stmts: `
+CREATE TABLE IF NOT EXISTS archive_frontier (
+  site          TEXT NOT NULL,
+  tid           TEXT NOT NULL,
+  source_tid    TEXT,
+  depth         INTEGER NOT NULL DEFAULT 1,
+  state         TEXT NOT NULL DEFAULT 'pending',
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  discovered_at INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (site, tid)
+);
+CREATE INDEX IF NOT EXISTS idx_frontier_pending
+  ON archive_frontier(site, state, discovered_at);
+`,
+	},
 }
 
 // SchemaVersion 是当前代码期望的 schema 版本。

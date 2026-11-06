@@ -15,7 +15,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
-type JobKind = "archive_posts" | "archive_books" | "archive_auto_group"
+type JobKind =
+  | "archive_posts"
+  | "archive_books"
+  | "archive_auto_group"
+  | "archive_linked"
 
 const KINDS: { value: JobKind; label: string; desc: string }[] = [
   {
@@ -28,6 +32,11 @@ const KINDS: { value: JobKind; label: string; desc: string }[] = [
     value: "archive_auto_group",
     label: "自动分组",
     desc: "按书名把多章帖子归入分组",
+  },
+  {
+    value: "archive_linked",
+    label: "链接归档",
+    desc: "收录评论与正文内链发现的帖子",
   },
 ]
 
@@ -58,6 +67,8 @@ export function CreateJobModal({
   const [step, setStep] = useState<1 | 2>(1)
   const [kind, setKind] = useState<JobKind>("archive_posts")
   const [mode, setMode] = useState<ArchiveMode>("incremental")
+  const [linkMode, setLinkMode] = useState<"queue" | "harvest">("queue")
+  const [batch, setBatch] = useState(200)
   const [minMembers, setMinMembers] = useState(2)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -86,6 +97,12 @@ export function CreateJobModal({
     try {
       if (kind === "archive_auto_group") {
         await startJob(kind, { minMembers })
+      } else if (kind === "archive_linked") {
+        if (batch < 1 || batch > 1000) {
+          setError("每轮处理上限需在 1 到 1000 之间")
+          return
+        }
+        await startJob(kind, { site: "1", mode: linkMode, batch })
       } else {
         await startJob(kind, { site, mode })
       }
@@ -132,7 +149,44 @@ export function CreateJobModal({
         )}
 
         {step === 2 &&
-          (kind === "archive_auto_group" ? (
+          (kind === "archive_linked" ? (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={linkMode === "queue" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setLinkMode("queue")}
+                >
+                  队列
+                </Button>
+                <Button
+                  type="button"
+                  variant={linkMode === "harvest" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => setLinkMode("harvest")}
+                >
+                  回填
+                </Button>
+              </div>
+              <label className="text-sm font-medium text-muted-foreground">
+                每轮处理上限（1–1000）
+              </label>
+              <Input
+                type="number"
+                min={1}
+                max={1000}
+                value={batch}
+                onChange={(e) => setBatch(Number(e.target.value))}
+                className="w-28"
+              />
+              <p className="text-xs text-muted-foreground">
+                {linkMode === "harvest"
+                  ? "对已归档帖子回扫跟帖列表，把章节补进队列"
+                  : "消费队列：抓标题入库，并继续发现新链接"}
+              </p>
+            </div>
+          ) : kind === "archive_auto_group" ? (
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">
                 最少章节数（2–50）

@@ -73,6 +73,7 @@ func main() {
 	runner.Register(jobs.NewArchivePostsJob(cool18Svc, store))
 	runner.Register(jobs.NewArchiveBooksJob(xchinaSvc, store))
 	runner.Register(jobs.NewArchiveAutoGroupJob(store))
+	runner.Register(jobs.NewArchiveLinkedJob(cool18Svc, store))
 	runner.RecoverOnStartup(context.Background())
 
 	meHdl := me.NewHandler(store, runner, cfg.DataDir).Routes()
