@@ -220,6 +220,8 @@ export function normalizeTitleKey(title: string): string {
   return stripTrailingChapterMarker(
     title.replace(/^[「《【〖［[]+|[」》】〗］\]]+$/g, "")
   )
-    .trim()
     .toLowerCase()
+    // 去标点/符号/空白：同一书名标点有无、顿号逗号差异收敛到同一 key
+    // （\p{P}/\p{S} 与后端 storage.NormalizeTitleKey 的 unicode.IsPunct/IsSymbol 同类目）。
+    .replace(/[\p{P}\p{S}\s]/gu, "")
 }

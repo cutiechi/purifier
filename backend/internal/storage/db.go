@@ -15,6 +15,9 @@ import (
 type migration struct {
 	version int
 	stmts   string
+	// fn 可选：同一事务内、stmts 之后执行的数据迁移（SQL 无法表达的 Go 逻辑）。
+	// 失败则整个迁移回滚，版本号不前进。
+	fn func(tx *sqlx.Tx) error
 }
 
 var migrations = []migration{
@@ -230,6 +233,67 @@ CREATE INDEX IF NOT EXISTS idx_frontier_pending
   ON archive_frontier(site, state, discovered_at);
 `,
 	},
+	{
+		// v6：分组键新增「去标点」归一步，重写存量 groups.key。
+		version: 6,
+		fn:      migrateGroupKeyPunctuation,
+	},
+}
+
+// migrateGroupKeyPunctuation v6：存量 key 是旧归一管道的输出，而新管道在旧管道
+// 之后追加去标点步骤，因此「旧 key 去标点 = 新 key」，直接重写即可，无需重新
+// 解析组 title（title 可能带展示后缀，重算反而有歧义）。去标点后冲突的组
+// （同书名的标点变体，如「A，B，C」与「A、B、C」）合并进最早建的组。
+func migrateGroupKeyPunctuation(tx *sqlx.Tx) error {
+	var rows []struct {
+		ID  int64  `db:"id"`
+		Key string `db:"key"`
+	}
+	if err := tx.Select(&rows, "SELECT id, key FROM groups ORDER BY id"); err != nil {
+		return fmt.Errorf("read groups: %w", err)
+	}
+
+	canonical := map[string]int64{} // 新 key -> 最早组 id
+	rewrites := map[int64]string{}  // 组 id -> 新 key
+	dupes := map[int64]int64{}      // 重复组 id -> 并入的组 id
+	for _, r := range rows {
+		nk := NormalizeTitleKey(r.Key)
+		if nk == "" {
+			nk = r.Key // 防御：纯标点 key 不重写为空
+		}
+		if first, ok := canonical[nk]; ok {
+			dupes[r.ID] = first
+			continue
+		}
+		canonical[nk] = r.ID
+		if nk != r.Key {
+			rewrites[r.ID] = nk
+		}
+	}
+
+	for dupe, into := range dupes {
+		// 成员并入最早组；(group_id, tid) 主键冲突的行被 OR IGNORE 跳过，残余随后删除。
+		if _, err := tx.Exec("UPDATE OR IGNORE group_items SET group_id = ? WHERE group_id = ?", into, dupe); err != nil {
+			return fmt.Errorf("merge members %d -> %d: %w", dupe, into, err)
+		}
+		if _, err := tx.Exec("DELETE FROM group_items WHERE group_id = ?", dupe); err != nil {
+			return fmt.Errorf("drop leftover members %d: %w", dupe, err)
+		}
+		if _, err := tx.Exec("DELETE FROM groups WHERE id = ?", dupe); err != nil {
+			return fmt.Errorf("drop duplicate group %d: %w", dupe, err)
+		}
+	}
+	// 重复组已删除：幸存组的新 key 两两不同（每个 key 只有一个 bucket 冠军），
+	// 也不会与他人旧 key 相同（相同则同 bucket，必有一方是重复组），可安全重写。
+	for id, nk := range rewrites {
+		if _, err := tx.Exec("UPDATE groups SET key = ? WHERE id = ?", nk, id); err != nil {
+			return fmt.Errorf("rekey group %d: %w", id, err)
+		}
+	}
+	if len(rewrites) > 0 || len(dupes) > 0 {
+		log.Printf("[db] migration v6 rekeyed %d group(s), merged %d duplicate group(s)", len(rewrites), len(dupes))
+	}
+	return nil
 }
 
 // SchemaVersion 是当前代码期望的 schema 版本。
@@ -250,14 +314,23 @@ func migrate(db *sqlx.DB) error {
 		if err != nil {
 			return fmt.Errorf("migration %d: begin: %w", m.version, err)
 		}
-		res, err := tx.Exec(m.stmts)
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("migration %d: %w", m.version, err)
+		// 纯 fn 迁移（stmts 为空）无结果集，跳过执行与行数统计。
+		if m.stmts != "" {
+			res, err := tx.Exec(m.stmts)
+			if err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("migration %d: %w", m.version, err)
+			}
+			// v2 会删掉重复 tid，属破坏性变更：留下行数，便于事后追溯。
+			if affected, aErr := res.RowsAffected(); aErr == nil && m.version == 2 && affected > 0 {
+				log.Printf("[db] migration v2 deduped %d duplicate group_items row(s)", affected)
+			}
 		}
-		// v2 会删掉重复 tid，属破坏性变更：留下行数，便于事后追溯。
-		if affected, aErr := res.RowsAffected(); aErr == nil && m.version == 2 && affected > 0 {
-			log.Printf("[db] migration v2 deduped %d duplicate group_items row(s)", affected)
+		if m.fn != nil {
+			if err := m.fn(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("migration %d: data step: %w", m.version, err)
+			}
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
 			_ = tx.Rollback()

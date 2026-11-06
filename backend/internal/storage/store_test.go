@@ -394,3 +394,73 @@ func TestUpsertArchivePostsKeepsArchivedAtOnRename(t *testing.T) {
 		t.Fatalf("archived_at refreshed to %d, want %d", res.Items[0].ArchivedAt, old)
 	}
 }
+
+// v6 把存量分组键按新规则（追加去标点）重写；去标点后同 key 的组合并进最早组。
+func TestMigrateV6StripsPunctuationFromGroupKeys(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenDB(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// 回退到 v5，再种入旧规则 key 的行（顿号/逗号变体应合并，无标点 key 不动）。
+	if _, err := db.Exec("PRAGMA user_version = 5"); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.Exec(`INSERT INTO groups (id,key,title,created_at,updated_at) VALUES
+		(1,'我的妈妈，我的孕母，我的母马','母马·逗号',?,?),
+		(2,'我的妈妈、我的孕母、我的母马','母马·顿号',?,?),
+		(3,'种魔','种魔',?,?)`, now, now, now, now, now, now); err != nil {
+		t.Fatalf("seed groups: %v", err)
+	}
+	// 组 1：tid 1、2；组 2：tid 3（并入组 1）；组 3：tid 9。
+	// v2 起 group_items.tid 全局唯一，同 tid 不能预先挂在两个组。
+	if _, err := db.Exec(`INSERT INTO group_items (group_id,tid,title,added_at) VALUES
+		(1,'1','a',?), (1,'2','b',?),
+		(2,'3','c',?),
+		(3,'9','d',?)`, now, now, now, now); err != nil {
+		t.Fatalf("seed items: %v", err)
+	}
+	_ = db.Close()
+
+	db2, err := OpenDB(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db2.Close()
+
+	var keys []struct {
+		ID  int64  `db:"id"`
+		Key string `db:"key"`
+	}
+	if err := db2.Select(&keys, "SELECT id,key FROM groups ORDER BY id"); err != nil {
+		t.Fatalf("read groups: %v", err)
+	}
+	want := []struct {
+		ID  int64
+		Key string
+	}{{1, "我的妈妈我的孕母我的母马"}, {3, "种魔"}}
+	if len(keys) != len(want) {
+		t.Fatalf("groups %+v, want %v", keys, want)
+	}
+	for i, w := range want {
+		if keys[i].ID != w.ID || keys[i].Key != w.Key {
+			t.Fatalf("group[%d] = (%d,%q), want (%d,%q)", i, keys[i].ID, keys[i].Key, w.ID, w.Key)
+		}
+	}
+
+	var members []struct {
+		GroupID int64  `db:"group_id"`
+		Tid     string `db:"tid"`
+	}
+	if err := db2.Select(&members, "SELECT group_id,tid FROM group_items ORDER BY group_id,tid"); err != nil {
+		t.Fatalf("read members: %v", err)
+	}
+	if len(members) != 4 ||
+		members[0].GroupID != 1 || members[0].Tid != "1" ||
+		members[1].GroupID != 1 || members[1].Tid != "2" ||
+		members[2].GroupID != 1 || members[2].Tid != "3" ||
+		members[3].GroupID != 3 || members[3].Tid != "9" {
+		t.Fatalf("members %+v, want tid 1,2,3 in group 1 and tid 9 in group 3", members)
+	}
+}

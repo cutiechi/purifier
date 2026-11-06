@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"testing"
+
+	"purifier/internal/storage"
 )
 
 // 分组键必须与前端 title-parse 规则一致，否则自动分组与前端折叠分组会分叉。
@@ -11,17 +13,18 @@ func TestParseListTitleGroupKey(t *testing.T) {
 		key   string
 		title string
 	}{
-		{"【马屌少年…】（第三部 1-2）作者：热爱生活的小东『都市』", "马屌少年…", "马屌少年…"},
+		// 省略号、逗号等标点在新规则下从 key 中去除。
+		{"【马屌少年…】（第三部 1-2）作者：热爱生活的小东『都市』", "马屌少年", "马屌少年…"},
 		{"为妻子种下一片森林（13）[原创]『都市』", "为妻子种下一片森林", "为妻子种下一片森林"},
 		{"【安环之乱】（01-22）作 者:可乐瓶子[原创]", "安环之乱", "安环之乱"},
 		{"种魔（2）作者：随风", "种魔", "种魔"},
 	}
 	for _, c := range cases {
 		p := ParseListTitle(c.raw)
-		if got := NormalizeTitleKey(p.Title); got != c.key {
+		if got := storage.NormalizeTitleKey(p.Title); got != c.key {
 			t.Errorf("%q → key %q, want %q", c.raw, got, c.key)
 		}
-		if got := StripTrailingChapterMarker(p.Title); got != c.title {
+		if got := storage.StripTrailingChapterMarker(p.Title); got != c.title {
 			t.Errorf("%q → title %q, want %q", c.raw, got, c.title)
 		}
 	}
@@ -35,11 +38,36 @@ func TestNormalizeTitleKeyCollapsesChapters(t *testing.T) {
 		{"《种魔》（2）", "种魔"},
 	}
 	for _, p := range pairs {
-		a := NormalizeTitleKey(StripTrailingChapterMarker(p[0]))
-		b := NormalizeTitleKey(StripTrailingChapterMarker(p[1]))
+		a := storage.NormalizeTitleKey(storage.StripTrailingChapterMarker(p[0]))
+		b := storage.NormalizeTitleKey(storage.StripTrailingChapterMarker(p[1]))
 		if a != b {
 			t.Errorf("%q vs %q → %q != %q", p[0], p[1], a, b)
 		}
+	}
+}
+
+// 同书名标点有无、顿号/逗号差异必须收敛到同一 key（主帖与跟帖标题常不一致）。
+func TestNormalizeTitleKeyIgnoresPunctuation(t *testing.T) {
+	variants := []string{
+		"我的妈妈，我的孕母，我的母马",
+		"我的妈妈、我的孕母、我的母马",
+		"我的妈妈 我的孕母 我的母马",
+		"我的妈妈我的孕母我的母马",
+		"我的妈妈，我的孕母、我的母马",
+		"我的妈妈， 我的孕母 ，我的母马 ",
+	}
+	want := storage.NormalizeTitleKey(variants[0])
+	if want == "" {
+		t.Fatal("sanity: empty key")
+	}
+	for _, v := range variants[1:] {
+		if got := storage.NormalizeTitleKey(v); got != want {
+			t.Errorf("%q → %q, want %q", v, got, want)
+		}
+	}
+	// 标点差异不合并不同书名。
+	if storage.NormalizeTitleKey("种魔") == storage.NormalizeTitleKey("种魔传") {
+		t.Error("distinct titles must not collide")
 	}
 }
 

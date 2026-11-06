@@ -58,13 +58,13 @@ func (j *ArchiveAutoGroupJob) Run(ctx *JobContext) (any, error) {
 			}
 		}
 		parsed := ParseListTitle(p.Title)
-		key := NormalizeTitleKey(parsed.Title)
+		key := storage.NormalizeTitleKey(parsed.Title)
 		if key == "" {
 			continue
 		}
 		b, ok := buckets[key]
 		if !ok {
-			title := strings.TrimSpace(StripTrailingChapterMarker(parsed.Title))
+			title := strings.TrimSpace(storage.StripTrailingChapterMarker(parsed.Title))
 			if title == "" {
 				title = key
 			}
@@ -182,8 +182,6 @@ var (
 	reOriginalMark   = regexp.MustCompile(`\[\s*[^\]\s]+?_\s*原创\s*\]|\[[^\]]*原创[^\]]*\]`)
 	reAIMark         = regexp.MustCompile(`\[\s*AI辅助\s*\]`)
 	reGenre          = regexp.MustCompile(`『([^』]+)』\s*$`)
-	reTrailingChap   = regexp.MustCompile(`(?:[（(][^）)]{1,24}[）)]\s*)+$`)
-	reWrapChars      = regexp.MustCompile(`^[「《【〖［[]+|[」》】〗］\]]+$`)
 	reTitleChapter   = regexp.MustCompile(`^(.*?)[（(]([^）)]{1,24})[）)]\s*$`)
 	reAuthorSplit    = regexp.MustCompile(`^(.*?)\s*(?:作者|原作|译者|作\s*_?\s*者)\s*[:：_]\s*.+$`)
 	reAuthorTail     = regexp.MustCompile(`^(?:原作|作者|译者|翻译|作\s*_?\s*者)\s*[:：_]\s*(.+)$`)
@@ -287,13 +285,5 @@ func ParseListTitle(raw string) ParsedTitle {
 	return ParsedTitle{Title: title, Author: author, Genre: genre, Chapter: chapter}
 }
 
-// StripTrailingChapterMarker 去掉尾随的（…）章节标记。
-func StripTrailingChapterMarker(title string) string {
-	return reTrailingChap.ReplaceAllString(title, "")
-}
-
-// NormalizeTitleKey 生成分组键：去装饰括号、去章节标记、转小写。
-func NormalizeTitleKey(title string) string {
-	trimmed := strings.TrimSpace(reWrapChars.ReplaceAllString(title, ""))
-	return strings.ToLower(strings.TrimSpace(StripTrailingChapterMarker(trimmed)))
-}
+// StripTrailingChapterMarker、NormalizeTitleKey 已移至 internal/storage/titlekey.go
+// （分组键的存储侧单一来源，迁移与任务共用）。
