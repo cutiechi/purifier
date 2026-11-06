@@ -6,13 +6,11 @@ import { PageShell } from "@/components/page-shell"
 import { Pager } from "@/components/pager"
 import { GroupedPostList } from "@/components/grouped-post-list"
 import { SiteTabs } from "@/components/site-tabs"
-import { PostList } from "@/components/post-card"
-import { ListPostCard } from "@/components/list-post-card"
 import { SectionLabel } from "@/components/page-header"
 import { SearchForm, ListMeta, useScrollTop } from "@/components/form-controls"
 import { formatListPagination } from "@/lib/list-meta"
 import { useSite } from "@/hooks/use-site"
-import { api, bookPath, forumRoutes, libraryRoutes, parsePage, parseQuery, readPath, searchPath } from "@/lib/routes"
+import { api, forumRoutes, libraryRoutes, parsePage, parseQuery, searchPath } from "@/lib/routes"
 import type { ChapterLink } from "@/lib/types"
 import { compareTid } from "@/lib/groups"
 
@@ -165,16 +163,7 @@ export default function SearchPage() {
           >
             本地归档
           </SectionLabel>
-          <PostList>
-            {localItems.map((it) => (
-              <ListPostCard
-                key={it.tid}
-                href={isLibrary ? bookPath(it.tid) : readPath(it.tid)}
-                rawTitle={it.title}
-                showGenre
-              />
-            ))}
-          </PostList>
+          <GroupedPostList items={localItems} site={site} storageKey="search-local" />
           {localTotal > localItems.length && (
             <p className="mt-2 text-xs text-muted-foreground">
               仅显示前 {localItems.length} 条 · 完整列表请到
